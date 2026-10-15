@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#070809">
+  <meta name="description" content="Toda grande coleção começa com uma surpresa. Abra um novo capítulo com BKM TCG.">
+  <title>BKM TCG — O extraordinário está dentro.</title>
+  <link rel="icon" href="/assets/bkm-favicon.png" type="image/png">
+  <link rel="preload" as="image" href="/assets/pack.webp">
+  <link rel="preload" as="image" href="/assets/pikachu.webp">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/store.css" data-commerce>
+</head>
+<body>
+  <a class="skip-link" href="#final">Ir para a carta</a>
+  <header class="header">
+    <a class="brand" href="/" aria-label="BKM TCG, início"><img class="brand-logo" src="/assets/bkm-logo.webp" alt="" width="1280" height="1280"><span>BKM<span class="brand-tcg">TCG</span></span></a>
+    <div id="store-nav" data-commerce></div>
+    <button class="header-link" id="skip">Conheça a carta <span aria-hidden="true">↗</span></button>
+  </header>
+
+  <main>
+    <section class="experience" id="inicio" aria-label="Abertura de um pacote Pokémon com revelação do Pikachu ex">
+      <div class="stage">
+        <div class="ambient" aria-hidden="true"></div>
+        <div class="scene" id="scene" role="img" aria-label="Pacote Heróis Excelsos. Role a página ou use o botão para revelar uma carta Pikachu ex."></div>
+        <div class="fallback" id="fallback" hidden><img src="/assets/pack.webp" alt="Pacote Pokémon Heróis Excelsos" id="fallback-pack"><img src="/assets/pikachu.webp" alt="Pikachu ex" id="fallback-card" hidden></div>
+
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="small-star">✳</span> UM NOVO CAPÍTULO PARA SUA COLEÇÃO</p>
+          <h1>O extraordinário<br>está <em>dentro.</em></h1>
+          <p class="hero-description">A emoção de abrir. A surpresa de encontrar.<br>A próxima carta da sua história.</p>
+          <button class="primary" id="open-pack">Abra essa experiência <span aria-hidden="true">↘</span></button>
+          <div class="hero-footnote"><span class="mini-line"></span> POKÉMON TRADING CARD GAME</div>
+        </div>
+
+        <div class="pack-label" aria-hidden="true"><span>MEGAEVOLUÇÃO</span><strong>Heróis Excelsos</strong><span class="pack-label-bottom">UM PACOTE. INFINITAS POSSIBILIDADES.</span></div>
+
+        <div class="chapter-caption" aria-hidden="true"><span class="caption-number">01 / 03</span><p id="chapter-text">Toda descoberta tem um começo.</p></div>
+
+        <div class="reveal-copy" id="final">
+          <p class="eyebrow"><span class="small-star">✳</span> UM ENCONTRO ELETRIZANTE</p>
+          <h2>Pequeno.<br><em>Extraordinário.</em></h2>
+          <div class="card-title"><h3>Pikachu <span>ex</span></h3><span class="energy" aria-label="Tipo elétrico">ϟ</span></div>
+          <p class="reveal-description">Algumas cartas completam a coleção.<br>Outras fazem você se apaixonar por ela.</p>
+          <div class="card-specs"><div><span>COLEÇÃO</span><strong>ASCR</strong></div><div><span>NÚMERO</span><strong>276 / 217</strong></div><div><span>IDIOMA</span><strong>Português</strong></div></div>
+          <div class="reveal-actions"><button class="primary" id="inspect">Ver de perto <span aria-hidden="true">↗</span></button><button class="replay" id="replay"><span aria-hidden="true">↺</span> Abrir de novo</button></div>
+        </div>
+
+        <div class="card-side-label" aria-hidden="true"><span>PIKACHU EX</span><span>276/217 · ASCR</span></div>
+        <div class="progress-rail" aria-label="Etapas da experiência"><button data-step="0" class="is-active" aria-label="Etapa 1: o pacote" aria-current="step"><span>01</span><i></i></button><button data-step="0.42" aria-label="Etapa 2: a abertura"><span>02</span><i></i></button><button data-step="0.94" aria-label="Etapa 3: a carta"><span>03</span><i></i></button></div>
+
+        <div class="stage-bottom"><span class="edition">A DESCOBERTA <span class="edition-line"></span> VOL. 01</span><button id="scroll-cue" class="scroll-cue"><span class="mouse" aria-hidden="true"></span><span id="scroll-label">Role para revelar</span><span aria-hidden="true">↓</span></button><button class="auto-control" id="auto-play" aria-label="Reproduzir a animação automaticamente"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5z"/></svg><span>Assistir</span></button></div>
+        <div class="scroll-progress" aria-hidden="true"><i></i></div>
+        <p id="announcement" class="sr-only" aria-live="polite"></p>
+        <div class="loading" id="loading" aria-hidden="true"><img class="loading-logo" src="/assets/bkm-logo.webp" width="1280" height="1280" alt=""><span>PREPARANDO A DESCOBERTA</span><i></i></div>
+      </div>
+    </section>
+    <section id="storefront" tabindex="-1" data-commerce aria-label="Loja BKM TCG"></section>
+    <footer><a class="footer-brand" href="/" aria-label="BKM TCG, início"><img src="/assets/bkm-logo.webp" alt="BKM TCG" width="1280" height="1280"></a><p>O próximo capítulo é da sua coleção.</p><button id="footer-replay">Viver de novo <span aria-hidden="true">↗</span></button><span class="footer-small">POKÉMON · TRADING CARD GAME</span></footer>
+  </main>
+
+  <dialog id="card-dialog" aria-labelledby="dialog-title"><div class="dialog-inner"><button class="dialog-close" aria-label="Fechar carta">×</button><div class="inspect-image"><img src="/assets/pikachu.webp" alt="Frente da carta Pikachu ex, número 276/217, em português" width="2748" height="3840"></div><div class="inspect-meta"><p class="eyebrow">OS DETALHES FAZEM A DIFERENÇA.</p><h2 id="dialog-title">Pikachu ex<span>ϟ</span></h2><p>276/217 · ASCR · Português</p><span class="inspect-note">Imagem fornecida para esta experiência.</span></div></div></dialog>
+  <noscript><div class="noscript"><img src="/assets/pikachu.webp" alt="Carta Pikachu ex"><p>Ative o JavaScript para viver a abertura do pacote.</p></div></noscript>
+  <div id="store-overlay" data-commerce></div>
+  <script type="module" src="/app.js"></script>
+  <script type="module" src="/store.js" data-commerce></script>
+</body>
+</html>
