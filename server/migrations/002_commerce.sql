@@ -1,0 +1,16 @@
+ALTER TABLE orders ADD COLUMN number TEXT;
+CREATE UNIQUE INDEX orders_number ON orders(number);
+ALTER TABLE orders ADD COLUMN environment TEXT NOT NULL DEFAULT 'demo' CHECK(environment IN('demo','production'));
+ALTER TABLE orders ADD COLUMN contact_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE orders ADD COLUMN tracking_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE orders ADD COLUMN request_hash TEXT;
+CREATE TABLE collections(id TEXT PRIMARY KEY,name TEXT NOT NULL,aliases_json TEXT NOT NULL DEFAULT '[]',description TEXT NOT NULL DEFAULT '',image TEXT NOT NULL DEFAULT '',featured INTEGER NOT NULL DEFAULT 0,provider TEXT NOT NULL DEFAULT 'manual',metadata_json TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE order_history(id TEXT PRIMARY KEY,order_id TEXT NOT NULL REFERENCES orders(id),type TEXT NOT NULL,status TEXT NOT NULL,message TEXT NOT NULL,actor_id TEXT REFERENCES users(id),created_at TEXT NOT NULL);
+CREATE INDEX order_history_order ON order_history(order_id,created_at);
+CREATE TABLE payments(id TEXT PRIMARY KEY,order_id TEXT NOT NULL UNIQUE REFERENCES orders(id),provider TEXT NOT NULL,status TEXT NOT NULL,amount_cents INTEGER NOT NULL CHECK(amount_cents>=0),currency TEXT NOT NULL DEFAULT 'BRL',environment TEXT NOT NULL CHECK(environment IN('demo','production')),payload_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE payment_events(id TEXT PRIMARY KEY,payment_id TEXT NOT NULL REFERENCES payments(id),event_key TEXT NOT NULL UNIQUE,status TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE TABLE addresses(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),value_json TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE TABLE shipments(id TEXT PRIMARY KEY,order_id TEXT NOT NULL UNIQUE REFERENCES orders(id),provider TEXT NOT NULL,status TEXT NOT NULL,tracking_code TEXT NOT NULL DEFAULT '',tracking_url TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE password_resets(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),expires_at BIGINT NOT NULL,used_at TEXT,created_at TEXT NOT NULL);
+CREATE TABLE email_outbox(id TEXT PRIMARY KEY,key TEXT NOT NULL UNIQUE,payload_json TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('PENDING','PROCESSING','SENT','FAILED')),attempts INTEGER NOT NULL DEFAULT 0,next_attempt_at BIGINT NOT NULL,locked_until BIGINT,provider_id TEXT,last_error TEXT,created_at TEXT NOT NULL,sent_at TEXT,preview_json TEXT);
+CREATE INDEX email_due ON email_outbox(status,next_attempt_at,locked_until);

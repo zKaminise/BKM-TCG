@@ -1,7 +1,9 @@
 const path = require("node:path");
 const crypto = require("node:crypto");
 const readline = require("node:readline");
-const { openDatabase } = require("../server/db.cjs");
+const fs = require('node:fs');
+if(fs.existsSync(path.resolve(__dirname,'../.env')) && process.loadEnvFile) process.loadEnvFile(path.resolve(__dirname,'../.env'));
+const { openStore } = require("../server/store.cjs");
 const { hashPassword } = require("../server/auth.cjs");
 async function readVisible(prompt) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -60,22 +62,19 @@ async function readSecret(prompt) {
     if (confirmation !== password) throw new Error("As senhas não coincidem.");
   }
   const passwordHash = await hashPassword(password);
-  const db = openDatabase(process.env.BKM_DB_PATH || path.resolve(__dirname, "../data/bkm.sqlite"));
+  const db = openStore({dbPath:process.env.BKM_DB_PATH || path.resolve(__dirname, "../data/bkm.sqlite")});
+  await db.ready;
   try {
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      if (db.prepare("SELECT COUNT(*) count FROM users WHERE role='ADMIN'").get().count > 0) throw new Error("Já existe um administrador. Este comando cria somente o primeiro administrador.");
-      if (db.prepare("SELECT id FROM users WHERE email=?").get(email)) throw new Error("O e-mail já está cadastrado. Nenhuma conta foi alterada.");
+    await db.transaction(async()=>{
+      if(db.engine==='postgres') await db.prepare('SELECT pg_advisory_xact_lock(164732092)').get();
+      if ((await db.prepare("SELECT COUNT(*) count FROM users WHERE role='ADMIN'").get()).count > 0) throw new Error("Já existe um administrador. Este comando cria somente o primeiro administrador.");
+      if (await db.prepare("SELECT id FROM users WHERE email=?").get(email)) throw new Error("O e-mail já está cadastrado. Nenhuma conta foi alterada.");
       const id = crypto.randomUUID(), stamp = (/* @__PURE__ */ new Date()).toISOString();
-      db.prepare("INSERT INTO users(id,email,name,password_hash,role,created_at) VALUES(?,?,?,?,'ADMIN',?)").run(id, email, name, passwordHash, stamp);
-      db.exec("COMMIT");
-    } catch (error) {
-      db.exec("ROLLBACK");
-      throw error;
-    }
-    console.log("Primeiro administrador criado. Entre pelo site local com seu e-mail e senha.");
+      await db.prepare("INSERT INTO users(id,email,name,password_hash,role,created_at) VALUES(?,?,?,?,'ADMIN',?)").run(id, email, name, passwordHash, stamp);
+    });
+    console.log("Primeiro administrador criado. Entre no site com seu e-mail e senha.");
   } finally {
-    db.close();
+    await db.close();
   }
 })().catch((error) => {
   console.error(error.message);

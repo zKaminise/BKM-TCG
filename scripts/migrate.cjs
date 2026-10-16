@@ -1,6 +1,10 @@
-const path = require("node:path");
-const { openDatabase } = require("../server/db.cjs");
-const filename = process.env.BKM_DB_PATH || path.resolve(__dirname, "../data/bkm.sqlite");
-const db = openDatabase(filename);
-db.close();
-console.log("Migrations concluídas. Nenhum produto ou usuário de exemplo foi criado.");
+const fs=require('node:fs');
+const path=require('node:path');
+const envFile=path.resolve(__dirname,'../.env');
+if(fs.existsSync(envFile) && process.loadEnvFile) process.loadEnvFile(envFile);
+const {openStore}=require('../server/store.cjs');
+(async()=>{
+  const store=openStore();
+  try { await store.ready;console.log(`Migrations concluídas no motor ${store.engine}. Nenhum produto, usuário ou credencial foi criado.`); }
+  finally {await store.close();}
+})().catch(error=>{console.error(error.message);process.exitCode=1;});

@@ -1,13 +1,24 @@
 const [major,minor]=process.versions.node.split('.').map(Number);
 if(major<22||(major===22&&minor<13)){console.error('Instale o Node.js 22.13 ou mais recente.');process.exit(1);}
+const fs=require('node:fs'),path=require('node:path');
+const root=path.resolve(__dirname,'..');
+const envFile=path.join(root,'.env');
+if(!fs.existsSync(envFile))fs.copyFileSync(path.join(root,'.env.example'),envFile,fs.constants.COPYFILE_EXCL);
+if(process.loadEnvFile)process.loadEnvFile(envFile);
 const {createServer}=require('../serve.cjs');
 const {spawn}=require('node:child_process');
 const port=Number(process.env.PORT||4173);
 if(!Number.isInteger(port)||port<1||port>65535){console.error('PORT inválida.');process.exit(1);}
+async function main(){
+if(process.env.BKM_ENVIRONMENT==='demo'){
+  const result=await require('./seed-demo.cjs').seedDemo();
+  console.log(result.message);
+}
 const server=createServer();
-server.on('error',error=>{console.error(error.code==='EADDRINUSE'?`A porta ${port} está ocupada. Encerre a prévia anterior ou configure outra PORT.`:error.message);server.api.close();process.exitCode=1;});
+await server.api.ready;
+server.on('error',error=>{console.error(error.code==='EADDRINUSE'?`A porta ${port} está ocupada. Abra http://localhost:${port} ou configure outra PORT.`:'Não foi possível iniciar o servidor.');server.api.close();process.exitCode=1;});
 server.listen(port,'127.0.0.1',()=>{
-  const url=`http://127.0.0.1:${port}`;
+  const url=`http://localhost:${port}`;
   console.log(`BKM TCG: ${url}\nMantenha esta janela aberta. Ctrl+C para encerrar.`);
   if(process.platform==='win32'){
     const browser=spawn('explorer.exe',[url],{stdio:'ignore',windowsHide:true});
@@ -16,3 +27,5 @@ server.listen(port,'127.0.0.1',()=>{
   }
 });
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>server.close(()=>process.exit(0)));
+}
+main().catch(()=>{console.error('Não foi possível preparar a BKM TCG. Confira o banco dedicado e as variáveis no .env.');process.exitCode=1;});

@@ -11,7 +11,7 @@ const {openDatabase}=require('../server/db.cjs');
 
 test('migrations são idempotentes, catálogo comercial inicia vazio e persiste em disco',()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'bkm-db-')),filename=path.join(dir,'store.sqlite');
-  try{let db=openDatabase(filename);assert.equal(db.prepare('SELECT COUNT(*) n FROM products').get().n,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM users').get().n,0);db.close();db=openDatabase(filename);assert.equal(db.prepare('PRAGMA user_version').get().user_version,2);db.close();}finally{fs.rmSync(dir,{recursive:true,force:true});}
+  try{let db=openDatabase(filename);assert.equal(db.prepare('SELECT COUNT(*) n FROM products').get().n,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM users').get().n,0);db.close();db=openDatabase(filename);assert.equal(db.prepare('PRAGMA user_version').get().user_version,3);db.close();}finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 
 test('API integrada: sessões, RBAC, inventário, preços, cupons, frete e privacidade',async t=>{
@@ -19,7 +19,7 @@ test('API integrada: sessões, RBAC, inventário, preços, cupons, frete e priva
   const root=dir,dbPath=path.join(dir,'store.sqlite');
   fs.writeFileSync(path.join(root,'index.html'),'<!doctype html><title>Teste descartável</title>');
   fs.writeFileSync(path.join(root,'app.js'),'/* recurso público de teste */');
-  const server=createServer({root,dbPath});server.listen(0,'127.0.0.1');await once(server,'listening');
+  const server=createServer({root,dbPath,env:{...process.env,BKM_ENVIRONMENT:'demo',PAYMENT_PROVIDER:'disabled'}});server.listen(0,'127.0.0.1');await once(server,'listening');
   const base='http://127.0.0.1:'+server.address().port;
   t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));fs.rmSync(dir,{recursive:true,force:true});});
   class Client{constructor(){this.cookie='';this.csrf='';}async call(route,{method='GET',body,headers={}}={}){const res=await fetch(base+route,{method,headers:{...(this.cookie?{cookie:this.cookie}:{}),...(this.csrf?{'x-csrf-token':this.csrf}:{}),...(body?{'content-type':'application/json'}:{}),...headers},body:body?JSON.stringify(body):undefined});const set=res.headers.get('set-cookie');if(set)this.cookie=set.split(';')[0];const type=res.headers.get('content-type')||'';const data=type.includes('json')?await res.json():await res.text();if(data.csrfToken)this.csrf=data.csrfToken;return {res,data,status:res.status};}async session(){return this.call('/api/session');}}
@@ -82,7 +82,7 @@ test('API integrada: sessões, RBAC, inventário, preços, cupons, frete e priva
   });
   await t.test('pedido registrado só pode ser consultado pelo próprio cliente ou admin',async()=>{
     const customerId=(await customer.call('/api/session')).data.user.id,id=crypto.randomUUID(),stamp=new Date().toISOString();
-    server.api.db.prepare("INSERT INTO orders VALUES(?,?, 'PENDING','PENDING','UNFULFILLED','BRL',8000,0,2000,10000,NULL,?,NULL,?,?,?)").run(id,customerId,JSON.stringify({postalCode:'01001000'}),'test-only-'+id,stamp,stamp);
+    server.api.db.prepare("INSERT INTO orders(id,user_id,status,payment_status,shipping_status,currency,subtotal_cents,discount_cents,shipping_cents,total_cents,coupon_id,address_json,payment_provider_id,idempotency_key,created_at,updated_at) VALUES(?,?, 'PENDING','PENDING','UNFULFILLED','BRL',8000,0,2000,10000,NULL,?,NULL,?,?,?)").run(id,customerId,JSON.stringify({postalCode:'01001000'}),'test-only-'+id,stamp,stamp);
     assert.equal((await customer.call('/api/account/orders/'+id)).status,200);assert.equal((await outsider.call('/api/account/orders/'+id)).status,404);assert.equal((await admin.call('/api/admin/orders')).data.items.length,1);
   });
   await t.test('servidor não expõe arquivos privados, uploads executáveis nem URLs indevidas',async()=>{

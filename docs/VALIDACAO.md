@@ -1,32 +1,30 @@
-# Validação desta entrega — 15/10/2026
+# Validação — BKM TCG Fase 2
 
-## Automática
+## Automatizada
 
-- `npm run check`: passou para os scripts de frontend, backend, CLI, build e testes.
-- `npm test`: **30 testes passaram, zero falhas**. Executados com bases temporárias e servidores exclusivos em loopback.
-- Cobertura: migrations idempotentes e inventário vazio; sessões/CSRF/origem/permissões; senha scrypt e bootstrap concorrente do primeiro administrador; catálogo/paginação/filtros; identificação de variantes; edição de metadados; preços e estoque no servidor; persistência por conta; cupons/frete/regiões; arquivos privados e uploads; bloqueio de checkout sem pagamento; contratos TCGdex e utilitários HMAC/idempotência.
-- Regressão adicional: totais do painel calculados sobre 51 produtos, além da primeira página de 48; endereço e textos operacionais persistidos.
+Execução local em 15/10/2026: `npm test` passou com **106 testes**, zero falhas e zero ignorados. `npm run check` e `npm run build` passaram.
 
-## Navegador
+Cobertura: catálogo TCGdex/identidade/idiomas; autenticação/RBAC/CSRF; CRUD; variantes e uploads; preços/cupom/frete no servidor; carrinho/favoritos de conta; seed idempotente e protegido; bootstrap administrativo; checkout/pedidos/histórico; cinco resultados mock; reserva/liberação/baixa; última unidade concorrente; idempotência; propriedade do pedido; envios; recuperação de senha; outbox/retry; Storage; adapter Mercado Pago e webhook/consulta autoritativa com transporte controlado; prevenção de mistura de ambientes.
 
-Conferência em desktop e viewport móvel de 390×844, em banco isolado de QA:
+PostgreSQL foi exercitado com PGlite e as migrations SQL reais, inclusive RLS. Isso não substitui teste multipool no Supabase. Pagamentos e e-mails não usaram credenciais externas; não houve cobranças nem envios reais.
 
-1. Logo BKM e paleta aplicadas à apresentação existente.
-2. Login administrativo e navegação direta em rotas internas.
-3. Consulta TCGdex: Amigos de Jornada, 001/159, Caterpie; confirmação de imagem/metadados, gravação de preço e estoque e publicação local.
-4. Anúncio encontrado no catálogo e página individual com valores corretos.
-5. Cadastro manual de carta como rascunho, independente da consulta externa.
-6. Cadastro de produto lacrado com condição Lacrado e persistência dos valores.
-7. Carrinho lateral, persistência após recarregar, foco restrito ao diálogo, Escape e retorno do foco ao acionador.
-8. Busca com sugestões reais e navegação por teclado.
-9. Conta exibindo consulta de pedidos vazia sem erro de rota.
-10. Configuração administrativa de frete fixo por faixa de CEP e texto de envio.
-11. Cotação real da API: item de teste R$ 12,34 + regra de entrega de teste R$ 5,00 = R$ 17,34; pagamento permaneceu desabilitado.
+## Navegador: execução efetiva
 
-Os produtos, preços, conta administrativa e regras usados nessa conferência são dados de teste explícitos. **Não são copiados para o banco da entrega.**
+- Home completa no servidor, logo e animação preservadas: conferidas.
+- Vitrine populada com 14 produtos de demonstração: conferida.
+- Listagem de lacrados: cinco produtos; todas as imagens carregadas.
+- Página do Booster Heróis Excelsos: imagem, descrição, preço, estoque e relacionados conferidos.
+- Adição ao drawer: 1 unidade R$ 14,90; aumento para 2 unidades R$ 29,80; progresso de frete mudou de R$ 135,10 restantes para R$ 120,20: conferidos.
+- Screenshot `bkm-fase2-lacrados.jpg` salvo como evidência local na pasta de entregas da conversa.
 
-## Limites da validação
+Após a retomada, o navegador estava na página de erro e o controle de navegador não conseguiu obter permissão para observá-la. Foi solicitado ao usuário recarregar localhost:4173, com o servidor em segundo plano ativo. Ainda não marcar como aprovados nesta rodada: checkout visual final, CRUD administrativo visual, PNG 4K otimizado, mobile completo e persistência após reinício pelo navegador. Esses fluxos têm cobertura automatizada, mas precisam de execução visual.
 
-Não houve cobrança, teste financeiro em sandbox, processamento de webhook financeiro ou deploy. Os testes unitários de assinatura e idempotência não comprovam integração completa com Mercado Pago. O teste de concorrência executado é do primeiro administrador; concorrência de reservas da última unidade permanece pendente com o fluxo de pedidos.
+## Serviços externos
 
-A lista de trabalho restante está em PENDENCIAS.md. Esta etapa é a base local integrada, não a conclusão integral do prompt master.
+GitHub: repositório oficial confirmado com acesso de escrita; código-base enviado à branch main, commit inicial af355c7baa840a7caf9effd05798c376101383a3. A atualização Fase 2 deve ser identificada pelo commit final no Git.
+
+Supabase: solicitou login; projeto remoto, tabelas e Storage não foram confirmados.
+
+Vercel: conta autenticada Hobby; painel mostrou cotas gratuitas de CPU/memória excedidas. Deploy e cenários online ainda não aprovados.
+
+Nunca inferir aprovação de deploy apenas pela presença de arquivos vercel.json, migrations ou módulos de integração.

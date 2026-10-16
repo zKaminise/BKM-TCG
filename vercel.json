@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": null,
+  "functions": { "api/index.cjs": { "maxDuration": 60, "includeFiles": "server/**" } },
+  "redirects": [{ "source": "/ABRIR.html", "destination": "/", "permanent": false }],
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/index" },
+    { "source": "/((?!assets/|vendor/|api/|.*\\.[a-zA-Z0-9]+$).*)", "destination": "/index.html" }
+  ],
+  "headers": [{ "source": "/(.*)", "headers": [
+    { "key": "X-Content-Type-Options", "value": "nosniff" },
+    { "key": "X-Frame-Options", "value": "DENY" },
+    { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+    { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+  ] }]
+}

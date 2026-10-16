@@ -1,0 +1,425 @@
+[
+  {
+    "card": {
+      "id": "tcgdex:pt:me02.5-276",
+      "setId": "me02.5",
+      "setName": "Heróis Excelsos",
+      "name": "Pikachu ex",
+      "number": "276",
+      "total": 217,
+      "rarity": "Ilustração Rara Especial",
+      "type": "Elétrico",
+      "hp": 200,
+      "image": "https://assets.tcgdex.net/pt/me/me02.5/276/high.webp",
+      "series": {
+        "id": "me",
+        "name": "Megaevolução"
+      },
+      "category": "Pokémon",
+      "variants": {
+        "firstEdition": false,
+        "holo": true,
+        "normal": false,
+        "reverse": false,
+        "wPromo": false
+      },
+      "provider": "tcgdex",
+      "providerId": "me02.5-276",
+      "language": "pt",
+      "imageKind": "reference"
+    },
+    "set": {
+      "id": "me02.5",
+      "name": "Heróis Excelsos",
+      "code": "me02.5",
+      "total": 217,
+      "totalWithSecret": 295,
+      "logo": "https://assets.tcgdex.net/pt/me/me02.5/logo.webp",
+      "symbol": "https://assets.tcgdex.net/univ/me/me02.5/symbol.webp",
+      "series": {
+        "id": "me",
+        "name": "Megaevolução"
+      },
+      "releaseDate": "2026-01-30",
+      "provider": "tcgdex",
+      "providerId": "me02.5",
+      "language": "pt"
+    }
+  },
+  {
+    "card": {
+      "id": "tcgdex:pt:me02.5-048",
+      "setId": "me02.5",
+      "setName": "Heróis Excelsos",
+      "name": "Regice ex",
+      "number": "048",
+      "total": 217,
+      "rarity": "Rara Dupla",
+      "type": "Água",
+      "hp": 230,
+      "image": "https://assets.tcgdex.net/pt/me/me02.5/048/high.webp",
+      "series": {
+        "id": "me",
+        "name": "Megaevolução"
+      },
+      "category": "Pokémon",
+      "variants": {
+        "firstEdition": false,
+        "holo": true,
+        "normal": false,
+        "reverse": false,
+        "wPromo": false
+      },
+      "provider": "tcgdex",
+      "providerId": "me02.5-048",
+      "language": "pt",
+      "imageKind": "reference"
+    },
+    "set": {
+      "id": "me02.5",
+      "name": "Heróis Excelsos",
+      "code": "me02.5",
+      "total": 217,
+      "totalWithSecret": 295,
+      "logo": "https://assets.tcgdex.net/pt/me/me02.5/logo.webp",
+      "symbol": "https://assets.tcgdex.net/univ/me/me02.5/symbol.webp",
+      "series": {
+        "id": "me",
+        "name": "Megaevolução"
+      },
+      "releaseDate": "2026-01-30",
+      "provider": "tcgdex",
+      "providerId": "me02.5",
+      "language": "pt"
+    }
+  },
+  {
+    "card": {
+      "id": "tcgdex:pt:me02.5-001",
+      "setId": "me02.5",
+      "setName": "Heróis Excelsos",
+      "name": "Oddish da Érica",
+      "number": "001",
+      "total": 217,
+      "rarity": "Comum",
+      "type": "Planta",
+      "hp": 60,
+      "image": "https://assets.tcgdex.net/pt/me/me02.5/001/high.webp",
+      "series": {
+        "id": "me",
+        "name": "Megaevolução"
+      },
+      "category": "Pokémon",
+      "variants": {
+        "firstEdition": false,
+        "holo": false,
+        "normal": true,
+        "reverse": true,
+        "wPromo": false
+      },
+      "provider": "tcgdex",
+      "providerId": "me02.5-001",
+      "language": "pt",
+      "imageKind": "reference"
+    },
+    "set": {
+      "id": "me02.5",
+      "name": "Heróis Excelsos",
+      "code": "me02.5",
+      "total": 217,
+      "totalWithSecret": 295,
+      "logo": "https://assets.tcgdex.net/pt/me/me02.5/logo.webp",
+      "symbol": "https://assets.tcgdex.net/univ/me/me02.5/symbol.webp",
+      "series": {
+        "id": "me",
+        "name": "Megaevolução"
+      },
+      "releaseDate": "2026-01-30",
+      "provider": "tcgdex",
+      "providerId": "me02.5",
+      "language": "pt"
+    }
+  },
+  {
+    "card": {
+      "id": "tcgdex:pt:sv09-001",
+      "setId": "sv09",
+      "setName": "Amigos de Jornada",
+      "name": "Caterpie",
+      "number": "001",
+      "total": 159,
+      "rarity": "Comum",
+      "type": "Planta",
+      "hp": 50,
+      "image": "https://assets.tcgdex.net/pt/sv/sv09/001/high.webp",
+      "series": {
+        "id": "sv",
+        "name": "Escarlate e Violeta"
+      },
+      "category": "Pokémon",
+      "variants": {
+        "firstEdition": false,
+        "holo": false,
+        "normal": true,
+        "reverse": true,
+        "wPromo": false
+      },
+      "provider": "tcgdex",
+      "providerId": "sv09-001",
+      "language": "pt",
+      "imageKind": "reference"
+    },
+    "set": {
+      "id": "sv09",
+      "name": "Amigos de Jornada",
+      "code": "sv09",
+      "total": 159,
+      "totalWithSecret": 190,
+      "logo": "https://assets.tcgdex.net/pt/sv/sv09/logo.webp",
+      "symbol": "https://assets.tcgdex.net/univ/sv/sv09/symbol.webp",
+      "series": {
+        "id": "sv",
+        "name": "Escarlate e Violeta"
+      },
+      "releaseDate": "2025-03-28",
+      "provider": "tcgdex",
+      "providerId": "sv09",
+      "language": "pt"
+    }
+  },
+  {
+    "card": {
+      "id": "tcgdex:pt:sv09-162",
+      "setId": "sv09",
+      "setName": "Amigos de Jornada",
+      "name": "Wailord",
+      "number": "162",
+      "total": 159,
+      "rarity": "Ilustração Rara",
+      "type": "Água",
+      "hp": 240,
+      "image": "https://assets.tcgdex.net/pt/sv/sv09/162/high.webp",
+      "series": {
+        "id": "sv",
+        "name": "Escarlate e Violeta"
+      },
+      "category": "Pokémon",
+      "variants": {
+        "firstEdition": false,
+        "holo": true,
+        "normal": false,
+        "reverse": false,
+        "wPromo": false
+      },
+      "provider": "tcgdex",
+      "providerId": "sv09-162",
+      "language": "pt",
+      "imageKind": "reference"
+    },
+    "set": {
+      "id": "sv09",
+      "name": "Amigos de Jornada",
+      "code": "sv09",
+      "total": 159,
+      "totalWithSecret": 190,
+      "logo": "https://assets.tcgdex.net/pt/sv/sv09/logo.webp",
+      "symbol": "https://assets.tcgdex.net/univ/sv/sv09/symbol.webp",
+      "series": {
+        "id": "sv",
+        "name": "Escarlate e Violeta"
+      },
+      "releaseDate": "2025-03-28",
+      "provider": "tcgdex",
+      "providerId": "sv09",
+      "language": "pt"
+    }
+  },
+  {
+    "card": {
+      "id": "tcgdex:pt:sv09-175",
+      "setId": "sv09",
+      "setName": "Amigos de Jornada",
+      "name": "Zoroark ex do N",
+      "number": "175",
+      "total": 159,
+      "rarity": "Ultra Rara",
+      "type": "Sombrio",
+      "hp": 280,
+      "image": "https://assets.tcgdex.net/pt/sv/sv09/175/high.webp",
+      "series": {
+        "id": "sv",
+        "name": "Escarlate e Violeta"
+      },
+      "category": "Pokémon",
+      "variants": {
+        "firstEdition": false,
+        "holo": true,
+        "normal": false,
+        "reverse": false,
+        "wPromo": false
+      },
+      "provider": "tcgdex",
+      "providerId": "sv09-175",
+      "language": "pt",
+      "imageKind": "reference"
+    },
+    "set": {
+      "id": "sv09",
+      "name": "Amigos de Jornada",
+      "code": "sv09",
+      "total": 159,
+      "totalWithSecret": 190,
+      "logo": "https://assets.tcgdex.net/pt/sv/sv09/logo.webp",
+      "symbol": "https://assets.tcgdex.net/univ/sv/sv09/symbol.webp",
+      "series": {
+        "id": "sv",
+        "name": "Escarlate e Violeta"
+      },
+      "releaseDate": "2025-03-28",
+      "provider": "tcgdex",
+      "providerId": "sv09",
+      "language": "pt"
+    }
+  },
+  {
+    "card": {
+      "id": "tcgdex:pt:sv09-183",
+      "setId": "sv09",
+      "setName": "Amigos de Jornada",
+      "name": "Bellibolt ex da Kissera",
+      "number": "183",
+      "total": 159,
+      "rarity": "Ilustração Rara Especial",
+      "type": "Elétrico",
+      "hp": 280,
+      "image": "https://assets.tcgdex.net/pt/sv/sv09/183/high.webp",
+      "series": {
+        "id": "sv",
+        "name": "Escarlate e Violeta"
+      },
+      "category": "Pokémon",
+      "variants": {
+        "firstEdition": false,
+        "holo": true,
+        "normal": false,
+        "reverse": false,
+        "wPromo": false
+      },
+      "provider": "tcgdex",
+      "providerId": "sv09-183",
+      "language": "pt",
+      "imageKind": "reference"
+    },
+    "set": {
+      "id": "sv09",
+      "name": "Amigos de Jornada",
+      "code": "sv09",
+      "total": 159,
+      "totalWithSecret": 190,
+      "logo": "https://assets.tcgdex.net/pt/sv/sv09/logo.webp",
+      "symbol": "https://assets.tcgdex.net/univ/sv/sv09/symbol.webp",
+      "series": {
+        "id": "sv",
+        "name": "Escarlate e Violeta"
+      },
+      "releaseDate": "2025-03-28",
+      "provider": "tcgdex",
+      "providerId": "sv09",
+      "language": "pt"
+    }
+  },
+  {
+    "card": {
+      "id": "tcgdex:en:base1-58",
+      "setId": "base1",
+      "setName": "Base Set",
+      "name": "Pikachu",
+      "number": "58",
+      "total": 102,
+      "rarity": "Common",
+      "type": "Lightning",
+      "hp": 40,
+      "image": "https://assets.tcgdex.net/en/base/base1/58/high.webp",
+      "series": {
+        "id": "base",
+        "name": "Base"
+      },
+      "category": "Pokemon",
+      "variants": {
+        "firstEdition": true,
+        "holo": false,
+        "normal": true,
+        "reverse": false,
+        "wPromo": false
+      },
+      "provider": "tcgdex",
+      "providerId": "base1-58",
+      "language": "en",
+      "imageKind": "reference"
+    },
+    "set": {
+      "id": "base1",
+      "name": "Base Set",
+      "code": "base1",
+      "total": 102,
+      "totalWithSecret": 102,
+      "logo": "https://assets.tcgdex.net/en/base/base1/logo.webp",
+      "symbol": null,
+      "series": {
+        "id": "base",
+        "name": "Base"
+      },
+      "releaseDate": "1999-01-09",
+      "provider": "tcgdex",
+      "providerId": "base1",
+      "language": "en"
+    }
+  },
+  {
+    "card": {
+      "id": "tcgdex:en:sv09-041",
+      "setId": "sv09",
+      "setName": "Journey Together",
+      "name": "Wailord",
+      "number": "041",
+      "total": 159,
+      "rarity": "Rare",
+      "type": "Water",
+      "hp": 240,
+      "image": "https://assets.tcgdex.net/en/sv/sv09/041/high.webp",
+      "series": {
+        "id": "sv",
+        "name": "Scarlet & Violet"
+      },
+      "category": "Pokemon",
+      "variants": {
+        "firstEdition": false,
+        "holo": true,
+        "normal": false,
+        "reverse": true,
+        "wPromo": false
+      },
+      "provider": "tcgdex",
+      "providerId": "sv09-041",
+      "language": "en",
+      "imageKind": "reference"
+    },
+    "set": {
+      "id": "sv09",
+      "name": "Journey Together",
+      "code": "sv09",
+      "total": 159,
+      "totalWithSecret": 190,
+      "logo": "https://assets.tcgdex.net/en/sv/sv09/logo.webp",
+      "symbol": "https://assets.tcgdex.net/univ/sv/sv09/symbol.webp",
+      "series": {
+        "id": "sv",
+        "name": "Scarlet & Violet"
+      },
+      "releaseDate": "2025-03-28",
+      "provider": "tcgdex",
+      "providerId": "sv09",
+      "language": "en"
+    }
+  }
+]

@@ -22,7 +22,7 @@ function openDatabase(filename) {
   const db = new DatabaseSync(filename);
   db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
   const version = db.prepare("PRAGMA user_version").get().user_version;
-  if (version > 2) {
+  if (version > 3) {
     db.close();
     throw new Error("Banco criado por uma versão mais recente; atualização recusada.");
   }
@@ -50,6 +50,11 @@ function openDatabase(filename) {
   if (version < 2) db.exec(`BEGIN IMMEDIATE;
     CREATE TABLE account_lists(user_id TEXT NOT NULL REFERENCES users(id),kind TEXT NOT NULL CHECK(kind IN('cart','favorites')),items_json TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(user_id,kind));
     PRAGMA user_version=2; COMMIT;`);
+  if (version < 3) {
+    db.exec('BEGIN IMMEDIATE');
+    try { db.exec(fs.readFileSync(path.join(__dirname, 'migrations/002_commerce.sql'), 'utf8')); db.exec('PRAGMA user_version=3; COMMIT;'); }
+    catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
   db.prepare("INSERT OR IGNORE INTO settings(id,value_json,updated_at) VALUES(1,?,?)").run(JSON.stringify(defaultSettings), (/* @__PURE__ */ new Date()).toISOString());
   return db;
 }

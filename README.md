@@ -1,75 +1,87 @@
 # BKM TCG
 
-Loja local em desenvolvimento com a logo fornecida, cores preta, vermelha, ciano e prata e animação 3D preservada. O banco começa sem anúncios, preços, estoque ou vendas fictícias.
+Loja de demonstração de Pokémon TCG com a marca BKM, catálogo persistente, administração e abertura 3D do pacote preservada. Produtos, preços, estoques, frete e pedidos de demonstração são fictícios. Nenhuma venda, cobrança ou entrega real é feita nesse modo.
 
-## Abrir
+Repositório oficial: [zKaminise/BKM-TCG](https://github.com/zKaminise/BKM-TCG).
 
-Use Node.js **22.13 ou mais recente**. Dê dois cliques em **ABRIR SITE.cmd** e mantenha a janela aberta. Ou execute `npm start` nesta pasta. Acesse o endereço exibido, por padrão `http://127.0.0.1:4173`. O servidor aceita acesso apenas neste computador.
+## Abrir a loja completa
 
-Não é necessário instalar dependências para usar a loja. Node fornece o backend/SQLite e Three.js já está incluído.
+Use Node.js **22.13 ou mais recente na versão 22**. No Windows, dê dois cliques em **ABRIR SITE.cmd**. O inicializador instala as dependências se necessário, prepara a demonstração sem sobrescrever alterações administrativas, inicia o servidor e abre o navegador. Mantenha a janela aberta.
 
-**ABRIR.html contém somente a apresentação animada**, sem catálogo, contas, painel ou checkout. Abre diretamente no navegador, sem servidor. Para a loja, use ABRIR SITE.cmd.
+A entrada da loja é **http://localhost:4173/**. Administração: **http://localhost:4173/admin**.
 
-## Primeiro administrador
-
-Dê dois cliques em **CONFIGURAR ADMIN.cmd** ou execute `npm run admin:create`. O assistente pede nome, e-mail e senha de 12 a 128 caracteres, sem exibir a senha. Não existe senha padrão. Também aceita:
+Para usar o terminal:
 
 ```powershell
-npm run admin:create -- --email seu@email.com --name "Seu nome"
-```
-
-Entre em `/entrar` e abra `/admin`. O comando cria somente o primeiro administrador; não promove contas existentes silenciosamente.
-
-## Produtos e cartas
-
-No painel, crie um lacrado ou uma carta. Preencha SKU, coleção, imagens, descrição e variantes. Cada combinação de idioma, condição e acabamento tem preço e estoque próprios. Valores são persistidos em centavos e exibidos em BRL. Publicar torna o anúncio visível no catálogo; despublicar o retira.
-
-Para cartas, selecione idioma e coleção e procure pelo número. Confira a imagem e os metadados antes de usá-los. A TCGdex fornece referências, não inventário: a consulta nunca cria um anúncio automaticamente. Não há correspondência automática entre nomes comerciais brasileiros e coleções internacionais. O cadastro manual continua disponível.
-
-Metadados de identificação da carta são separados do anúncio comercial. Imagens de referência são ilustrativas; fotos reais devem ser fornecidas pelo vendedor. Upload administrativo aceita PNG/JPEG/WebP até 8 MB, salvo em `uploads/`. SVG e executáveis não são aceitos.
-
-## Arquitetura e banco
-
-HTML/CSS/JavaScript com Three.js para a apresentação (`app.js`) e módulo comercial separado (`store.js`). Backend modular Node em `server/`, SQLite transacional persistente em `data/bkm.sqlite`. A escolha permite operação local sem infraestrutura adicional; PostgreSQL e hospedagem produtiva não foram provisionados.
-
-Migrations são aplicadas na inicialização. Também podem ser executadas com `npm run db:migrate`. O schema separa usuários, sessões, cartas, anúncios, variantes, cupons, configurações e auditoria. A estrutura de pedidos/reservas está preparada; o fluxo financeiro ainda não cria pedidos ou movimenta estoque de vendas.
-
-Senhas usam scrypt com salt; sessões usam tokens aleatórios armazenados como hash, cookie HttpOnly/SameSite e proteção CSRF. A autorização administrativa é validada na API. Banco, scripts, arquivos de ambiente e código do servidor não são servidos como arquivos públicos.
-
-## Carrinho, frete e cupons
-
-Carrinho e favoritos de visitantes persistem no navegador; contas autenticadas têm persistência no banco e mesclagem ao entrar. A API revalida preços, disponibilidade e quantidades. Adicionar ao carrinho não reserva estoque.
-
-O frete começa desabilitado. Configure no painel uma regra própria de frete fixo com prazo e faixas de CEP, quando corresponder à operação real. Frete grátis só aparece quando configurado e depende da elegibilidade validada pelo servidor. Não há cotação de transportadoras ou contratação de etiquetas nesta etapa.
-
-Cupons básicos suportam valor fixo/percentual, mínimo, validade e limite global. Segmentação e consumo concorrente de cupons no pagamento ainda dependem da conclusão do fluxo de pedidos.
-
-## Pagamentos e limites atuais
-
-**Cobranças permanecem indisponíveis.** Não há Pix fictício ou confirmação simulada. Nenhuma chave isoladamente habilita vendas nesta entrega. A preparação Mercado Pago inclui configuração, HMAC e idempotência, mas ainda faltam criação de Orders, componentes oficiais de pagamento, webhooks integrados aos pedidos, confirmação remota, conciliação e reservas transacionais verificadas em sandbox.
-
-Recuperação/verificação de e-mail, gestão completa de endereços/operadores, logística integrada e políticas finais também estão pendentes. Consulte `docs/PENDENCIAS.md` e `docs/INTEGRACOES.md`. Não houve deploy ou cobrança.
-
-## Configuração e backup
-
-`.env.example` documenta variáveis; o servidor não carrega `.env` automaticamente. Exemplo no PowerShell:
-
-```powershell
-$env:PORT = '4173'
-$env:BKM_DB_PATH = 'D:\dados-privados\bkm.sqlite'
+npm ci
+# Na primeira instalação, copie .env.example para .env. Preserve um .env já existente.
+Copy-Item -LiteralPath '.env.example' -Destination '.env'
+npm run db:migrate
+npm run demo:seed
 npm start
 ```
 
-Use o mesmo BKM_DB_PATH para migrations e criação do administrador. Faça backup do banco e da pasta uploads com o servidor encerrado. Dados empresariais, contato e políticas devem ser preenchidos com informações reais antes de operação comercial. Uma publicação futura exige HTTPS, cookies Secure, infraestrutura, backups e revisão de segurança.
+O `.env` é privado e carregado automaticamente. O servidor local escuta apenas neste computador. `ABRIR.html` é uma apresentação offline opcional, apenas da animação. No servidor, esse endereço redireciona à loja completa para evitar confusão.
 
-## Verificação e build
+## Primeiro administrador
 
-`npm run check` verifica a sintaxe. `npm test` executa testes com bancos temporários e dados sintéticos isolados, sem semear o inventário da loja. Cobrem autenticação, permissões, CSRF, persistência, catálogo, variantes, preço/estoque, cupons, frete, uploads e contratos dos provedores.
+Depois de configurar o `.env`, execute **CONFIGURAR ADMIN.cmd** ou `npm run admin:create`. Informe nome, e-mail e uma senha de 12 a 128 caracteres. A senha não é exibida nem salva no código. Não existe administrador ou senha padrão nos dados de demonstração.
 
-Para reconstruir somente ABRIR.html: `npm install` e `npm run build`. O build não empacota o backend na apresentação offline.
+O comando cria somente o primeiro administrador, no mesmo banco configurado para o servidor. Não promove outra conta silenciosamente. Entre em `/entrar` e abra `/admin`. No Supabase, o bootstrap usa a conexão PostgreSQL privada do `.env` local; não exponha a conexão no navegador.
+
+## O que a demonstração permite
+
+- Navegar pela home, animação, lacrados, avulsas, coleções e páginas de produto com zoom e relacionados.
+- Buscar por nome ou número e filtrar coleção, idioma, condição, acabamento, preço e disponibilidade.
+- Gerenciar favoritos e carrinho com drawer, quantidades, cupons, subtotal e progresso para frete grátis.
+- Cadastrar conta, entrar e consultar pedidos próprios.
+- Simular checkout aprovado, pendente, recusado, cancelado ou expirado, com pedidos persistidos, snapshots de preço, histórico e controle transacional de estoque.
+- Administrar produtos, variantes, imagens, coleções e aliases, cupons, estoque, pedidos, rastreamento, banners e configurações.
+- Importar a identidade de uma carta pela TCGdex, conferindo idioma + coleção + número antes de preencher os campos comerciais e publicar.
+- Ver prévias privadas de e-mails de teste e reenviar mensagens transacionais pela fila administrativa.
+
+O seed cria 14 produtos e quatro coleções em banco dedicado: cartas em português/inglês, variantes, lacrados e exemplos esgotados. O cupom ilustrativo `BKMDEMO` concede 10% a partir de R$ 50. O frete demonstrativo é R$ 15, com gratuidade a partir de R$ 150 em CEPs cobertos. Tudo pode ser alterado no painel. Reexecutar o seed preserva as edições; um banco com produtos sem a identificação de demonstração é recusado.
+
+## Arquitetura e persistência
+
+Frontend HTML/CSS/JavaScript; Three.js local para a animação. Backend Node modular. `server/store.cjs` usa PostgreSQL quando `DATABASE_URL` está configurada e SQLite somente no desenvolvimento local. Não há catálogo fixo no frontend nem dependência de localStorage como banco principal.
+
+As migrations PostgreSQL versionadas ficam em `server/migrations/` e são aplicadas transacionalmente. As tabelas incluem usuários, sessões, cartas, produtos, variantes, coleções, carrinho/favoritos de contas, cupons, pedidos/itens, reservas, movimentos, pagamentos/eventos, endereços, remessas, configurações, auditoria e outbox de e-mails. As tabelas da aplicação têm RLS e não concedem acesso direto aos papéis anon/authenticated. A API aplica propriedade da conta e autorização administrativa.
+
+A autenticação existente foi preservada: scrypt com salt, sessões com tokens armazenados como hash, cookie HttpOnly/SameSite e CSRF. Na hospedagem HTTPS o cookie usa Secure. Não foi criado um segundo sistema paralelo de usuários no Supabase Auth.
+
+Em pedidos pendentes, unidades ficam reservadas. Aprovação efetiva a baixa uma vez; recusa, cancelamento e expiração liberam a reserva. Alterações no anúncio não mudam o snapshot de um pedido existente. Preços, estoque, cupom e entrega são sempre recalculados no servidor.
+
+## Supabase e hospedagem
+
+Veja [docs/DEPLOY.md](docs/DEPLOY.md) para as etapas exatas. A publicação Vercel usa frontend em `dist/` e uma função Node para `/api/*`; não depende de um processo Node permanente. PostgreSQL e uploads devem estar no Supabase. O filesystem da Vercel nunca é usado como armazenamento persistente.
+
+O upload administrativo aceita PNG/JPEG/WebP de até 8 MB. Imagens grandes são otimizadas no navegador antes de atravessar o limite do servidor de hospedagem. O servidor valida o formato e envia a imagem a um bucket Supabase dedicado. O fallback `uploads/` é permitido apenas localmente.
+
+Para importar um SQLite existente em um PostgreSQL dedicado vazio, use `npm run db:import -- "caminho/do/banco.sqlite"`. O script recusa um destino já populado e invalida sessões, sem apagar o banco de origem.
+
+O deploy Hobby é **exclusivamente demonstrativo e não comercial**. `HOSTING_DEMO_ONLY=true` mantém pagamentos e e-mails externos desativados. Antes de vendas reais, use infraestrutura/plano comercialmente compatível, domínio e políticas definitivas, logística e as validações dos provedores. Consulte as [regras Hobby da Vercel](https://vercel.com/docs/plans/hobby).
+
+## Mercado Pago e Resend
+
+Há adaptadores, fluxo de pedidos, interface oficial tokenizada de cartão/Pix, webhook com validação de assinatura e confirmação remota, idempotência e reconciliação. A demonstração usa exclusivamente `MockPaymentProvider` e não carrega o SDK de cartão. Não existe QR Pix fictício.
+
+E-mails usam `DevelopmentEmailProvider` em demonstração. `ResendEmailProvider` depende de chave, remetente/domínio verificado e ativação explícita. A outbox persiste tentativas, falhas e reenvios. Templates BKM incluem boas-vindas, pedido, estados de pagamento, envio, rastreio e recuperação de senha. Prévias de desenvolvimento não divulgam tokens de recuperação.
+
+As integrações externas reais **ainda exigem credenciais seguras e validação de sandbox/domínio**. Testes com transporte controlado não equivalem a cobranças ou envios reais aprovados pelos provedores. Configurações em `.env.example`; detalhes em [docs/INTEGRACOES.md](docs/INTEGRACOES.md).
+
+## Verificação e builds
+
+```powershell
+npm run check
+npm test
+npm run build
+```
+
+Os testes usam bancos e identidades sintéticas isoladas, incluindo PostgreSQL via PGlite. Não enviam e-mail externo nem cobram pagamentos. `npm run build` gera o frontend da loja para hospedagem. `npm run build:offline` reconstrói somente a animação autônoma e requer esbuild.
+
+Estado de provisionamento e evidências reais: [docs/VALIDACAO.md](docs/VALIDACAO.md). Bloqueios externos e ativação comercial: [docs/PENDENCIAS.md](docs/PENDENCIAS.md).
 
 ## Recursos visuais
 
-Logo, frente do pacote e Pikachu fornecidos pelo usuário. PNG masters preservam os recursos enviados; WebP otimiza a transferência. Verso da carta: https://tcg.pokemon.com/assets/img/global/tcg-card-back-2x.jpg. Texturas procedurais próprias. Three.js 0.186.1 inclui licença MIT em vendor/. Pokémon e nomes das cartas pertencem aos respectivos titulares.
-
-A animação foi inspirada nos vídeos e em Star Grading, com reconstrução própria em tempo real. Não reutiliza os frames do site de referência e não inclui graduação/slab.
+Logo, frente do pacote e Pikachu fornecidos pelo proprietário. Imagens de referência e fontes dos produtos de teste: [docs/IMAGENS-DEMO.md](docs/IMAGENS-DEMO.md). Three.js inclui licença MIT em `vendor/LICENSE`. A animação é uma reconstrução própria em tempo real inspirada no material de referência; não reutiliza os frames da Star Grading nem inclui graduação/slab.

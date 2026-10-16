@@ -70,34 +70,93 @@ Referências de contrato: [REST v2](https://tcgdex.dev/rest), [coleções](https
 
 ---
 
-# Mercado Pago — preparação de segurança, integração pendente
+# Pagamentos — demonstração e adapter Mercado Pago
 
-`server/payments.cjs` contém somente utilitários de preparação. **Não é um gateway integrado e não cria cobranças, Pix, tokens de cartão, capturas ou reembolsos.** A compra com pagamento deve continuar indisponível. Não foi executada transação, inclusive sandbox.
+`server/payments.cjs` separa `PaymentProvider`, `MockPaymentProvider` e `MercadoPagoPaymentProvider`. Os valores são centavos inteiros calculados pelo servidor, nunca um total confiado ao navegador. Nenhuma cobrança externa foi executada nesta implementação, nem em sandbox. O ambiente demonstrativo utiliza exclusivamente o mock.
 
-## O que foi implementado
+## Modos e ativação explícita
 
-- `paymentReadiness(env)`: retorna prontidão honesta, sem divulgar segredos. `enabled` e `canCharge` permanecem falsos mesmo que variáveis estejam preenchidas, porque a integração não foi concluída nem validada.
-- `requirePaymentReady()`: responde com erro 503 e informa que nenhuma cobrança foi criada.
-- `idempotencyKeyForOrder(orderId)`: gera chave estável SHA-256 para uma futura requisição de criação, permitindo reutilização segura da mesma chave em tentativas do mesmo pedido.
-- `verifyWebhookSignature({signature,requestId,dataId,secret,now,maxAgeMs})`: verifica HMAC SHA-256 e compara em tempo constante. Usa `data.id` da query, em minúsculas quando alfanumérico, junto de `x-request-id` e `ts` no manifesto documentado. Recusa campos ausentes/duplicados e timestamps fora da janela configurada. Aceita timestamp em segundos ou milissegundos. Retorna uma chave de identificação de repetição exata, **sem persistir ou processar eventos financeiros**.
+| Modo da aplicação | Provedor | Requisitos | Cobrança real |
+| --- | --- | --- | --- |
+| `BKM_ENVIRONMENT=demo` | `PAYMENT_PROVIDER=mock` | Ambos explicitamente configurados | Impossível |
+| `BKM_ENVIRONMENT=staging` | `PAYMENT_PROVIDER=mercadopago` | Sandbox, credenciais e `MERCADO_PAGO_ENABLED=true` | Não permitida; exige comprador de teste |
+| `BKM_ENVIRONMENT=production` | `PAYMENT_PROVIDER=mercadopago` | Ambiente production, credenciais, habilitação e `MERCADO_PAGO_PRODUCTION_APPROVED=true` | Somente após autorização e homologação |
 
-Os nomes de configuração reservados são `MERCADO_PAGO_ENVIRONMENT=sandbox`, `MERCADO_PAGO_ACCESS_TOKEN`, `MERCADO_PAGO_PUBLIC_KEY` e `MERCADO_PAGO_WEBHOOK_SECRET`. Não adicionar credenciais ao repositório nem ao HTML autossuficiente.
+Credenciais isoladas não ativam o gateway. `paymentReadiness(env)` retorna apenas estado, nomes de variáveis ausentes e explicação, sem segredos. `HOSTING_DEMO_ONLY=true` bloqueia Mercado Pago, inclusive sandbox, independentemente das demais variáveis: a demonstração hospedada no Vercel Hobby permanece sem transações externas. Uma operação comercial precisa primeiro de hospedagem elegível. O mock é recusado fora de `demo`, mesmo que `NODE_ENV=production` seja usado para compilar a demonstração.
 
-## O que falta para habilitar
+Variáveis: `BKM_ENVIRONMENT`, `PAYMENT_PROVIDER`, `MERCADO_PAGO_ENVIRONMENT`, `MERCADO_PAGO_ENABLED`, `MERCADO_PAGO_PRODUCTION_APPROVED`, `MERCADO_PAGO_ACCESS_TOKEN`, `MERCADO_PAGO_PUBLIC_KEY`, `MERCADO_PAGO_WEBHOOK_SECRET`, `MERCADO_PAGO_SELLER_ID` e `BKM_PUBLIC_URL`. Valores sensíveis pertencem ao painel do serviço ou `.env` local ignorado pelo Git. O prefixo do token não comprova ambiente; a [documentação de contas de teste](https://www.mercadopago.com.br/developers/en/docs/checkout-api-orders/resources/test-accounts) também utiliza credenciais `APP_USR`.
 
-1. Configurar uma aplicação e contas de teste do Mercado Pago, confirmando explicitamente que as credenciais pertencem ao ambiente correto.
-2. Implementar criação de Orders e formulário oficial/tokenização para Pix e cartão, usando somente totais calculados pelo servidor e a chave de idempotência persistida por tentativa financeira.
-3. Dispor de endpoint HTTPS de notificações e configurar evento `order` e assinatura. Verificar HMAC antes de aceitar a notificação. A assinatura identifica o recurso, não autoriza confiar cegamente em todos os campos do corpo.
-4. Consultar a order no provedor e validar identidade do vendedor, ambiente, referência externa, moeda BRL, total, valor efetivamente pago e status apropriado.
-5. Persistir evento com unicidade e realizar transição financeira + movimentação de estoque em transação de banco. A chave de repetição exata do helper não substitui idempotência comercial para novas notificações do mesmo pagamento.
-6. Testar sandbox de ponta a ponta: aprovação, pendência, recusa, cancelamento, notificações duplicadas, falhas de rede e concorrência de estoque. Não marcar como pronto sem esses testes.
+## Contrato usado pelo backend
 
-## Referências oficiais consultadas em 15/10/2026
+```js
+const provider = createPaymentProvider({ env });
+const payment = await provider.createPayment({
+  orderId, amountCents, currency: 'BRL', idempotencyKey,
+  outcome: 'pending' // somente mock
+});
+const event = await provider.simulatePayment({ payment, outcome: 'approved' });
+```
 
-As [credenciais Orders](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/resources/credentials?scope=prod) distinguem testes e produção. O prefixo sozinho não comprova ambiente: nas [contas de teste Orders](https://www.mercadopago.com.br/developers/en/docs/checkout-api-orders/resources/test-accounts), o Access Token de teste pode começar com `APP_USR`. Nenhuma configuração deste módulo habilita cobranças automaticamente.
+Resultado comum: `{id,provider,demo,status,orderId,amountCents,currency,eventId,occurredAt}`. O mock acrescenta `expiresAt` e rótulo obrigatório de simulação. Resultados: `APPROVED`, `PENDING`, `REJECTED`, `CANCELLED`, `EXPIRED`. Transições após um estado terminal são recusadas. Não há Pix fictício, captura financeira ou envio externo. O backend deve persistir eventos e histórico, aplicar estoque em transação e recusar eventos duplicados; a função pura do provedor não substitui esses controles.
 
-O contrato de notificações e a necessidade de confirmação do recurso estão na [documentação de Webhooks Orders](https://www.mercadopago.com.br/developers/pt/docs/checkout-api-orders/notifications). O [manifesto HMAC sem SDK](https://www.mercadopago.com.br/developers/pt/docs/wallet-connect/notifications) descreve `data.id`, `request-id` e `ts`, incluindo uso do identificador alfanumérico em minúsculas. A tolerância local padrão de 10 minutos é política deste helper; deve ser ajustada e testada com os reenvios reais antes de ativação.
+`idempotencyKeyForOrder(orderId,attemptId)` gera chave estável por tentativa. Uma repetição reutiliza a mesma tentativa e o mesmo conteúdo. Uma nova tentativa financeira requer identificação própria persistida, nunca uma chave gerada automaticamente como reação a um timeout.
 
-## Testes executados
+## Mercado Pago preparado
 
-`node --test server/payments.test.cjs`: 4 testes passaram, cobrindo HMAC válido/adulterado, campos duplicados/ausentes, timestamp antigo, chave estável por pedido e bloqueio permanente de cobrança sem exposição de segredos. São testes unitários locais com valores artificiais identificados; não comprovam integração com o serviço Mercado Pago.
+O adapter utiliza a **Orders API atual**. `createPayment` aceita `method:'pix'` ou `method:'card'`, pagador e valor do pedido. A criação usa `POST https://api.mercadopago.com/v1/orders`, processamento automático e `X-Idempotency-Key`. Valores são strings decimais exatas. O [contrato de criação](https://www.mercadopago.com.br/developers/en/reference/online-payments/checkout-api/create-order/post) contempla HTTP 402 com uma order existente. Obtido o ID, o adapter sempre consulta `GET /v1/orders/{id}` para validar conta, referência e valores; o exemplo de criação não garante todos os campos da conta. Falha nessa confirmação conserva o ID e exige reconciliação, sem outra criação.
+
+Para Pix, o pedido contém `id:'pix'`, `type:'bank_transfer'` e expiração de 30 minutos; o adapter expõe apenas o código real devolvido pelo provedor em `pix.copyPaste`. A demonstração nunca percorre esse caminho. A [documentação Pix](https://www.mercadopago.com.br/developers/en/docs/checkout-api-orders/payment-integration/websites/pix) descreve esse fluxo e a necessidade de configuração da conta. No sandbox, o código exige pagador `@testuser.com` criado no Mercado Pago.
+
+Para cartão, o servidor aceita somente um token do SDK, bandeira, tipo e parcelas: `card:{token,paymentMethodId,type,installments}`. PAN e CVV não pertencem aos modelos nem ao armazenamento da BKM. O [Card Payment Brick oficial](https://www.mercadopago.com.br/developers/en/docs/checkout-api-orders/payment-integration/websites/cards) produz o token no navegador; `getAdditionalData` ocorre depois de `getFormData`, conforme o [contrato do controller](https://www.mercadopago.com.br/developers/en/docs/checkout-bricks/card-payment-brick/advanced-features/additional-data). O token é usado na requisição e omitido da persistência e das respostas. A ativação depende de validar o formulário, as URLs e as credenciais reais em sandbox.
+
+`getPayment(paymentId,expected)` exige ID persistido, referência, vendedor configurado, Brasil, BRL quando fornecida e valor exato. A aprovação requer status acreditado, total bruto integral e valor bruto da única transação também acreditada. `paid_amount` da transação pode representar repasse líquido de taxas; ele não é usado como total bruto do pedido. Outros estados preservam pendência, recusa, cancelamento, expiração, reembolso ou revisão. Referências: [consulta de order](https://www.mercadopago.com.br/developers/en/reference/online-payments/checkout-api/get-order/get), [estados oficiais](https://www.mercadopago.com.br/developers/en/docs/checkout-api-orders/payment-management/status/order-status).
+
+## Webhooks, reconciliação e falhas
+
+`verifyWebhookSignature` valida HMAC SHA-256 em tempo constante, campos únicos, timestamp e manifesto com `data.id` em minúsculas. `data.id` deve vir exclusivamente da query da URL, com `x-signature` e `x-request-id`. A tolerância local é de dez minutos; é política da aplicação e deve ser conferida com os reenvios sandbox.
+
+`reconcileWebhook({signature,requestId,dataId,expected})` autentica e consulta o recurso remoto; o corpo não confirma estado financeiro. Retorna `replayKey`, evento comercial estável e pagamento verificado. O serviço persistente pode recuperar uma criação inconclusiva pela referência devolvida nessa consulta, inclusive quando o cliente não recebeu o ID. Referência: [notificações Orders](https://www.mercadopago.com.br/developers/en/docs/checkout-api-orders/notifications).
+
+`server/payment-service.cjs` mantém a tentativa no banco antes do acesso externo. `createMercadoPagoService` expõe `preparePayment`, `createPayment`, `reconcile` e `webhook`; a preparação ocorre na mesma transação de pedido e reserva, sem acesso à rede. Cada tentativa conserva seu ambiente sandbox ou production; trocar as variáveis posteriormente não converte uma tentativa de teste em cobrança real. O backend conecta checkout, consulta do titular e reconciliação administrativa. O endpoint público `POST /api/payments/webhook/mercadopago?data.id=ORD...&type=order` exige HMAC e ID único da query, sem exigir sessão de navegador ou CSRF. Rotas de cliente e administrador exigem sessão, CSRF e propriedade ou papel administrativo.
+
+A transação de confirmação bloqueia pedido, tentativa e variantes em ordem estável. Eventos comerciais e recibos são únicos. Estoque e cupom baixam uma vez, junto do histórico e da outbox; notificações antigas e aprovação depois de reembolso não repetem a baixa. Aprovação tardia sem reserva válida ou com cupom esgotado preserva o fato financeiro em `PAYMENT_REVIEW`, libera a reserva e exige resolução administrativa antes de envio. Reembolsos não repõem automaticamente mercadoria que pode ter sido enviada. Falha local depois da criação ou uma resposta inválida mantêm a tentativa inconclusiva; nenhum desses casos é tratado como recusa definitiva para criar outra cobrança.
+
+O transporte tem origem HTTPS fixa, redirecionamentos recusados, timeout de oito segundos e corpo limitado a 1 MiB. Falhas retornam erros sanitizados sem payloads ou credenciais. 423, 429 e 5xx indicam possibilidade de retry com `retryAfterMs`; timeout, falha de rede e conflito 409 na criação exigem reconciliação antes de prosseguir. Não há retry automático de cobrança com chave nova. O agendador deve respeitar o intervalo informado e reutilizar a tentativa persistida.
+
+Os 13 testes de adapter substituem o transporte e cobrem HMAC, adulteração, janela temporal, idempotência, ambientes, mock, valores, Pix/cartão, 402, consulta e falhas. `payment-service.test.cjs` acrescenta onze cenários em cada um dos bancos SQLite e PostgreSQL embarcado PGlite: confirmações e repetições, duas submissões sobrepostas, ambiente persistido, retorno inconclusivo, recuperação por webhook, rollback financeiro/estoque/outbox, aprovação tardia, cupom, vendedor/valor incompatíveis, reembolso e leases de e-mail. A suíte HTTP `tests/mercadopago-api.test.cjs` verifica permissões e integração das rotas. PGlite verifica o SQL e as transações PostgreSQL; não substitui um teste de carga com conexões independentes no Supabase. Não houve cobrança externa, nem homologação da conta Mercado Pago.
+
+---
+
+# E-mails transacionais — desenvolvimento e Resend
+
+`server/email.cjs` exporta `EmailProvider`, `DevelopmentEmailProvider`, `ResendEmailProvider`, `createEmailProvider`, `renderEmail`, `emailReadiness` e `createEmailDispatcher`. Não foi enviado e-mail externo nesta execução.
+
+## Templates e modo seguro
+
+Modelos: `welcome`, `order-confirmation`, `payment-approved`, `payment-rejected`, `order-shipped`, `tracking-update`, `password-reset`. Todos incluem logo fornecida, preto/vermelho/ciano/prata, versão em texto e HTML, links da loja e resumo do pedido quando aplicável. Dados variáveis são escapados e limitados; links de conta/recuperação ficam na origem configurada. A recuperação usa token de uso único de 30 minutos gerado pelo backend.
+
+`BKM_ENVIRONMENT=demo` ou `HOSTING_DEMO_ONLY=true` força `DevelopmentEmailProvider`, mesmo se houver configuração Resend. Ele não utiliza rede nem grava arquivos públicos. Retorna uma prévia para armazenamento privado na outbox, com destinatário mascarado. Tokens de recuperação são omitidos da prévia. Todos os templates de demonstração levam aviso no assunto e no conteúdo; nenhum resultado simulado pode disparar e-mail comercial pelo adapter Resend.
+
+Contrato de dados dos templates: `customerName`, `orderNumber`, `orderId`, `orderUrl`, `items:[{name,quantity,priceCents,subtotalCents}]`, `subtotalCents`, `discountCents`, `shippingCents`, `totalCents`, `trackingCode`, `trackingUrl`, `resetUrl`, `storeName`, `storeContact`, `demo`.
+
+## Ativação futura
+
+O envio externo exige `EMAIL_PROVIDER=resend`, ambiente `staging` ou `production`, `RESEND_ENABLED=true`, `RESEND_DOMAIN_VERIFIED=true`, `RESEND_API_KEY` e `RESEND_FROM` válido em domínio efetivamente verificado no painel. O flag da aplicação não verifica DNS por conta própria; o domínio precisa passar pela [verificação do Resend](https://resend.com/docs/dashboard/domains/introduction). `BKM_PUBLIC_URL` define links e URL absoluta da logo. A chave fica somente no servidor.
+
+O adapter envia `POST https://api.resend.com/emails`, texto/HTML e cabeçalho de idempotência estável. A resposta confirma **aceitação pela API**, não entrega na caixa do destinatário. Timeout e respostas são limitados; 429/5xx permitem retry, erros permanentes encerram o item. Erros não expõem chave, destinatário, token ou corpo do provedor. Referência: [Send Email](https://resend.com/docs/api-reference/emails/send-email).
+
+## Outbox e reenvio
+
+O backend persiste o evento na mesma transação do evento de negócio, usando `key` única. `createEmailDispatcher({store,env,provider})` trabalha com o store de banco, sem depender de timers que desaparecem em serverless:
+
+- `enqueue({key,template,to,data},tx?)` persiste uma vez, devolve o ID existente e recusa reutilização da chave com conteúdo diferente.
+- `claimDue({limit,now,leaseUntil})` obtém lote atomicamente e registra tentativas/lease. Cada retorno inclui a prova da tentativa; um worker antigo não pode concluir ou sobrescrever uma tentativa reatribuída.
+- `complete(id,{providerId,preview,now})` registra aceitação ou prévia privada.
+- `retry(id,{attempts,nextAttemptAt,errorCode})` agenda backoff exponencial com jitter e respeita `Retry-After`.
+- `fail(id,{errorCode})` encerra erro permanente ou seis tentativas; operação administrativa pode reavaliar e reenfileirar com segurança.
+
+O dispatcher processa cinco mensagens por chamada. O backend deve acioná-lo em requisições autorizadas ou por agendador compatível com o plano, sem depender de um processo residente. A [idempotência Resend](https://resend.com/docs/dashboard/emails/idempotency-keys) dura 24 horas; por isso uma tentativa ambígua com mais de 23 horas é interrompida para reconciliação manual, em vez de correr o risco de duplicar um e-mail. A chave persistida permanece a mesma em todos os retries. A unicidade local e o histórico continuam sendo necessários mesmo com deduplicação do provedor.
+
+Sete testes locais cobrem identidade e escape dos templates, links inseguros, tokens omitidos, ausência de envio em demo, gates de configuração, aceitação API, erro/timeout, idempotência, backoff, limite de tentativas e encerramento da janela segura. Os testes de backend validam a persistência da fila e dos eventos de negócio separadamente.
+
+Documentação oficial consultada em 15/10/2026. Ativação final de Mercado Pago e Resend exige credenciais privadas, configuração nos painéis e homologação externa; os adapters e o fluxo demonstrativo não dependem dessas chaves.

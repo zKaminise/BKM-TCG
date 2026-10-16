@@ -1,7 +1,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { openDatabase, defaultSettings } = require("./db.cjs");
+const { defaultSettings } = require("./db.cjs");
+const { openStore } = require("./store.cjs");
 const { hashPassword, verifyPassword, hashToken, publicUser } = require("./auth.cjs");
 const { accountList } = require("./accounts.cjs");
 const { paymentReadiness } = require("./payments.cjs");
@@ -44,20 +45,29 @@ function imageUrl(value) {
   }
   fail("VALIDATION", "Use uma URL de imagem HTTPS ou uma imagem enviada à loja.");
 }
-function transaction(db, fn) {
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    const value = fn();
-    db.exec("COMMIT");
-    return value;
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
-}
+async function transaction(db, fn) { return db.transaction(fn); }
 async function readJson(req, max = 1024 * 1024) {
   if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] || "")) throw new ApiError(415, "CONTENT_TYPE", "Envie os dados em JSON.");
   if (Number(req.headers["content-length"] || 0) > max) throw new ApiError(413, "BODY_TOO_LARGE", "Arquivo ou formulário acima do limite permitido.");
+  function parse(raw) {
+    if(Buffer.byteLength(raw)>max) throw new ApiError(413,"BODY_TOO_LARGE","Arquivo ou formulário acima do limite permitido.");
+    try {
+      const data=JSON.parse(raw);
+      if(!data || typeof data!=="object" || Array.isArray(data)) throw new Error();
+      return data;
+    } catch { throw new ApiError(400,"INVALID_JSON","JSON inválido."); }
+  }
+  // Vercel may parse JSON before invoking the function, consuming its stream.
+  if(req.body!==undefined) {
+    let raw;
+    if(typeof req.body==='string' || Buffer.isBuffer(req.body)) raw=req.body;
+    else {
+      try { raw=JSON.stringify(req.body); }
+      catch { throw new ApiError(400,'INVALID_JSON','JSON inválido.'); }
+    }
+    if(typeof raw!=='string' && !Buffer.isBuffer(raw)) throw new ApiError(400,'INVALID_JSON','JSON inválido.');
+    return parse(raw);
+  }
   const chunks = [];
   let length = 0;
   for await (const chunk of req) {
@@ -65,33 +75,43 @@ async function readJson(req, max = 1024 * 1024) {
     if (length > max) throw new ApiError(413, "BODY_TOO_LARGE", "Arquivo ou formulário acima do limite permitido.");
     chunks.push(chunk);
   }
-  try {
-    const data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error();
-    return data;
-  } catch {
-    throw new ApiError(400, "INVALID_JSON", "JSON inválido.");
-  }
+  return parse(Buffer.concat(chunks).toString("utf8"));
 }
 function createApi(options = {}) {
   const root = options.root || path.resolve(__dirname, "..");
-  const db = openDatabase(options.dbPath || process.env.BKM_DB_PATH || path.join(root, "data", "bkm.sqlite"));
+  const env = options.env || process.env;
+  const effectiveEnv = { ...env, BKM_ENVIRONMENT: env.BKM_ENVIRONMENT || (env.VERCEL ? '' : 'demo'), PAYMENT_PROVIDER: env.PAYMENT_PROVIDER || 'mock' };
+  const demo = effectiveEnv.BKM_ENVIRONMENT === 'demo';
+  const demoPayments = demo && effectiveEnv.PAYMENT_PROVIDER === 'mock';
+  const db = openStore({ ...options, env });
+  const { createCollections } = require('./collections.cjs');
+  const collections = createCollections({db,ApiError,audit,imageUrl});
+  const { createEmailStore } = require('./email-store.cjs');
+  const emailStore = createEmailStore(db);
+  let emailDispatcher;
+  async function enqueueEmail(message) { return emailStore.enqueue(message); }
+  async function flushEmails() {
+    const { createEmailDispatcher, createEmailProvider } = require('./email.cjs');
+    emailDispatcher ||= createEmailDispatcher({store:emailStore,provider:createEmailProvider({env:effectiveEnv}),env:effectiveEnv});
+    return emailDispatcher.flush({limit:10});
+  }
   const rateLimits = /* @__PURE__ */ new Map();
   const dummyPassword = "scrypt$32768$8$1$00000000000000000000000000000000$" + "0".repeat(128);
-  function audit(actor, action, entity, details = {}) {
-    db.prepare("INSERT INTO admin_audit VALUES(?,?,?,?,?,?)").run(uid(), actor, action, entity, JSON.stringify(details), now());
+  async function audit(actor, action, entity, details = {}) {
+    (await db.prepare("INSERT INTO admin_audit VALUES(?,?,?,?,?,?)").run(uid(), actor, action, entity, JSON.stringify(details), now()));
   }
-  function settings() {
-    const saved = JSON.parse(db.prepare("SELECT value_json FROM settings WHERE id=1").get().value_json);
+  async function settings() {
+    const saved = JSON.parse((await db.prepare("SELECT value_json FROM settings WHERE id=1").get()).value_json);
     return { ...defaultSettings, ...saved, shipping: { ...defaultSettings.shipping, ...saved.shipping } };
   }
-  function config() {
-    const s = settings();
-    const payment = paymentReadiness();
-    return { ...s, freeShippingThresholdCents: s.shipping.freeShippingEnabled ? s.shipping.freeShippingThresholdCents : null, paymentConfigured: false, shippingConfigured: s.shipping.enabled, payments: { available: false, provider: payment.provider, reason: payment.reason } };
+  async function config() {
+    const s = await settings();
+    const payment = paymentReadiness(effectiveEnv);
+    const available=payment.enabled && (demoPayments || !s.demoDataVersion);
+    return { ...s, freeShippingThresholdCents: s.shipping.freeShippingEnabled ? s.shipping.freeShippingThresholdCents : null, environment: effectiveEnv.BKM_ENVIRONMENT || 'unconfigured',demo,paymentConfigured:available, shippingConfigured:s.shipping.enabled, payments:{available,provider:payment.provider,environment:payment.environment,demo:payment.demo,canCharge:available && payment.canCharge,reason:!demo && s.demoDataVersion?'O banco demonstrativo não aceita cobranças externas.':payment.reason,...(available && payment.provider==='mercadopago'?{publicKey:effectiveEnv.MERCADO_PAGO_PUBLIC_KEY}:{})} };
   }
   function limit(req, scope, max, windowMs = 15 * 60 * 1e3) {
-    const key = `${req.socket.remoteAddress}:${scope}`;
+    const key = `${req.socket?.remoteAddress || "serverless"}:${scope}`;
     const stamp = Date.now();
     let entry = rateLimits.get(key);
     if (!entry || entry.reset < stamp) {
@@ -103,23 +123,23 @@ function createApi(options = {}) {
       for (const [k, v] of rateLimits) if (v.reset < stamp) rateLimits.delete(k);
     }
   }
-  function getSession(req) {
+  async function getSession(req) {
     const cookie = (req.headers.cookie || "").split(";").map((x) => x.trim()).find((x) => x.startsWith("bkm_session="));
     const token = cookie?.slice(12);
     if (!token || !/^[-_A-Za-z0-9]{43}$/.test(token)) return null;
-    const s = db.prepare("SELECT * FROM sessions WHERE token_hash=? AND expires_at>?").get(hashToken(token), Date.now());
+    const s = (await db.prepare("SELECT * FROM sessions WHERE token_hash=? AND expires_at>?").get(hashToken(token), Date.now()));
     if (!s) return null;
-    s.user = s.user_id ? db.prepare("SELECT * FROM users WHERE id=?").get(s.user_id) : null;
+    s.user = s.user_id ? (await db.prepare("SELECT * FROM users WHERE id=?").get(s.user_id)) : null;
     return s;
   }
-  function newSession(res, userId = null, previous = null) {
-    if (previous) db.prepare("DELETE FROM sessions WHERE token_hash=?").run(previous.token_hash);
+  async function newSession(res, userId = null, previous = null) {
+    if (previous) (await db.prepare("DELETE FROM sessions WHERE token_hash=?").run(previous.token_hash));
     const token = crypto.randomBytes(32).toString("base64url"), csrfToken = crypto.randomBytes(32).toString("base64url");
     const age = userId ? 7 * 86400 : 86400;
-    db.prepare("DELETE FROM sessions WHERE expires_at<?").run(Date.now());
-    db.prepare("INSERT INTO sessions VALUES(?,?,?,?,?)").run(hashToken(token), userId, csrfToken, Date.now() + age * 1e3, Date.now());
+    (await db.prepare("DELETE FROM sessions WHERE expires_at<?").run(Date.now()));
+    (await db.prepare("INSERT INTO sessions VALUES(?,?,?,?,?)").run(hashToken(token), userId, csrfToken, Date.now() + age * 1e3, Date.now()));
     res.setHeader("Set-Cookie", `bkm_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${age}${options.secureCookies ? "; Secure" : ""}`);
-    return { user: userId ? publicUser(db.prepare("SELECT * FROM users WHERE id=?").get(userId)) : null, csrfToken };
+    return { user: userId ? publicUser((await db.prepare("SELECT * FROM users WHERE id=?").get(userId))) : null, csrfToken };
   }
   function auth(session, admin = false) {
     if (!session?.user) throw new ApiError(401, "UNAUTHENTICATED", "Entre na sua conta para continuar.");
@@ -133,22 +153,25 @@ function createApi(options = {}) {
   function origin(req) {
     if (req.headers["sec-fetch-site"] === "cross-site") throw new ApiError(403, "ORIGIN", "Origem da solicitação não permitida.");
     if (req.headers.origin) {
-      const expected = `${req.socket.encrypted ? "https" : "http"}://${req.headers.host}`;
-      if (req.headers.origin !== expected) throw new ApiError(403, "ORIGIN", "Origem da solicitação não permitida.");
+      const expected = options.publicUrl ? new URL(options.publicUrl).origin : `${options.secureCookies || req.socket?.encrypted ? "https" : "http"}://${req.headers.host}`;
+      if (req.headers.origin !== expected && !(options.allowedOrigins || []).includes(req.headers.origin)) throw new ApiError(403, "ORIGIN", "Origem da solicitação não permitida.");
     }
   }
-  function product(row, admin = false) {
+  async function product(row, admin = false) {
     if (!row) return null;
-    const variants = db.prepare("SELECT * FROM variants WHERE product_id=? AND active=1 ORDER BY rowid").all(row.id).map((v) => ({ id: v.id, language: v.language, condition: v.condition, finish: v.finish, priceCents: v.price_cents, compareAtCents: v.compare_at_cents, stock: v.stock }));
-    const metadata = row.card_id ? JSON.parse(db.prepare("SELECT metadata_json FROM card_metadata WHERE id=?").get(row.card_id).metadata_json) : null;
+    const variants = (await db.prepare("SELECT v.*,(SELECT COALESCE(SUM(r.quantity),0) FROM inventory_reservations r WHERE r.variant_id=v.id AND r.status='ACTIVE' AND r.expires_at>?) reserved FROM variants v WHERE v.product_id=? AND v.active=1 ORDER BY CASE v.language WHEN 'pt' THEN 0 WHEN 'en' THEN 1 ELSE 2 END,v.id").all(Date.now(),row.id)).map((v) => ({ id: v.id, language: v.language, condition: v.condition, finish: v.finish, priceCents: v.price_cents, compareAtCents: v.compare_at_cents, stock: admin ? v.stock : Math.max(0,v.stock-v.reserved), reservedStock:v.reserved }));
+    const metadata = row.card_id ? JSON.parse((await db.prepare("SELECT metadata_json FROM card_metadata WHERE id=?").get(row.card_id)).metadata_json) : null;
     return { id: row.id, slug: row.slug, kind: row.kind, name: row.name, description: row.description, sku: row.sku, tcg: row.tcg, setId: row.set_id, setName: row.set_name, images: JSON.parse(row.images_json), attributes: JSON.parse(row.attributes_json), card: metadata, featured: !!row.featured, published: !!row.published, createdAt: row.created_at, updatedAt: row.updated_at, variants, ...admin ? { archived: !!row.archived } : {} };
   }
-  function facets() {
-    const rows = db.prepare("SELECT DISTINCT set_id id,set_name name FROM products WHERE published=1 AND archived=0 AND set_id<>'' ORDER BY set_name").all();
-    const vs = db.prepare("SELECT DISTINCT v.language,v.condition,v.finish FROM variants v JOIN products p ON p.id=v.product_id WHERE v.active=1 AND p.published=1 AND p.archived=0").all();
-    return { sets: rows, languages: [...new Set(vs.map((x) => x.language))], conditions: [...new Set(vs.map((x) => x.condition))], finishes: [...new Set(vs.map((x) => x.finish))] };
+  async function facets() {
+    const rows = (await db.prepare("SELECT DISTINCT set_id id,set_name name FROM products WHERE published=1 AND archived=0 AND set_id<>'' ORDER BY set_name").all());
+    const canonicalNames=new Map((await db.prepare('SELECT id,name FROM collections').all()).map(row=>[row.id,row.name]));
+    const uniqueSets=new Map();
+    for(const row of rows) if(!uniqueSets.has(row.id)) uniqueSets.set(row.id,{id:row.id,name:canonicalNames.get(row.id) || row.name});
+    const vs = (await db.prepare("SELECT DISTINCT v.language,v.condition,v.finish FROM variants v JOIN products p ON p.id=v.product_id WHERE v.active=1 AND p.published=1 AND p.archived=0").all());
+    return { sets: [...uniqueSets.values()].sort((a,b)=>a.name.localeCompare(b.name,'pt-BR')), languages: [...new Set(vs.map((x) => x.language))], conditions: [...new Set(vs.map((x) => x.condition))], finishes: [...new Set(vs.map((x) => x.finish))] };
   }
-  function listProducts(query, admin = false) {
+  async function listProducts(query, admin = false) {
     const clauses = [admin ? "1=1" : "p.published=1 AND p.archived=0"], params = [];
     if (query.get("kind")) {
       const v = query.get("kind");
@@ -160,6 +183,10 @@ function createApi(options = {}) {
       clauses.push("p.set_id=?");
       params.push(query.get("set"));
     }
+    if (query.get('number')) {
+      clauses.push("EXISTS(SELECT 1 FROM card_metadata c WHERE c.id=p.card_id AND lower(ltrim(c.number,'0'))=?)");
+      params.push(String(query.get('number')).split('/')[0].trim().toLowerCase().replace(/^0+/,''));
+    }
     for (const word of normalized(query.get("q")).split(/\s+/).filter(Boolean).slice(0, 12)) {
       clauses.push("p.search_text LIKE ? ESCAPE '\\'");
       params.push("%" + word.replace(/[\\%_]/g, "\\$&") + "%");
@@ -169,7 +196,10 @@ function createApi(options = {}) {
       filters.push(`v.${col}=?`);
       params.push(query.get(q));
     }
-    if (query.get("available") === "true" || query.get("available") === "1") filters.push("v.stock>0");
+    if (query.get("available") === "true" || query.get("available") === "1") {
+      filters.push("v.stock>(SELECT COALESCE(SUM(r.quantity),0) FROM inventory_reservations r WHERE r.variant_id=v.id AND r.status='ACTIVE' AND r.expires_at>?)");
+      params.push(Date.now());
+    }
     if (query.get("minPrice")) {
       filters.push("v.price_cents>=?");
       params.push(integer(Number(query.get("minPrice")), "minPrice"));
@@ -184,9 +214,9 @@ function createApi(options = {}) {
     const order2 = sorts[query.get("sort")] || sorts.newest;
     const page = integer(Number(query.get("page") || 1), "page", 1, 1e6), pageSize = Math.min(48, Math.max(1, Number(query.get("pageSize") || 24)));
     if (!Number.isInteger(pageSize)) fail("VALIDATION", "Paginação inválida.");
-    const where = clauses.join(" AND "), total = db.prepare(`SELECT COUNT(*) count FROM products p WHERE ${where}`).get(...params).count;
-    const rows = db.prepare(`SELECT p.* FROM products p WHERE ${where} ORDER BY ${order2},p.id LIMIT ? OFFSET ?`).all(...params, pageSize, (page - 1) * pageSize);
-    return { items: rows.map((x) => product(x, admin)), pagination: { page, pageSize, total, pages: Math.ceil(total / pageSize) }, facets: facets() };
+    const where = clauses.join(" AND "), total = (await db.prepare(`SELECT COUNT(*) count FROM products p WHERE ${where}`).get(...params)).count;
+    const rows = (await db.prepare(`SELECT p.* FROM products p WHERE ${where} ORDER BY ${order2},p.id LIMIT ? OFFSET ?`).all(...params, pageSize, (page - 1) * pageSize));
+    return { items: await Promise.all(rows.map((x) => product(x, admin))), pagination: { page, pageSize, total, pages: Math.ceil(total / pageSize) }, facets: await facets() };
   }
   function validateProduct(data, existing) {
     const kind = text(data.kind, "kind", 10, true);
@@ -227,36 +257,41 @@ function createApi(options = {}) {
     }
     return { id: existing?.id || uid(), kind, name, slug, sku, setId, setName, tcg, description, images, variants, card, attributes, featured: data.featured === true, published: data.published === true };
   }
-  function saveProduct(data, actor, existing) {
+  async function saveProduct(data, actor, existing) {
     const p = validateProduct(data, existing);
-    transaction(db, () => {
+    await transaction(db, async () => {
       let cardId = null;
       if (p.card) {
         const c = p.card, key = JSON.stringify([p.tcg, p.setId, normalized(c.number), c.language, c.provider, c.providerId]);
-        const prior = db.prepare("SELECT id FROM card_metadata WHERE identity_key=?").get(key);
+        const prior = (await db.prepare("SELECT id FROM card_metadata WHERE identity_key=?").get(key));
         cardId = prior?.id || uid();
-        if (!prior) db.prepare("INSERT INTO card_metadata VALUES(?,?,?,?,?,?,?,?)").run(cardId, key, p.tcg, p.setId, c.number, c.language, JSON.stringify(c), now());
-        else db.prepare("UPDATE card_metadata SET metadata_json=? WHERE id=?").run(JSON.stringify(c), cardId);
+        if (!prior) (await db.prepare("INSERT INTO card_metadata VALUES(?,?,?,?,?,?,?,?)").run(cardId, key, p.tcg, p.setId, c.number, c.language, JSON.stringify(c), now()));
+        else (await db.prepare("UPDATE card_metadata SET metadata_json=? WHERE id=?").run(JSON.stringify(c), cardId));
       }
       const search = normalized([p.name, p.sku, p.setName, p.setId, p.attributes.category, p.attributes.series, p.card?.name, p.card?.number, p.card ? `${p.card.number}/${p.card.total || ""}` : ""].join(" "));
-      if (existing) db.prepare("UPDATE products SET slug=?,kind=?,name=?,description=?,sku=?,tcg=?,set_id=?,set_name=?,card_id=?,images_json=?,attributes_json=?,search_text=?,featured=?,published=?,updated_at=? WHERE id=?").run(p.slug, p.kind, p.name, p.description, p.sku, p.tcg, p.setId, p.setName, cardId, JSON.stringify(p.images), JSON.stringify(p.attributes), search, +p.featured, +p.published, now(), p.id);
-      else db.prepare("INSERT INTO products VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(p.id, p.slug, p.kind, p.name, p.description, p.sku, p.tcg, p.setId, p.setName, cardId, JSON.stringify(p.images), JSON.stringify(p.attributes), search, +p.featured, +p.published, 0, now(), now());
-      const old = db.prepare("SELECT * FROM variants WHERE product_id=?").all(p.id);
-      db.prepare("UPDATE variants SET active=0 WHERE product_id=?").run(p.id);
+      if (existing) (await db.prepare("UPDATE products SET slug=?,kind=?,name=?,description=?,sku=?,tcg=?,set_id=?,set_name=?,card_id=?,images_json=?,attributes_json=?,search_text=?,featured=?,published=?,updated_at=? WHERE id=?").run(p.slug, p.kind, p.name, p.description, p.sku, p.tcg, p.setId, p.setName, cardId, JSON.stringify(p.images), JSON.stringify(p.attributes), search, +p.featured, +p.published, now(), p.id));
+      else (await db.prepare("INSERT INTO products VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(p.id, p.slug, p.kind, p.name, p.description, p.sku, p.tcg, p.setId, p.setName, cardId, JSON.stringify(p.images), JSON.stringify(p.attributes), search, +p.featured, +p.published, 0, now(), now()));
+      const old = (await db.prepare("SELECT * FROM variants WHERE product_id=? ORDER BY id"+db.lockSuffix).all(p.id));
+      for (const oldVariant of old) {
+        const reserved=(await db.prepare("SELECT COALESCE(SUM(quantity),0) quantity FROM inventory_reservations WHERE variant_id=? AND status='ACTIVE' AND expires_at>?").get(oldVariant.id,Date.now())).quantity;
+        const retained=p.variants.find(value=>value.id===oldVariant.id || !value.id && value.language===oldVariant.language && value.condition===oldVariant.condition && value.finish===oldVariant.finish);
+        if(reserved && (!retained || retained.stock<reserved)) throw new ApiError(409,'STOCK_RESERVED','Esta variante possui unidades reservadas em pedidos pendentes. Libere os pedidos antes de reduzir o estoque.');
+      }
+      (await db.prepare("UPDATE variants SET active=0 WHERE product_id=?").run(p.id));
       for (const v of p.variants) {
         let prior = v.id ? old.find((x) => x.id === v.id) : old.find((x) => x.language === v.language && x.condition === v.condition && x.finish === v.finish);
         if (v.id && !prior) fail("VALIDATION", "Esta variante não pertence ao produto.");
         const id = prior?.id || uid();
-        if (prior) db.prepare("UPDATE variants SET language=?,condition=?,finish=?,price_cents=?,compare_at_cents=?,stock=?,active=1 WHERE id=?").run(v.language, v.condition, v.finish, v.priceCents, v.compareAtCents, v.stock, id);
-        else db.prepare("INSERT INTO variants VALUES(?,?,?,?,?,?,?,?,1)").run(id, p.id, v.language, v.condition, v.finish, v.priceCents, v.compareAtCents, v.stock);
+        if (prior) (await db.prepare("UPDATE variants SET language=?,condition=?,finish=?,price_cents=?,compare_at_cents=?,stock=?,active=1 WHERE id=?").run(v.language, v.condition, v.finish, v.priceCents, v.compareAtCents, v.stock, id));
+        else (await db.prepare("INSERT INTO variants VALUES(?,?,?,?,?,?,?,?,1)").run(id, p.id, v.language, v.condition, v.finish, v.priceCents, v.compareAtCents, v.stock));
         const delta = v.stock - (prior?.stock || 0);
-        if (delta) db.prepare("INSERT INTO stock_movements VALUES(?,?,?,?,?,?,?)").run(uid(), id, actor, delta, v.stock, existing ? "Ajuste administrativo" : "Estoque inicial", now());
+        if (delta) (await db.prepare("INSERT INTO stock_movements VALUES(?,?,?,?,?,?,?)").run(uid(), id, actor, delta, v.stock, existing ? "Ajuste administrativo" : "Estoque inicial", now()));
       }
-      audit(actor, existing ? "PRODUCT_UPDATED" : "PRODUCT_CREATED", p.id, { sku: p.sku, published: p.published });
+      await audit(actor, existing ? "PRODUCT_UPDATED" : "PRODUCT_CREATED", p.id, { sku: p.sku, published: p.published });
     });
-    return product(db.prepare("SELECT * FROM products WHERE id=?").get(p.id), true);
+    return await product((await db.prepare("SELECT * FROM products WHERE id=?").get(p.id)), true);
   }
-  function quote(data) {
+  async function quote(data, lock = false) {
     if (!Array.isArray(data.items) || data.items.length < 1 || data.items.length > 100) fail("EMPTY_CART", "Adicione produtos ao carrinho.");
     const counts = /* @__PURE__ */ new Map();
     for (const item of data.items) {
@@ -266,10 +301,10 @@ function createApi(options = {}) {
     }
     const items = [];
     let subtotalCents = 0;
-    for (const [variantId, quantity] of counts) {
-      const v = db.prepare("SELECT v.*,p.name,p.slug,p.sku,p.images_json,p.published,p.archived FROM variants v JOIN products p ON p.id=v.product_id WHERE v.id=? AND v.active=1").get(variantId);
+    for (const [variantId, quantity] of [...counts].sort(([a],[b])=>a.localeCompare(b))) {
+      const v = (await db.prepare("SELECT v.*,p.name,p.slug,p.sku,p.images_json,p.published,p.archived FROM variants v JOIN products p ON p.id=v.product_id WHERE v.id=? AND v.active=1" + (lock ? db.lockSuffix : "")).get(variantId));
       if (!v || !v.published || v.archived) throw new ApiError(409, "PRODUCT_UNAVAILABLE", "Um produto do carrinho não está mais disponível.", { variantId });
-      const reserved = db.prepare("SELECT COALESCE(SUM(quantity),0) q FROM inventory_reservations WHERE variant_id=? AND status='ACTIVE' AND expires_at>?").get(variantId, Date.now()).q;
+      const reserved = (await db.prepare("SELECT COALESCE(SUM(quantity),0) q FROM inventory_reservations WHERE variant_id=? AND status='ACTIVE' AND expires_at>?").get(variantId, Date.now())).q;
       const available = Math.max(0, v.stock - reserved);
       if (quantity > available) throw new ApiError(409, "INSUFFICIENT_STOCK", `Estoque insuficiente para ${v.name}.`, { variantId, available });
       const totalCents = v.price_cents * quantity;
@@ -280,13 +315,13 @@ function createApi(options = {}) {
     let discountCents = 0, coupon2 = null;
     if (data.coupon) {
       const code = text(data.coupon, "coupon", 40, true).toUpperCase();
-      const c = db.prepare("SELECT * FROM coupons WHERE code=?").get(code);
+      const c = (await db.prepare("SELECT * FROM coupons WHERE code=?").get(code));
       const time = now();
       if (!c || !c.active || c.starts_at && c.starts_at > time || c.ends_at && c.ends_at < time || c.max_uses != null && c.used_count >= c.max_uses || subtotalCents < c.minimum_cents) fail("COUPON_INVALID", "Cupom inválido, expirado ou não aplicável a este carrinho.");
       discountCents = Math.min(subtotalCents, c.type === "PERCENT" ? Math.floor(subtotalCents * c.value / 100) : c.value);
       coupon2 = code;
     }
-    const s = settings().shipping;
+    const saved=await settings(),s=saved.shipping;
     const cep = String(data.cep || "").replace(/\D/g, "");
     if (cep && cep.length !== 8) fail("INVALID_CEP", "Informe um CEP com oito números.");
     const net = subtotalCents - discountCents;
@@ -295,12 +330,25 @@ function createApi(options = {}) {
     const free = !!(eligible && s.freeShippingEnabled && s.freeShippingThresholdCents != null && net >= s.freeShippingThresholdCents);
     const shippingCents = eligible ? free ? 0 : s.flatRateCents : null;
     const reason = !s.enabled ? "Frete ainda não configurado pela loja." : !cep ? "Informe o CEP para calcular a entrega." : !regional ? "Entrega indisponível para este CEP." : null;
-    return { items, subtotalCents, discountCents, shippingCents, totalCents: shippingCents == null ? null : net + shippingCents, coupon: coupon2, errors: [], shipping: { available: eligible, reason, cep, free, estimatedDays: eligible ? s.estimatedDays : null, freeShippingThresholdCents: s.freeShippingEnabled ? s.freeShippingThresholdCents : null, remainingForFreeShippingCents: s.enabled && s.freeShippingEnabled ? Math.max(0, s.freeShippingThresholdCents - net) : null }, paymentAvailable: false, reason: reason || "Pagamentos ainda não configurados. Nenhuma cobrança será realizada." };
+    const payment=paymentReadiness(effectiveEnv),paymentAvailable=payment.enabled && (demoPayments || !saved.demoDataVersion);
+    return { items, subtotalCents, discountCents, shippingCents, totalCents: shippingCents == null ? null : net + shippingCents, coupon: coupon2, errors: [], shipping: { available: eligible, reason, cep, free, estimatedDays: eligible ? s.estimatedDays : null, freeShippingThresholdCents: s.freeShippingEnabled ? s.freeShippingThresholdCents : null, remainingForFreeShippingCents: s.enabled && s.freeShippingEnabled ? Math.max(0, s.freeShippingThresholdCents - net) : null, demo:demo || !!saved.demoDataVersion }, paymentAvailable, demo, environment:effectiveEnv.BKM_ENVIRONMENT || 'unconfigured', reason:reason || (paymentAvailable ? payment.reason : 'Pagamentos indisponíveis neste ambiente.') };
   }
-  function saveSettings(data, user) {
-    const current = settings(), result = { ...current };
+  async function saveSettings(data, user) {
+    const current = await settings(), result = { ...current };
     for (const key of ["storeName", "contactEmail", "whatsapp", "instagram", "companyName", "cnpj", "address", "heroTitle", "heroSubtitle", "about", "shippingPolicy", "returnsPolicy", "privacyPolicy", "terms"]) if (key in data) result[key] = text(data[key], key, ["about", "shippingPolicy", "returnsPolicy", "privacyPolicy", "terms"].includes(key) ? 2e4 : 400, key === "storeName");
     if (result.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.contactEmail)) fail("VALIDATION", "E-mail de contato inválido.");
+    if ('categories' in data) {
+      if(!Array.isArray(data.categories) || data.categories.length>30) fail('VALIDATION','Informe até 30 categorias.');
+      result.categories=[...new Set(data.categories.map(value=>text(value,'categoria',100,true)))];
+    }
+    if ('banners' in data) {
+      if(!Array.isArray(data.banners) || data.banners.length>10) fail('VALIDATION','Informe até 10 banners.');
+      result.banners=data.banners.map(banner=>{
+        const url=text(banner.url || '/lacrados','banner.url',2000,true);
+        if(!/^\/[a-zA-Z0-9/?=&%_+-]*$/.test(url) && !/^https:\/\//.test(url)) fail('VALIDATION','Link de banner inválido.');
+        return {title:text(banner.title,'banner.title',160,true),subtitle:text(banner.subtitle,'banner.subtitle',400),image:banner.image?imageUrl(banner.image):'',url,active:banner.active!==false};
+      });
+    }
     if (data.shipping) {
       const s = { ...current.shipping, ...data.shipping };
       s.enabled = bool(s.enabled, "shipping.enabled");
@@ -317,16 +365,16 @@ function createApi(options = {}) {
       });
       result.shipping = s;
     }
-    transaction(db, () => {
-      db.prepare("UPDATE settings SET value_json=?,updated_at=? WHERE id=1").run(JSON.stringify(result), now());
-      audit(user.id, "SETTINGS_UPDATED", "store", { fields: Object.keys(data) });
+    await transaction(db, async () => {
+      (await db.prepare("UPDATE settings SET value_json=?,updated_at=? WHERE id=1").run(JSON.stringify(result), now()));
+      await audit(user.id, "SETTINGS_UPDATED", "store", { fields: Object.keys(data) });
     });
     return result;
   }
   function coupon(row) {
     return { id: row.id, code: row.code, type: row.type, value: row.value, minimumCents: row.minimum_cents, startsAt: row.starts_at, endsAt: row.ends_at, maxUses: row.max_uses, usedCount: row.used_count, active: !!row.active, createdAt: row.created_at };
   }
-  function saveCoupon(data, user, existing) {
+  async function saveCoupon(data, user, existing) {
     const code = text(data.code, "code", 40, true).toUpperCase();
     if (!/^[A-Z0-9_-]+$/.test(code)) fail("VALIDATION", "Use letras, números, hífen e sublinhado no cupom.");
     const type = text(data.type, "type", 20, true);
@@ -340,36 +388,48 @@ function createApi(options = {}) {
     const starts = date(data.startsAt), ends = date(data.endsAt);
     if (starts && ends && ends <= starts) fail("VALIDATION", "A validade final deve ser posterior ao início.");
     const id = existing?.id || uid(), minimum = integer(data.minimumCents || 0, "minimumCents"), max = data.maxUses == null ? null : integer(data.maxUses, "maxUses", 1, 1e6);
-    transaction(db, () => {
-      if (existing) db.prepare("UPDATE coupons SET code=?,type=?,value=?,minimum_cents=?,starts_at=?,ends_at=?,max_uses=?,active=? WHERE id=?").run(code, type, value, minimum, starts, ends, max, +(data.active !== false), id);
-      else db.prepare("INSERT INTO coupons VALUES(?,?,?,?,?,?,?,?,0,?,?)").run(id, code, type, value, minimum, starts, ends, max, +(data.active !== false), now());
-      audit(user.id, existing ? "COUPON_UPDATED" : "COUPON_CREATED", id, { code });
+    await transaction(db, async () => {
+      if (existing) (await db.prepare("UPDATE coupons SET code=?,type=?,value=?,minimum_cents=?,starts_at=?,ends_at=?,max_uses=?,active=? WHERE id=?").run(code, type, value, minimum, starts, ends, max, +(data.active !== false), id));
+      else (await db.prepare("INSERT INTO coupons VALUES(?,?,?,?,?,?,?,?,0,?,?)").run(id, code, type, value, minimum, starts, ends, max, +(data.active !== false), now()));
+      await audit(user.id, existing ? "COUPON_UPDATED" : "COUPON_CREATED", id, { code });
     });
-    return coupon(db.prepare("SELECT * FROM coupons WHERE id=?").get(id));
+    return coupon((await db.prepare("SELECT * FROM coupons WHERE id=?").get(id)));
   }
-  function order(row) {
-    return { ...row, subtotalCents: row.subtotal_cents, discountCents: row.discount_cents, shippingCents: row.shipping_cents, totalCents: row.total_cents, paymentStatus: row.payment_status, shippingStatus: row.shipping_status, createdAt: row.created_at, address: JSON.parse(row.address_json), items: db.prepare("SELECT * FROM order_items WHERE order_id=?").all(row.id).map((i) => ({ ...i, unitPriceCents: i.unit_price_cents, totalCents: i.total_cents, variant: JSON.parse(i.variant_json) })) };
+  async function legacyOrder(row) {
+    return { ...row, subtotalCents: row.subtotal_cents, discountCents: row.discount_cents, shippingCents: row.shipping_cents, totalCents: row.total_cents, paymentStatus: row.payment_status, shippingStatus: row.shipping_status, createdAt: row.created_at, address: JSON.parse(row.address_json), items: (await db.prepare("SELECT * FROM order_items WHERE order_id=?").all(row.id)).map((i) => ({ ...i, unitPriceCents: i.unit_price_cents, totalCents: i.total_cents, variant: JSON.parse(i.variant_json) })) };
   }
-  async function handle(req, res, pathname) {
+  const { createOrders } = require('./orders.cjs');
+  const orders = createOrders({db,quote,env:effectiveEnv,audit,ApiError,enqueueEmail,paymentProvider:options.paymentProvider});
+  const order = orders.serialize;
+  async function dispatch(req, res, pathname) {
     const respond = (status, data) => {
       res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
       res.end(JSON.stringify(data));
     };
     try {
+      await db.ready;
       origin(req);
       limit(req, "api", 500, 6e4);
       const query = new URL(req.url, "http://localhost").searchParams;
       const method = req.method;
-      let session = getSession(req);
-      if (method === "GET" && pathname === "/api/session") {
-        return respond(200, session ? { user: publicUser(session.user), csrfToken: session.csrf_token } : newSession(res));
+      if(method==='POST' && pathname==='/api/payments/webhook/mercadopago') {
+        limit(req,'payment-webhook',120,6e4);
+        await readJson(req,65536);
+        if(query.getAll('data.id').length!==1) throw new ApiError(400,'PAYMENT_ID_INVALID','Informe um único identificador do recurso assinado.');
+        await orders.webhook({signature:req.headers['x-signature'],requestId:req.headers['x-request-id'],dataId:query.get('data.id')});
+        return respond(200,{received:true});
       }
-      if (method === "GET" && pathname === "/api/config") return respond(200, config());
-      if (method === "GET" && pathname === "/api/products") return respond(200, listProducts(query));
+      let session = await getSession(req);
+      if (method === "GET" && pathname === "/api/session") {
+        return respond(200, session ? { user: publicUser(session.user), csrfToken: session.csrf_token } : await newSession(res));
+      }
+      if (method === "GET" && pathname === "/api/config") return respond(200, await config());
+      if (method === 'GET' && pathname === '/api/collections') return respond(200,await collections.list(query));
+      if (method === "GET" && pathname === "/api/products") return respond(200, await listProducts(query));
       if (method === "GET" && /^\/api\/products\/[^/]+$/.test(pathname)) {
-        const slug = pathname.split("/").at(-1), row = db.prepare("SELECT * FROM products WHERE slug=? AND published=1 AND archived=0").get(slug);
+        const slug = pathname.split("/").at(-1), row = (await db.prepare("SELECT * FROM products WHERE slug=? AND published=1 AND archived=0").get(slug));
         if (!row) throw new ApiError(404, "PRODUCT_NOT_FOUND", "Produto não encontrado.");
-        return respond(200, { ...product(row), related: listProducts(new URLSearchParams({ set: row.set_id, pageSize: "5" })).items.filter((p) => p.id !== row.id).slice(0, 4) });
+        return respond(200, { ...await product(row), related: (await listProducts(new URLSearchParams({ set: row.set_id, pageSize: "5" }))).items.filter((p) => p.id !== row.id).slice(0, 4) });
       }
       if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) csrf(req, session);
       if (method === "POST" && ["/api/auth/login", "/api/auth/register"].includes(pathname)) {
@@ -378,51 +438,77 @@ function createApi(options = {}) {
         const email = text(data.email, "email", 254, true).toLowerCase(), password = typeof data.password === "string" ? data.password : "";
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail("VALIDATION", "Informe um e-mail válido.");
         if (password.length < 12 || password.length > 128) fail("VALIDATION", "A senha deve ter entre 12 e 128 caracteres.");
-        let user = db.prepare("SELECT * FROM users WHERE email=?").get(email);
+        let user = (await db.prepare("SELECT * FROM users WHERE email=?").get(email));
         if (pathname.endsWith("/register")) {
           if (user) fail("REGISTRATION_UNAVAILABLE", "Não foi possível cadastrar este e-mail. Tente entrar ou contate a loja.");
           const name = text(data.name, "name", 120, true);
           const id = uid();
-          db.prepare("INSERT INTO users(id,email,name,password_hash,role,created_at) VALUES(?,?,?,?,?,?)").run(id, email, name, await hashPassword(password), "CUSTOMER", now());
-          return respond(201, newSession(res, id, session));
+          (await db.prepare("INSERT INTO users(id,email,name,password_hash,role,created_at) VALUES(?,?,?,?,?,?)").run(id, email, name, await hashPassword(password), "CUSTOMER", now()));
+          await enqueueEmail({key:'welcome:'+id,template:'welcome',to:email,data:{name}});
+          return respond(201, await newSession(res, id, session));
         }
         const valid = await verifyPassword(password, user?.password_hash || dummyPassword);
         if (!user || !valid) throw new ApiError(401, "INVALID_CREDENTIALS", "E-mail ou senha incorretos.");
-        return respond(200, newSession(res, user.id, session));
+        return respond(200, await newSession(res, user.id, session));
       }
       if (method === "POST" && pathname === "/api/auth/logout") {
-        if (session) db.prepare("DELETE FROM sessions WHERE token_hash=?").run(session.token_hash);
-        return respond(200, newSession(res));
+        if (session) (await db.prepare("DELETE FROM sessions WHERE token_hash=?").run(session.token_hash));
+        return respond(200, await newSession(res));
       }
       if (method === "POST" && pathname === "/api/auth/forgot-password") {
         limit(req, "recovery", 5);
-        await readJson(req);
-        throw new ApiError(503, "RECOVERY_UNAVAILABLE", "Recuperação por e-mail ainda não configurada. Entre em contato com a loja.");
+        const data=await readJson(req),email=text(data.email,'email',254,true).toLowerCase();
+        const user=await db.prepare('SELECT * FROM users WHERE email=?').get(email);
+        if(user) {
+          const token=crypto.randomBytes(32).toString('base64url');
+          const base=options.publicUrl || env.PUBLIC_URL || `http://${req.headers.host}`;
+          await db.transaction(async()=>{
+            await db.prepare('DELETE FROM password_resets WHERE user_id=? OR expires_at<?').run(user.id,Date.now());
+            await db.prepare('INSERT INTO password_resets VALUES(?,?,?,NULL,?)').run(hashToken(token),user.id,Date.now()+30*60000,now());
+            await enqueueEmail({key:'password-reset:'+uid(),template:'password-reset',to:user.email,data:{name:user.name,resetUrl:base.replace(/\/$/,'')+'/recuperar-senha?token='+token}});
+          });
+        }
+        return respond(202,{message:'Se existir uma conta com este e-mail, enviaremos as instruções. No ambiente de demonstração, os e-mails ficam em prévias privadas da administração.'});
       }
-      if (method === "POST" && pathname === "/api/checkout/quote") return respond(200, quote(await readJson(req)));
+      if(method==='POST' && pathname==='/api/auth/reset-password') {
+        limit(req,'reset',10);
+        const data=await readJson(req),token=text(data.token,'token',100,true),password=typeof data.password==='string'?data.password:'';
+        if(password.length<12 || password.length>128) fail('VALIDATION','A senha deve ter entre 12 e 128 caracteres.');
+        const passwordHash=await hashPassword(password);
+        await db.transaction(async()=>{
+          const row=await db.prepare('SELECT * FROM password_resets WHERE token_hash=?'+db.lockSuffix).get(hashToken(token));
+          if(!row || row.used_at || row.expires_at<=Date.now()) throw new ApiError(422,'RESET_INVALID','Link inválido ou expirado. Solicite uma nova recuperação.');
+          await db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(passwordHash,row.user_id);
+          await db.prepare('UPDATE password_resets SET used_at=? WHERE token_hash=?').run(now(),row.token_hash);
+          await db.prepare('DELETE FROM sessions WHERE user_id=?').run(row.user_id);
+        });
+        return respond(200,{message:'Senha atualizada. Entre novamente com sua nova senha.'});
+      }
+      if (method === "POST" && pathname === "/api/checkout/quote") return respond(200, await quote(await readJson(req)));
       if (method === "POST" && pathname === "/api/checkout") {
-        auth(session);
-        quote(await readJson(req));
-        throw new ApiError(503, "PAYMENT_UNAVAILABLE", "Pagamento indisponível. Nenhum pedido ou cobrança foi criado.");
+        return respond(201, {order: await orders.create(await readJson(req), auth(session))});
       }
       if (pathname.startsWith("/api/account")) {
         const user = auth(session);
         if (["/api/account/cart", "/api/account/favorites"].includes(pathname) && ["GET", "PUT"].includes(method)) {
           const body = method === "PUT" ? await readJson(req) : null;
-          return respond(200, accountList(db, user, pathname, method, body, product));
+          return respond(200, await accountList(db, user, pathname, method, body, product));
         }
         if (pathname === "/api/account/profile" && method === "GET") return respond(200, { user: publicUser(user), profile: JSON.parse(user.profile_json) });
         if (pathname === "/api/account/profile" && method === "PUT") {
           const data = await readJson(req);
           const name = text(data.name || user.name, "name", 120, true), profile = { phone: text(data.phone, "phone", 30) };
-          db.prepare("UPDATE users SET name=?,profile_json=? WHERE id=?").run(name, JSON.stringify(profile), user.id);
+          (await db.prepare("UPDATE users SET name=?,profile_json=? WHERE id=?").run(name, JSON.stringify(profile), user.id));
           return respond(200, { user: publicUser({ ...user, name }), profile });
         }
-        if (pathname === "/api/account/orders" && method === "GET") return respond(200, { items: db.prepare("SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").all(user.id).map(order) });
+        if (/^\/api\/account\/orders\/[^/]+\/simulate$/.test(pathname) && method === 'POST') return respond(200,{order:await orders.simulate(pathname.split('/')[4],await readJson(req),user)});
+        if (/^\/api\/account\/orders\/[^/]+\/payment$/.test(pathname) && method === 'POST') return respond(200,{order:await orders.payment(pathname.split('/')[4],await readJson(req),user)});
+        if (/^\/api\/account\/orders\/[^/]+\/reconcile$/.test(pathname) && method === 'POST') return respond(200,{order:await orders.reconcile(pathname.split('/')[4],user)});
+        if (pathname === "/api/account/orders" && method === "GET") return respond(200, { items: await Promise.all((await db.prepare("SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").all(user.id)).map(order)) });
         if (/^\/api\/account\/orders\/[^/]+$/.test(pathname) && method === "GET") {
-          const row = db.prepare("SELECT * FROM orders WHERE id=? AND user_id=?").get(pathname.split("/").at(-1), user.id);
+          const row = (await db.prepare("SELECT * FROM orders WHERE id=? AND user_id=?").get(pathname.split("/").at(-1), user.id));
           if (!row) throw new ApiError(404, "ORDER_NOT_FOUND", "Pedido não encontrado.");
-          return respond(200, order(row));
+          return respond(200, await order(row));
         }
       }
       if (pathname.startsWith("/api/catalog/")) {
@@ -439,37 +525,65 @@ function createApi(options = {}) {
       }
       if (pathname.startsWith("/api/admin")) {
         const user = auth(session, true);
-        if (pathname === "/api/admin/products" && method === "GET") return respond(200, listProducts(query, true));
-        if (pathname === "/api/admin/products" && method === "POST") return respond(201, saveProduct(await readJson(req), user.id));
+        if(pathname==='/api/admin/collections' && method==='GET') return respond(200,await collections.list(query));
+        if(pathname==='/api/admin/collections' && method==='POST') return respond(201,await collections.save(await readJson(req),user));
+        if(/^\/api\/admin\/collections\/[^/]+$/.test(pathname) && method==='PUT') return respond(200,await collections.save(await readJson(req),user,pathname.split('/').at(-1)));
+        if(pathname==='/api/admin/emails' && method==='GET') {
+          await flushEmails();
+          const rows=await db.prepare('SELECT id,payload_json,status,created_at,preview_json,last_error,attempts FROM email_outbox ORDER BY created_at DESC LIMIT 100').all();
+          return respond(200,{items:rows.map(row=>{
+            const payload=JSON.parse(row.payload_json),preview=JSON.parse(row.preview_json || 'null');
+            return {id:row.id,to:preview?.toMasked || String(payload.to).replace(/^(.{1,2})[^@]*(@.*)$/,'$1***$2'),subject:preview?.subject || payload.template,template:payload.template,status:row.status,createdAt:row.created_at,text:preview?.text || 'Mensagem na fila de envio.',demo,attempts:row.attempts,errorCode:row.last_error};
+          })});
+        }
+        if(/^\/api\/admin\/emails\/[^/]+\/retry$/.test(pathname) && method==='POST') {
+          const id=pathname.split('/')[4],entry=await db.prepare('SELECT * FROM email_outbox WHERE id=?').get(id);
+          if(!entry) throw new ApiError(404,'NOT_FOUND','E-mail não encontrado.');
+          if(entry.status==='SENT') throw new ApiError(409,'EMAIL_ALREADY_PROCESSED','Este e-mail já foi processado.');
+          if(entry.status==='PROCESSING' && entry.locked_until>Date.now()) throw new ApiError(409,'EMAIL_PROCESSING','Este e-mail já está sendo processado.');
+          await db.prepare("UPDATE email_outbox SET status='PENDING',next_attempt_at=?,locked_until=NULL WHERE id=?").run(Date.now(),id);
+          await flushEmails();
+          return respond(200,{queued:true,demo});
+        }
+        if (pathname === "/api/admin/products" && method === "GET") return respond(200, await listProducts(query, true));
+        if (pathname === "/api/admin/products" && method === "POST") return respond(201, await saveProduct(await readJson(req), user.id));
         if (/^\/api\/admin\/products\/[^/]+$/.test(pathname)) {
-          const id = pathname.split("/").at(-1), existing = db.prepare("SELECT * FROM products WHERE id=?").get(id);
+          const id = pathname.split("/").at(-1), existing = (await db.prepare("SELECT * FROM products WHERE id=?").get(id));
           if (!existing) throw new ApiError(404, "PRODUCT_NOT_FOUND", "Produto não encontrado.");
-          if (method === "GET") return respond(200, product(existing, true));
-          if (method === "PUT") return respond(200, saveProduct(await readJson(req), user.id, existing));
+          if (method === "GET") return respond(200, await product(existing, true));
+          if (method === "PUT") return respond(200, await saveProduct(await readJson(req), user.id, existing));
           if (method === "DELETE") {
-            transaction(db, () => {
-              db.prepare("UPDATE products SET archived=1,published=0,updated_at=? WHERE id=?").run(now(), id);
-              audit(user.id, "PRODUCT_ARCHIVED", id);
+            await transaction(db, async () => {
+              (await db.prepare("UPDATE products SET archived=1,published=0,updated_at=? WHERE id=?").run(now(), id));
+              await audit(user.id, "PRODUCT_ARCHIVED", id);
             });
             return respond(200, { archived: true });
           }
         }
-        if (pathname === "/api/admin/settings" && method === "GET") return respond(200, settings());
-        if (pathname === "/api/admin/settings" && method === "PUT") return respond(200, saveSettings(await readJson(req), user));
-        if (pathname === "/api/admin/coupons" && method === "GET") return respond(200, { items: db.prepare("SELECT * FROM coupons ORDER BY created_at DESC").all().map(coupon) });
-        if (pathname === "/api/admin/coupons" && method === "POST") return respond(201, saveCoupon(await readJson(req), user));
+        if (pathname === "/api/admin/settings" && method === "GET") return respond(200, await settings());
+        if (pathname === "/api/admin/settings" && method === "PUT") return respond(200, await saveSettings(await readJson(req), user));
+        if (pathname === "/api/admin/coupons" && method === "GET") return respond(200, { items: (await db.prepare("SELECT * FROM coupons ORDER BY created_at DESC").all()).map(coupon) });
+        if (pathname === "/api/admin/coupons" && method === "POST") return respond(201, await saveCoupon(await readJson(req), user));
         if (/^\/api\/admin\/coupons\/[^/]+$/.test(pathname) && method === "PUT") {
-          const c = db.prepare("SELECT * FROM coupons WHERE id=?").get(pathname.split("/").at(-1));
+          const c = (await db.prepare("SELECT * FROM coupons WHERE id=?").get(pathname.split("/").at(-1)));
           if (!c) throw new ApiError(404, "NOT_FOUND", "Cupom não encontrado.");
-          return respond(200, saveCoupon(await readJson(req), user, c));
+          return respond(200, await saveCoupon(await readJson(req), user, c));
         }
-        if (pathname === "/api/admin/orders" && method === "GET") return respond(200, { items: db.prepare("SELECT * FROM orders ORDER BY created_at DESC LIMIT 200").all().map(order) });
+        if (/^\/api\/admin\/orders\/[^/]+\/simulate$/.test(pathname) && method === 'POST') return respond(200,{order:await orders.simulate(pathname.split('/')[4],await readJson(req),user,true)});
+        if (/^\/api\/admin\/orders\/[^/]+\/reconcile$/.test(pathname) && method === 'POST') return respond(200,{order:await orders.reconcile(pathname.split('/')[4],user,true)});
+        if (/^\/api\/admin\/orders\/[^/]+\/shipping$/.test(pathname) && ['PATCH','PUT'].includes(method)) return respond(200,{order:await orders.shipping(pathname.split('/')[4],await readJson(req),user)});
+        if (/^\/api\/admin\/orders\/[^/]+$/.test(pathname) && method === 'GET') {
+          const row = await db.prepare('SELECT * FROM orders WHERE id=?').get(pathname.split('/').at(-1));
+          if(!row) throw new ApiError(404,'ORDER_NOT_FOUND','Pedido não encontrado.');
+          return respond(200,await order(row));
+        }
+        if (pathname === "/api/admin/orders" && method === "GET") return respond(200, { items: await Promise.all((await db.prepare("SELECT * FROM orders ORDER BY created_at DESC LIMIT 200").all()).map(order)) });
         if (pathname === "/api/admin/summary" && method === "GET") {
-          const count = (sql) => db.prepare(sql).get().value;
-          return respond(200, { products: count("SELECT COUNT(*) value FROM products WHERE archived=0"), published: count("SELECT COUNT(*) value FROM products WHERE archived=0 AND published=1"), stockUnits: count("SELECT COALESCE(SUM(v.stock),0) value FROM variants v JOIN products p ON p.id=v.product_id WHERE v.active=1 AND p.archived=0"), singles: count("SELECT COUNT(*) value FROM products WHERE archived=0 AND kind='SINGLE'"), sealed: count("SELECT COUNT(*) value FROM products WHERE archived=0 AND kind='SEALED'"), lowStock: count("SELECT COUNT(*) value FROM variants WHERE active=1 AND stock BETWEEN 1 AND 2"), outOfStock: count("SELECT COUNT(*) value FROM variants WHERE active=1 AND stock=0"), orders: count("SELECT COUNT(*) value FROM orders"), pendingOrders: count("SELECT COUNT(*) value FROM orders WHERE payment_status='PENDING'"), paidOrders: count("SELECT COUNT(*) value FROM orders WHERE payment_status='PAID'"), confirmedRevenueCents: count("SELECT COALESCE(SUM(total_cents),0) value FROM orders WHERE payment_status='PAID'") });
+          const count = async (sql) => (await db.prepare(sql).get()).value;
+          return respond(200, { products: await count("SELECT COUNT(*) value FROM products WHERE archived=0"), published: await count("SELECT COUNT(*) value FROM products WHERE archived=0 AND published=1"), stockUnits: await count("SELECT COALESCE(SUM(v.stock),0) value FROM variants v JOIN products p ON p.id=v.product_id WHERE v.active=1 AND p.archived=0"), singles: await count("SELECT COUNT(*) value FROM products WHERE archived=0 AND kind='SINGLE'"), sealed: await count("SELECT COUNT(*) value FROM products WHERE archived=0 AND kind='SEALED'"), lowStock: await count("SELECT COUNT(*) value FROM variants WHERE active=1 AND stock BETWEEN 1 AND 2"), outOfStock: await count("SELECT COUNT(*) value FROM variants WHERE active=1 AND stock=0"), orders: await count("SELECT COUNT(*) value FROM orders"), pendingOrders: await count("SELECT COUNT(*) value FROM orders WHERE payment_status='PENDING'"), paidOrders: await count("SELECT COUNT(*) value FROM orders WHERE payment_status IN('PAID','APPROVED')"), confirmedRevenueCents: await count("SELECT COALESCE(SUM(total_cents),0) value FROM orders WHERE payment_status IN('PAID','APPROVED')") });
         }
-        if (pathname === "/api/admin/inventory" && method === "GET") return respond(200, { items: db.prepare("SELECT s.*,p.name FROM stock_movements s JOIN variants v ON v.id=s.variant_id JOIN products p ON p.id=v.product_id ORDER BY s.created_at DESC LIMIT 200").all() });
-        if (pathname === "/api/admin/audit" && method === "GET") return respond(200, { items: db.prepare("SELECT * FROM admin_audit ORDER BY created_at DESC LIMIT 200").all() });
+        if (pathname === "/api/admin/inventory" && method === "GET") return respond(200, { items: (await db.prepare("SELECT s.*,p.name FROM stock_movements s JOIN variants v ON v.id=s.variant_id JOIN products p ON p.id=v.product_id ORDER BY s.created_at DESC LIMIT 200").all()) });
+        if (pathname === "/api/admin/audit" && method === "GET") return respond(200, { items: (await db.prepare("SELECT * FROM admin_audit ORDER BY created_at DESC LIMIT 200").all()) });
         if (pathname === "/api/admin/uploads" && method === "POST") {
           const data = await readJson(req, 12 * 1024 * 1024);
           const match = typeof data.dataUrl === "string" && data.dataUrl.match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/);
@@ -479,16 +593,16 @@ function createApi(options = {}) {
           const type = match[1], valid = type === "png" ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) : type === "jpeg" ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 : bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
           if (!valid) fail("INVALID_IMAGE", "O conteúdo do arquivo não corresponde ao formato informado.");
           const filename = uid() + "." + (type === "jpeg" ? "jpg" : type);
-          await fs.promises.mkdir(path.join(root, "uploads"), { recursive: true });
-          await fs.promises.writeFile(path.join(root, "uploads", filename), bytes, { flag: "wx" });
-          audit(user.id, "IMAGE_UPLOADED", filename, { size: bytes.length });
-          return respond(201, { url: "/uploads/" + filename, kind: "actual" });
+          const {createStorage}=require('./storage.cjs');
+          const uploaded=await createStorage({root,env}).upload({buffer:bytes,mime:'image/'+type,filename});
+          await audit(user.id, "IMAGE_UPLOADED", filename, { size: bytes.length });
+          return respond(201, uploaded);
         }
       }
       throw new ApiError(404, "NOT_FOUND", "Recurso não encontrado.");
     } catch (error) {
       let status = error.status || 500, code = error.code || "INTERNAL", message = error.message;
-      if (String(error.code || "").startsWith("SQLITE_CONSTRAINT") || /UNIQUE constraint failed/.test(error.message)) {
+      if (["23505","23514","23503"].includes(error.code) || String(error.code || "").startsWith("SQLITE_CONSTRAINT") || /UNIQUE constraint failed/.test(error.message)) {
         status = 409;
         code = "CONFLICT";
         message = "Já existe um registro com este SKU, URL ou combinação de variante.";
@@ -500,6 +614,7 @@ function createApi(options = {}) {
       respond(status, { error: { code, message, ...error.fields ? { fields: error.fields } : {} } });
     }
   }
-  return { handle, close: () => db.close(), db };
+  const handle = (req,res,pathname) => db.exclusive(() => dispatch(req,res,pathname));
+  return { handle, ready: db.ready, close: () => db.close(), db: db.raw || db, asyncStore: db };
 }
-module.exports = { createApi, ApiError, normalized };
+module.exports = { createApi, ApiError, normalized, readJson };

@@ -1,34 +1,19 @@
-# Estado do projeto — 15/10/2026
+# Pendências externas — Fase 2
 
-O prompt master descreve uma plataforma maior que esta primeira entrega integrada. Esta etapa entrega a identidade BKM e a fundação local. Não equivale à conclusão de todos os critérios do documento.
+O código inclui catálogo, administração, pedidos persistidos, reservas transacionais, pagamentos simulados, Storage Supabase, migrations PostgreSQL, adaptadores Mercado Pago/Resend e configuração Vercel. O seed não contém contas ou credenciais padrão.
 
-## Implementado
+## Provisionamento e validação remota
 
-- Logo BKM, paleta da marca e animação preservada.
-- Banco persistente, migrations, autenticação e administração autorizada no servidor.
-- Cadastro/edição de lacrados e cartas, variantes, imagens, preços, estoque e publicação local.
-- Consulta TCGdex por idioma/coleção/número, cache, timeout e alternativa manual.
-- Catálogo paginado, busca/filtros reais, páginas de produto, favoritos e carrinho persistente.
-- Cotação de carrinho, preço/estoque no servidor, cupons básicos e frete fixo por faixas de CEP.
-- Configurações de loja, conta/admin e consultas de pedidos com estados vazios reais.
-- Checkout com informação explícita de pagamento indisponível.
+- Supabase: o painel solicitou login do proprietário. Sem essa autenticação, ainda não foram criados nem verificados projeto, tabelas, bucket e dados no serviço remoto. Os testes PostgreSQL locais usam PGlite e não comprovam provisionamento Supabase.
+- Vercel: a conta autenticada é Hobby e o painel mostrou CPU/memória acima das cotas gratuitas. A aplicação foi adaptada para funções Node e banco externo. Deploy e testes online só podem ser considerados aprovados após conferir a URL e os fluxos reais.
+- Navegador local: a loja abriu e foram conferidos home, lacrados, produto e drawer. Após a retomada, as abas do usuário estavam na página de erro; o servidor foi iniciado em segundo plano em localhost:4173 e foi solicitada recarga manual porque o controle do navegador bloqueou a página de erro. Os cenários restantes precisam dessa recarga para validação visual.
 
-## Próxima prioridade: pedidos e pagamentos
+## Credenciais e ativação posterior
 
-1. Criação de pedido idempotente com snapshots e reservas transacionais.
-2. Expiração/liberação/baixa das reservas e teste de dois clientes para a última unidade.
-3. Orders API Mercado Pago em ambiente de teste confirmado, cartão tokenizado e Pix de teste.
-4. Webhook conectado aos pedidos, confirmação remota, reconciliação, reembolso e auditoria financeira.
-5. Testes de ponta a ponta em sandbox antes de habilitação produtiva.
+- Mercado Pago: credenciais seguras de teste, vendedor e webhook; executar homologação real de Pix/cartão, notificações/retries, reconciliação e cenários financeiros em sandbox. A estrutura de checkout, SDK oficial tokenizado e fluxo transacional estão no código. Nenhuma cobrança externa foi realizada.
+- Resend: API key, domínio e remetente verificados, URLs definitivas e testes reais de entrega. A demonstração gera somente prévias privadas; não envia e-mails externos.
+- Domínio próprio: nome e acesso ao DNS ainda não fornecidos.
+- Frete operacional: provedor/contrato real ainda não fornecido. Frete e rastreamento demonstrativos não contratam transporte nem geram etiquetas.
+- Operação comercial: infraestrutura/plano compatíveis, backups e restauração, dados empresariais e políticas definitivas, logística e validação dos provedores. Vercel Hobby permanece apenas demonstração não comercial.
 
-## Operação e administração pendentes
-
-Recuperação/verificação de e-mail; troca de senha; endereços e operadores; gestão completa de pedidos/envio/rastreamento/cancelamento; importação/edição em massa; aliases administráveis de coleções; condições configuráveis; banners e ordenação completa da home; mais vendidos a partir de vendas confirmadas; cupons segmentados/por cliente; provedor logístico e etiquetas; políticas finais e dados empresariais reais.
-
-Também faltam os filtros avançados completos na interface (raridade, tipo, série, acabamento e faixa de preço), campos comerciais extensos de lacrados, zoom de galeria e a vitrine de recomendações. Os filtros já disponíveis são busca, coleção, idioma, condição, disponibilidade e ordenação. A API possui filtros adicionais de preço e acabamento preparados, mas a interface ainda não os expõe.
-
-## Preparação produtiva pendente
-
-Hospedagem, domínio, HTTPS, cookies Secure atrás do proxy, armazenamento e backups; revisão de segurança/abuso/logs; avaliação PostgreSQL conforme operação; SEO por produto no servidor, sitemap e dados estruturados reais; ampliação de testes ponta a ponta e acessibilidade.
-
-A licença do banco de metadados não comprova, por si só, autorização comercial de todas as ilustrações Pokémon. Consulte as fontes em INTEGRACOES.md.
+O estado executado e as evidências ficam em VALIDACAO.md. Não confundir módulos preparados, testes locais e configuração realmente confirmada em contas externas.
