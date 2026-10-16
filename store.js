@@ -9,7 +9,8 @@ const conditions = { NM: "Near Mint", LP: "Levemente jogada", MP: "Moderadamente
 const finishes = { NORMAL: "Normal", HOLO: "Holo", REVERSE: "Reverse holo", FOIL: "Foil" };
 const paymentLabels = {APPROVED:"Aprovado",PENDING:"Pendente",REJECTED:"Recusado",CANCELLED:"Cancelado",EXPIRED:"Expirado",REVIEW:"Em análise",REFUNDED:"Estornado",CHARGEBACK:"Contestado"};
 const orderLabels = {CONFIRMED:"Confirmado",PENDING:"Aguardando pagamento",PAYMENT_REVIEW:"Pagamento em análise",CANCELLED:"Cancelado",EXPIRED:"Expirado",PROCESSING:"Em preparação",SHIPPED:"Enviado",DELIVERED:"Entregue",UNFULFILLED:"A preparar"};
-const isDemo = () => state.config.demo === true || state.config.environment === "demo";
+const isLocalHost = () => ["localhost","127.0.0.1","::1","[::1]", ""].includes(location.hostname);
+const isDemo = () => state.config.demo === true || state.config.environment === "demo" || (!state.apiReady && !isLocalHost());
 const demoNotice = () => isDemo() ? el("div",{class:"shop-demo-note"},el("strong",{},"AMBIENTE DE DEMONSTRAÇÃO"),el("span",{},"Produtos e valores ilustrativos. Pedidos de teste, sem cobranças ou envios reais.")) : null;
 const icons = { search: "\u2315", heart: "\u2661", bag: "\u25B1", user: "\u25EF", menu: "\u2630", close: "\xD7", arrow: "\u2197", plus: "+", minus: "\u2212" };
 let pageVersion = 0;
@@ -247,7 +248,7 @@ function renderNav() {
   let notice=document.querySelector("#shop-demo-banner");
   if(isDemo()){
     if(!notice){notice=el("div",{id:"shop-demo-banner",class:"shop-demo-banner"});document.body.prepend(notice);}
-    setChildren(notice,el("span",{},"DEMONSTRAÇÃO"),"Sem vendas ou cobranças reais. Explore a loja e simule pedidos.",link("Acessar loja ↓","/busca"));
+    setChildren(notice,el("span",{},"DEMONSTRAÇÃO"),state.apiReady?"Sem vendas ou cobranças reais. Explore a loja e simule pedidos.":"Sem vendas ou cobranças reais. Catálogo, conta e pedidos aguardam conexão ao banco de dados.",state.apiReady?link("Acessar loja ↓","/busca"):link("Ver a experiência ↓","/"));
   }else notice?.remove();
 }
 function setupSearchSuggestions(form){
@@ -299,7 +300,8 @@ async function renderRoute() {
   document.title = `${home ? "A sua pr\xF3xima descoberta" : path.startsWith("/admin") ? "Administra\xE7\xE3o" : "Loja Pok\xE9mon"} \xB7 BKM TCG`;
   try {
     if (!state.apiReady) {
-      mount.replaceChildren(el("div", { class: "shop-shell" }, empty("Vamos conectar sua loja.", "A experi\xEAncia visual est\xE1 dispon\xEDvel. Para usar cat\xE1logo, estoque e conta, abra a loja pelo servidor local.", el("div", { class: "shop-actions" }, button("Tentar conectar", async () => {
+      const local=isLocalHost();
+      mount.replaceChildren(el("div", { class: "shop-shell" }, empty(local?"Vamos conectar sua loja.":"Demonstração online aguardando conexão ao banco de dados.", local?"A experiência visual está disponível. Para usar catálogo, estoque e conta, abra a loja pelo servidor local.":"Catálogo, conta e pedidos estarão disponíveis após a configuração do Supabase.", el("div", { class: "shop-actions" }, button("Tentar conectar", async () => {
         await initialize();
         renderRoute();
       }), link("Ver a experi\xEAncia", "/", "shop-button secondary")))));
@@ -1128,6 +1130,7 @@ async function initialize() {
   renderNav();
 }
 if (navMount && mount && overlay) {
+  renderNav();
   await initialize();
   await renderRoute();
 }

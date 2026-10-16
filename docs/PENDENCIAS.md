@@ -5,7 +5,7 @@ O código inclui catálogo, administração, pedidos persistidos, reservas trans
 ## Provisionamento e validação remota
 
 - Supabase: o painel solicitou login do proprietário. Sem essa autenticação, ainda não foram criados nem verificados projeto, tabelas, bucket e dados no serviço remoto. Os testes PostgreSQL locais usam PGlite e não comprovam provisionamento Supabase.
-- Vercel: a conta autenticada é Hobby e o painel mostrou CPU/memória acima das cotas gratuitas. A aplicação foi adaptada para funções Node e banco externo. Deploy e testes online só podem ser considerados aprovados após conferir a URL e os fluxos reais.
+- Vercel: projeto gratuito `bkm-tcg-demo` criado e vinculado à `main`; build e deploy da correção `0d0c271` chegaram a Ready. A URL https://bkm-tcg-demo.vercel.app foi aberta no navegador. A experiência visual está publicada; catálogo, contas e pedidos online aguardam o Supabase. A API responde 503/NOT_CONFIGURED sem banco e não usa persistência temporária. Portanto, o e-commerce online completo ainda não está concluído. O aviso de cotas excedidas da conta foi observado, mas não bloqueou esse deploy.
 - Navegador local: a loja abriu e foram conferidos home, lacrados, produto e drawer. Após a retomada, as abas do usuário estavam na página de erro; o servidor foi iniciado em segundo plano em localhost:4173 e foi solicitada recarga manual porque o controle do navegador bloqueou a página de erro. Os cenários restantes precisam dessa recarga para validação visual.
 
 ## Credenciais e ativação posterior

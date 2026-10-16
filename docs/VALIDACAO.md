@@ -21,10 +21,12 @@ Após a retomada, o navegador estava na página de erro e o controle de navegado
 
 ## Serviços externos
 
-GitHub: repositório oficial confirmado com acesso de escrita; código-base enviado à branch main, commit inicial af355c7baa840a7caf9effd05798c376101383a3. A atualização Fase 2 deve ser identificada pelo commit final no Git.
+GitHub: repositório oficial confirmado com acesso de escrita; Fase 2 publicada na main, commit e5e04b6aac397aa2472560cce41730186732c130, seguido da correção de função Vercel 0d0c27196265c6b3f83894e30518494cd84b0ba2. O CI da Fase 2 concluiu com sucesso: https://github.com/zKaminise/BKM-TCG/actions/runs/38834029240. O Git registra o commit final vigente.
 
 Supabase: solicitou login; projeto remoto, tabelas e Storage não foram confirmados.
 
-Vercel: conta autenticada Hobby; painel mostrou cotas gratuitas de CPU/memória excedidas. Deploy e cenários online ainda não aprovados.
+Vercel: projeto gratuito bkm-tcg-demo criado e conectado ao repositório. O primeiro build identificou entrada .cjs não reconhecida; corrigida para api/index.js. O push 0d0c271 acionou automaticamente outro deploy, que ficou Ready. Domínio bkm-tcg-demo.vercel.app com Valid Configuration; URL pública aberta no navegador e animação carregada. /api/config confirmou HTTP 503 NOT_CONFIGURED, pois o Supabase ainda não foi provisionado. Catálogo e checkout online continuam não aprovados. Não houve bloqueio desse deploy por cota, apesar do aviso de uso excedido na conta.
+
+Diretório oficial D: atualizado, dependências instaladas, seed de 14 produtos aplicado ao banco local dedicado e 106 testes aprovados novamente nesse diretório. O servidor foi reiniciado usando os arquivos oficiais; a API manteve os 14 produtos e as quatro coleções. O endereço /ABRIR.html redirecionou corretamente à loja completa.
 
 Nunca inferir aprovação de deploy apenas pela presença de arquivos vercel.json, migrations ou módulos de integração.
