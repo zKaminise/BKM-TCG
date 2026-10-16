@@ -3,7 +3,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": null,
-  "functions": { "api/index.cjs": { "maxDuration": 60, "includeFiles": "server/**" } },
+  "functions": { "api/index.js": { "maxDuration": 60, "includeFiles": "server/**" } },
   "redirects": [{ "source": "/ABRIR.html", "destination": "/", "permanent": false }],
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/index" },

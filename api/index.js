@@ -1,6 +1,7 @@
-const { createApi } = require('../server/api.cjs');
+import apiModule from '../server/api.cjs';
+const { createApi } = apiModule;
 let api;
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   const publicUrl = process.env.BKM_PUBLIC_URL;
   if (!publicUrl || !process.env.DATABASE_URL) {
     res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -12,4 +13,4 @@ module.exports = async function handler(req, res) {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-Frame-Options', 'DENY');
   return api.handle(req, res, new URL(req.url, publicUrl).pathname);
-};
+}
