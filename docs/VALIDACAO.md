@@ -30,3 +30,11 @@ Vercel: projeto gratuito bkm-tcg-demo criado e conectado ao repositório. O prim
 Diretório oficial D: atualizado, dependências instaladas, seed de 14 produtos aplicado ao banco local dedicado e 106 testes aprovados novamente nesse diretório. O servidor foi reiniciado usando os arquivos oficiais; a API manteve os 14 produtos e as quatro coleções. O endereço /ABRIR.html redirecionou corretamente à loja completa.
 
 Nunca inferir aprovação de deploy apenas pela presença de arquivos vercel.json, migrations ou módulos de integração.
+
+## Verificação complementar da entrega
+
+No servidor oficial em localhost:4173, foi criado pelo HTTP um cliente fictício e um pedido DEMO com dois boosters. O servidor calculou R$ 29,80 de produtos + R$ 15,00 de frete = R$ 44,80, aprovou somente a simulação e baixou estoque de 20 para 18. Repetir a mesma solicitação retornou o mesmo pedido sem outra baixa. Após reiniciar o processo Node, pedido, sessão e estoque continuaram armazenados. Essa verificação usa a API real da aplicação; não foi uma execução visual do formulário.
+
+A URL pública final foi recarregada após o push 7554aed e mostrou DEMONSTRAÇÃO e a mensagem explícita de conexão Supabase pendente. Home/animação verificadas online em viewport 390x844: pacote, carta saindo de costas e Pikachu revelado; sem overflow horizontal. Evidências bkm-online-mobile.jpg e bkm-online-carta-mobile.jpg. Os demais cenários comerciais online continuam bloqueados pela ausência de banco remoto.
+
+CI também aprovado no commit 7554aed: https://github.com/zKaminise/BKM-TCG/actions/runs/38834710878.
