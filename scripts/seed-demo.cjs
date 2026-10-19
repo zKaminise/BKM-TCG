@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const root = path.resolve(__dirname, '..');
-if (fs.existsSync(path.join(root, '.env')) && process.loadEnvFile) process.loadEnvFile(path.join(root, '.env'));
+if (require.main === module) require('../server/env.cjs').loadProjectEnvFile(path.join(root, '.env'));
 const { openStore } = require('../server/store.cjs');
 const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\b0+(?=\d)/g, '');
 const uuid = value => { const h = crypto.createHash('sha256').update('bkm-demo-v1:' + value).digest('hex'); return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20,32)}`; };

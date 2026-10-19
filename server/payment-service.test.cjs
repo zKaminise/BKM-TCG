@@ -147,7 +147,7 @@ for(const engine of ['sqlite','postgres'])test('ledger Mercado Pago com banco '+
     const first=await outbox.enqueue(message),again=await outbox.enqueue({...message,data:{demo:true,name:'Teste'}});assert.equal(first.id,again.id);
     await assert.rejects(outbox.enqueue({...message,to:'other@example.test'}),error=>error.code==='EMAIL_EVENT_CONFLICT');
     // Isolate the row so a queue filled by the previous scenarios cannot mask it.
-    await db.prepare("UPDATE email_outbox SET next_attempt_at=? WHERE id<>?").run(at+86400000,first.id);
+    await db.prepare("UPDATE email_outbox SET next_attempt_at=? WHERE id<>?").run(Date.now()+86400000,first.id);
     const row=(await outbox.claimDue({limit:1,now:Date.now(),leaseUntil:Date.now()+1000}))[0];assert.equal(row.id,first.id);
     const newer=(await outbox.claimDue({limit:1,now:Date.now()+2000,leaseUntil:Date.now()+10000}))[0];assert.equal(newer.id,first.id);
     assert.equal((await outbox.complete(row.id,{providerId:'stale',claim:row.claim})).changes,0);

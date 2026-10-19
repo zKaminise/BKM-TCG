@@ -1,7 +1,7 @@
 const fs=require('node:fs');
 const path=require('node:path');
 const envFile=path.resolve(__dirname,'../.env');
-if(fs.existsSync(envFile) && process.loadEnvFile) process.loadEnvFile(envFile);
+require('../server/env.cjs').loadProjectEnvFile(envFile);
 const {openStore}=require('../server/store.cjs');
 (async()=>{
   const store=openStore();

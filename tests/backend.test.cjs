@@ -19,7 +19,7 @@ test('API integrada: sessões, RBAC, inventário, preços, cupons, frete e priva
   const root=dir,dbPath=path.join(dir,'store.sqlite');
   fs.writeFileSync(path.join(root,'index.html'),'<!doctype html><title>Teste descartável</title>');
   fs.writeFileSync(path.join(root,'app.js'),'/* recurso público de teste */');
-  const server=createServer({root,dbPath,env:{...process.env,BKM_ENVIRONMENT:'demo',PAYMENT_PROVIDER:'disabled'}});server.listen(0,'127.0.0.1');await once(server,'listening');
+  const server=createServer({root,dbPath,databaseUrl:'',env:{BKM_ENVIRONMENT:'demo',PAYMENT_PROVIDER:'disabled',EMAIL_PROVIDER:'development'}});server.listen(0,'127.0.0.1');await once(server,'listening');
   const base='http://127.0.0.1:'+server.address().port;
   t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));fs.rmSync(dir,{recursive:true,force:true});});
   class Client{constructor(){this.cookie='';this.csrf='';}async call(route,{method='GET',body,headers={}}={}){const res=await fetch(base+route,{method,headers:{...(this.cookie?{cookie:this.cookie}:{}),...(this.csrf?{'x-csrf-token':this.csrf}:{}),...(body?{'content-type':'application/json'}:{}),...headers},body:body?JSON.stringify(body):undefined});const set=res.headers.get('set-cookie');if(set)this.cookie=set.split(';')[0];const type=res.headers.get('content-type')||'';const data=type.includes('json')?await res.json():await res.text();if(data.csrfToken)this.csrf=data.csrfToken;return {res,data,status:res.status};}async session(){return this.call('/api/session');}}

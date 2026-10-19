@@ -3,8 +3,8 @@ if(major<22||(major===22&&minor<13)){console.error('Instale o Node.js 22.13 ou m
 const fs=require('node:fs'),path=require('node:path');
 const root=path.resolve(__dirname,'..');
 const envFile=path.join(root,'.env');
-if(!fs.existsSync(envFile))fs.copyFileSync(path.join(root,'.env.example'),envFile,fs.constants.COPYFILE_EXCL);
-if(process.loadEnvFile)process.loadEnvFile(envFile);
+if(process.env.BKM_SKIP_DOTENV!=='true' && process.env.NODE_ENV!=='test' && !process.env.NODE_TEST_CONTEXT && !fs.existsSync(envFile))fs.copyFileSync(path.join(root,'.env.example'),envFile,fs.constants.COPYFILE_EXCL);
+require('../server/env.cjs').loadProjectEnvFile(envFile);
 const {createServer}=require('../serve.cjs');
 const {spawn}=require('node:child_process');
 const port=Number(process.env.PORT||4173);

@@ -2,7 +2,7 @@ const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const envFile = path.join(__dirname, '.env');
-if (fs.existsSync(envFile) && process.loadEnvFile) process.loadEnvFile(envFile);
+if (require.main === module) require('./server/env.cjs').loadProjectEnvFile(envFile);
 const { createApi } = require("./server/api.cjs");
 const mime = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".ico": "image/x-icon", ".woff2": "font/woff2", ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8" };
 function createServer(options = {}) {

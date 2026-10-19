@@ -228,15 +228,33 @@ window.addEventListener("popstate", () => {
 function heading(kicker, title, description) {
   return el("div", { class: "shop-heading" }, el("p", { class: "shop-kicker" }, kicker), el("h1", {}, title), description ? el("p", { class: "shop-lead" }, description) : null);
 }
+function prepareCommerceShell() {
+  const openPack = document.querySelector("#open-pack");
+  if (openPack && !openPack.closest(".shop-hero-actions")) {
+    const actions = el("div", { class: "shop-hero-actions" });
+    openPack.before(actions);
+    openPack.classList.add("shop-experience-button");
+    openPack.replaceChildren("Ver animação", el("span", { "aria-hidden": true }, "↘"));
+    actions.append(link(["Explorar loja", el("span", { "aria-hidden": true }, "↗")], "/busca", "primary shop-hero-cta"), openPack);
+  }
+  const footer = document.querySelector("footer");
+  if (footer && !footer.querySelector(".shop-footer-nav")) {
+    const links = el("nav", { class: "shop-footer-nav", "aria-label": "Informações e acesso à loja" },
+      link("Catálogo", "/busca"), link("Coleções", "/colecoes"), link("Atendimento", "/contato"),
+      link("Envio e entrega", "/envio"), link("Privacidade", "/privacidade"), link("Painel administrativo", "/admin"));
+    footer.querySelector(".footer-small")?.before(links);
+  }
+}
 function renderNav() {
   if (!navMount) return;
+  prepareCommerceShell();
   const count = state.cart.reduce((n, item) => n + item.quantity, 0);
   const form = el("form", { class: "shop-search", role: "search", onSubmit: (e) => {
     e.preventDefault();
     const q = new FormData(form).get("q").trim();
     navigate(`/busca${q ? `?q=${encodeURIComponent(q)}` : ""}`);
   } }, el("label", { class: "sr-only", for: "shop-search-q" }, "Buscar produtos"), el("input", { id: "shop-search-q", name: "q", type: "search", placeholder: "Busque sua pr\xF3xima carta", autocomplete: "off", value: new URLSearchParams(location.search).get("q") || "" }), button(icons.search, () => form.requestSubmit(), "shop-icon", { "aria-label": "Buscar produtos" }));
-  const links = el("nav", { class: "shop-navigation", "aria-label": "Navega\xE7\xE3o da loja" }, link("Lacrados", "/lacrados"), link("Cartas avulsas", "/cartas"), link("Coleções", "/colecoes"), link("A experiência", "/"), state.user?.role === "ADMIN" ? link("Administrar", "/admin") : link("Sobre a BKM", "/sobre"));
+  const links = el("nav", { class: "shop-navigation", "aria-label": "Navega\xE7\xE3o da loja" }, link("Loja", "/busca"), link("Lacrados", "/lacrados"), link("Cartas avulsas", "/cartas"), link("Coleções", "/colecoes"), state.user?.role === "ADMIN" ? link("Administrar", "/admin") : link("Sobre a BKM", "/sobre"));
   const actions = el("div", { class: "shop-nav-actions" }, link(el("span", { "aria-hidden": true }, icons.heart), "/favoritos", "shop-icon"), link(el("span", { "aria-hidden": true }, icons.user), state.user ? "/conta" : "/entrar", "shop-icon"), button([el("span", { "aria-hidden": true }, icons.bag), el("span", { class: "shop-cart-count" }, count)], () => openCart(), "shop-icon", { "aria-label": `Abrir carrinho, ${count} ${count === 1 ? "item" : "itens"}` }));
   actions.children[0].setAttribute("aria-label", "Meus favoritos");
   actions.children[1].setAttribute("aria-label", state.user ? "Minha conta" : "Entrar na conta");

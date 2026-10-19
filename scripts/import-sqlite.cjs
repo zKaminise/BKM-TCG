@@ -1,7 +1,7 @@
 const fs=require('node:fs');
 const path=require('node:path');
 const envFile=path.resolve(__dirname,'../.env');
-if(fs.existsSync(envFile) && process.loadEnvFile) process.loadEnvFile(envFile);
+if (require.main === module) require('../server/env.cjs').loadProjectEnvFile(envFile);
 const {DatabaseSync}=require('node:sqlite');
 const {openStore}=require('../server/store.cjs');
 const tables=['users','card_metadata','collections','products','variants','coupons','settings','orders','order_items','inventory_reservations','stock_movements','admin_audit','account_lists','addresses','shipments','payments','payment_events','order_history','email_outbox'];

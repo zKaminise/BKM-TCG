@@ -437,9 +437,11 @@ function createApi(options = {}) {
         const data = await readJson(req);
         const email = text(data.email, "email", 254, true).toLowerCase(), password = typeof data.password === "string" ? data.password : "";
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail("VALIDATION", "Informe um e-mail válido.");
-        if (password.length < 12 || password.length > 128) fail("VALIDATION", "A senha deve ter entre 12 e 128 caracteres.");
+        const registering = pathname.endsWith('/register');
+        if (registering && (password.length < 12 || password.length > 128)) fail("VALIDATION", "A senha deve ter entre 12 e 128 caracteres.");
+        if (!registering && (!password.length || password.length > 128)) throw new ApiError(401, "INVALID_CREDENTIALS", "E-mail ou senha incorretos.");
         let user = (await db.prepare("SELECT * FROM users WHERE email=?").get(email));
-        if (pathname.endsWith("/register")) {
+        if (registering) {
           if (user) fail("REGISTRATION_UNAVAILABLE", "Não foi possível cadastrar este e-mail. Tente entrar ou contate a loja.");
           const name = text(data.name, "name", 120, true);
           const id = uid();
@@ -448,7 +450,8 @@ function createApi(options = {}) {
           return respond(201, await newSession(res, id, session));
         }
         const valid = await verifyPassword(password, user?.password_hash || dummyPassword);
-        if (!user || !valid) throw new ApiError(401, "INVALID_CREDENTIALS", "E-mail ou senha incorretos.");
+        const minimum = demo && user?.role === 'ADMIN' ? 8 : 12;
+        if (!user || !valid || password.length < minimum) throw new ApiError(401, "INVALID_CREDENTIALS", "E-mail ou senha incorretos.");
         return respond(200, await newSession(res, user.id, session));
       }
       if (method === "POST" && pathname === "/api/auth/logout") {
