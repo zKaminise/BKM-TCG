@@ -13,7 +13,7 @@ esbuild.build({stdin:{contents:source,resolveDir:root,sourcefile:'app.js'},bundl
   let html=fs.readFileSync(path.join(root,'index.html'),'utf8');
   // Commerce needs a server and a database. This export contains the presentation
   // only, so opening a local file never suggests a working offline checkout.
-  html=html.replace(/<link[^>]*data-commerce[^>]*>/g,'').replace(/<script[^>]*data-commerce[^>]*><\/script>/g,'').replace(/<(div|section)[^>]*data-commerce[^>]*><\/\1>/g,'');
+  html=html.replace(/<link[^>]*data-commerce[^>]*>/g,'').replace(/<script[^>]*data-commerce[^>]*>[\s\S]*?<\/script>/g,'').replace(/<(div|section)[^>]*data-commerce[^>]*><\/\1>/g,'');
   html=html.replace('<link rel="stylesheet" href="/styles.css">',()=>`<style>${fs.readFileSync(path.join(root,'styles.css'),'utf8')}</style>`);
   html=html.replace('<script type="module" src="/app.js"></script>',()=>`<script>${result.outputFiles[0].text.replaceAll('</script','<\\/script')}</script>`);
   html=html.replace(/(src|href)="(\/?assets\/[^\"]+)"/g,(match,attr,p)=>assets[p.replace(/^\//,'')]?`${attr}="${assets[p.replace(/^\//,'')]}"`:match);

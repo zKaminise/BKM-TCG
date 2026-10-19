@@ -16,7 +16,7 @@ const icons = { search: "\u2315", heart: "\u2661", bag: "\u25B1", user: "\u25EF"
 let pageVersion = 0;
 let routeCleanup=null;
 let mercadoPagoSdkPromise=null;
-let state = { user: null, csrfToken: "", config: {}, apiReady: false, cart: asArray(readLocal("bkm-cart-v1", [])).filter(item => item && typeof item.variantId === "string" && Number.isInteger(item.quantity) && item.quantity > 0), favorites: asArray(readLocal("bkm-favorites-v1", [])).filter(item => item && typeof item.id === "string" && typeof item.slug === "string"), drawer: false };
+let state = { user: null, csrfToken: "", config: {}, apiReady: false, initializing: true, cart: asArray(readLocal("bkm-cart-v1", [])).filter(item => item && typeof item.variantId === "string" && Number.isInteger(item.quantity) && item.quantity > 0), favorites: asArray(readLocal("bkm-favorites-v1", [])).filter(item => item && typeof item.id === "string" && typeof item.slug === "string"), drawer: false };
 let catalogCache = /* @__PURE__ */ new Map();
 function readLocal(key, fallback) {
   try {
@@ -266,7 +266,8 @@ function renderNav() {
   let notice=document.querySelector("#shop-demo-banner");
   if(isDemo()){
     if(!notice){notice=el("div",{id:"shop-demo-banner",class:"shop-demo-banner"});document.body.prepend(notice);}
-    setChildren(notice,el("span",{},"DEMONSTRAÇÃO"),state.apiReady?"Sem vendas ou cobranças reais. Explore a loja e simule pedidos.":"Sem vendas ou cobranças reais. Catálogo, conta e pedidos aguardam conexão ao banco de dados.",state.apiReady?link("Acessar loja ↓","/busca"):link("Ver a experiência ↓","/"));
+    const noticeText=state.initializing?"Sem vendas ou cobranças reais.":state.apiReady?"Sem vendas ou cobranças reais. Explore a loja e simule pedidos.":"Sem vendas ou cobranças reais. Catálogo, conta e pedidos aguardam conexão ao banco de dados.";
+    setChildren(notice,el("span",{},"DEMONSTRAÇÃO"),noticeText,state.initializing?null:state.apiReady?link("Acessar loja ↓","/busca"):link("Ver a experiência ↓","/"));
   }else notice?.remove();
 }
 function setupSearchSuggestions(form){
@@ -317,6 +318,7 @@ async function renderRoute() {
   mount.replaceChildren(loading());
   document.title = `${home ? "A sua pr\xF3xima descoberta" : path.startsWith("/admin") ? "Administra\xE7\xE3o" : "Loja Pok\xE9mon"} \xB7 BKM TCG`;
   try {
+    if (state.initializing) return;
     if (!state.apiReady) {
       const local=isLocalHost();
       mount.replaceChildren(el("div", { class: "shop-shell" }, empty(local?"Vamos conectar sua loja.":"Demonstração online aguardando conexão ao banco de dados.", local?"A experiência visual está disponível. Para usar catálogo, estoque e conta, abra a loja pelo servidor local.":"Catálogo, conta e pedidos estarão disponíveis após a configuração do Supabase.", el("div", { class: "shop-actions" }, button("Tentar conectar", async () => {
@@ -1135,6 +1137,8 @@ function infoPage(path) {
   return el("div", { class: "shop-shell shop-info" }, heading("BKM TCG", page[0], page[1]), content, path != "/contato" ? link("Fale com a BKM \u2197", "/contato", "shop-text-link") : null);
 }
 async function initialize() {
+  state.initializing = true;
+  renderNav();
   try {
     const [session, config] = await Promise.all([api("/session"), api("/config")]);
     state.user = session.user;
@@ -1145,9 +1149,14 @@ async function initialize() {
   } catch {
     state.apiReady = false;
   }
+  state.initializing = false;
   renderNav();
 }
 if (navMount && mount && overlay) {
+  const path = location.pathname.replace(/\/$/, "") || "/";
+  setHome(["/", "/index.html", "/ABRIR.html"].includes(path));
+  mount.replaceChildren(loading("Abrindo a loja…"));
+  document.documentElement.classList.remove("shop-bootstrap-page");
   renderNav();
   await initialize();
   await renderRoute();
