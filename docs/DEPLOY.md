@@ -1,5 +1,13 @@
 # Provisionamento BKM TCG
 
+## Estado implantado
+
+Em **19/10/2026**, a demonstração está conectada e publicada em [bkm-tcg-demo.vercel.app](https://bkm-tcg-demo.vercel.app/), a partir da branch `main` de [zKaminise/BKM-TCG](https://github.com/zKaminise/BKM-TCG). O Supabase dedicado `bkm-tcg-demo`, referência `nxrvmanifngjmdtgnzoq`, está no plano Free, região São Paulo, com 22 tabelas, migrations 1–3 e RLS conferidos. O pooler usado é `aws-1-sa-east-1.pooler.supabase.com:6543`.
+
+Os dados locais da demonstração foram importados ao PostgreSQL e o primeiro administrador já foi criado. Login administrativo online, upload 4K ao bucket `bkm-public`, edição de catálogo, checkout móvel e concorrência real entre dois pools foram verificados. A autenticação continua sendo a da BKM. Não recrie o projeto nem execute bootstrap de administrador para apenas abrir a instalação existente. Consulte [VALIDACAO.md](VALIDACAO.md) para os cenários e evidências, e [PENDENCIAS.md](PENDENCIAS.md) para ativação comercial.
+
+As etapas seguintes documentam a configuração e sua reprodução em um novo ambiente dedicado. Segredos são mantidos no `.env` privado e nas variáveis de servidor Vercel.
+
 ## Separação dos ambientes
 
 Use um projeto Supabase dedicado **bkm-tcg-demo** e um projeto Vercel **bkm-tcg-demo**. Nenhuma migração ou seed deve atingir bancos de outros aplicativos. A demonstração usa `BKM_ENVIRONMENT=demo`, `PAYMENT_PROVIDER=mock`, `EMAIL_PROVIDER=development` e `HOSTING_DEMO_ONLY=true`. Um projeto comercial futuro usa outro banco, credenciais e infraestrutura compatíveis.
@@ -10,7 +18,15 @@ Crie o projeto em uma organização Free com cota disponível, preferindo regiã
 
 No diálogo **Connect**, use o **Shared pooler / Transaction**, porta 6543, recomendado para funções serverless. Salve a URI completa com senha codificada corretamente apenas em `DATABASE_URL` do `.env` privado e das variáveis de servidor Vercel. Use `BKM_DB_POOL_SIZE=1` e TLS com verificação de certificado; configure `DATABASE_CA_CERT` quando necessário. Não desative a validação de TLS.
 
-Execute com o `.env` apontando para esse projeto:
+Para salvar a conexão local sem expor a senha, execute **CONECTAR SUPABASE.cmd** e informe host, referência do projeto e a senha do banco já criada no painel. Também é possível preencher os dados públicos previamente:
+
+```powershell
+npm run db:configure -- --host aws-0-sa-east-1.pooler.supabase.com --project abcdefghijklmnopqrst
+```
+
+Use o host e a referência reais do seu projeto, copiados do painel. O exemplo não é uma conexão utilizável. O assistente aceita somente o pooler Supabase na porta 6543, exige terminal interativo e confirmação da senha oculta, codifica a senha e atualiza atomicamente apenas `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_STORAGE_BUCKET` e `BKM_DB_POOL_SIZE` no `.env` privado. Ele preserva outras chaves e não verifica a conexão nem cria infraestrutura. Não passe senha por argumento, pipe ou chat. A chave `SUPABASE_SERVICE_ROLE_KEY` é configurada separadamente apenas no servidor. Quando usar `DATABASE_CA_CERT`, deixe a URI sem parâmetros SSL: o driver já ativa TLS e parâmetros como `sslmode` da URI podem sobrepor a CA do ambiente.
+
+Em um novo banco dedicado, execute com o `.env` apontando para esse projeto:
 
 ```powershell
 npm run db:migrate
@@ -20,6 +36,8 @@ npm run admin:create
 ```
 
 O primeiro comando aplica as migrations versionadas com bloqueio transacional de migração. O segundo só popula banco vazio/demonstrativo. O terceiro cria/reutiliza um bucket público dedicado `bkm-public`, com PNG/JPEG/WebP e limite 8 MB. Reutilizar bucket privado falha explicitamente. O último cria o primeiro administrador, com senha digitada de forma oculta.
+
+Se a intenção for preservar dados de um SQLite existente, substitua `npm run demo:seed` por `npm run db:import -- "caminho/do/banco.sqlite"`. Faça a importação antes de qualquer seed, em destino dedicado vazio. O importador não apaga a origem, preserva contas/pedidos/estoques e invalida sessões. Arquivos antigos referenciados por `/uploads/` exigem transferência separada ao Storage e atualização das URLs; o importador trata os registros do banco.
 
 Configure também `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` e `SUPABASE_STORAGE_BUCKET` no servidor. A chave de serviço não aparece no frontend, repositório ou resposta pública. Anônimos podem ler as imagens públicas; upload só é autorizado pela API administrativa. As tabelas de usuários/pedidos/sessões não têm políticas de leitura pública.
 

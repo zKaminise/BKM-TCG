@@ -4,6 +4,8 @@ Loja de demonstração de Pokémon TCG com a marca BKM, catálogo persistente, a
 
 Repositório oficial: [zKaminise/BKM-TCG](https://github.com/zKaminise/BKM-TCG).
 
+Demonstração online: [bkm-tcg-demo.vercel.app](https://bkm-tcg-demo.vercel.app/). PostgreSQL e Storage Supabase estão conectados. Administração, upload 4K, catálogo TCGdex, checkout móvel e concorrência real de estoque foram exercitados na integração remota; os cenários e evidências estão em [docs/VALIDACAO.md](docs/VALIDACAO.md).
+
 ## Abrir a loja completa
 
 Use Node.js **22.13 ou mais recente na versão 22**. No Windows, dê dois cliques em **ABRIR SITE.cmd**. O inicializador instala as dependências se necessário, prepara a demonstração sem sobrescrever alterações administrativas, inicia o servidor e abre o navegador. Mantenha a janela aberta.
@@ -15,7 +17,7 @@ Para usar o terminal:
 ```powershell
 npm ci
 # Na primeira instalação, copie .env.example para .env. Preserve um .env já existente.
-Copy-Item -LiteralPath '.env.example' -Destination '.env'
+if (-not (Test-Path -LiteralPath '.env')) { Copy-Item -LiteralPath '.env.example' -Destination '.env' }
 npm run db:migrate
 npm run demo:seed
 npm start
@@ -26,6 +28,8 @@ O `.env` é privado e carregado automaticamente. O servidor local escuta apenas 
 ## Primeiro administrador
 
 Depois de configurar o `.env`, execute **CONFIGURAR ADMIN.cmd** ou `npm run admin:create`. Informe nome, e-mail e uma senha de 12 a 128 caracteres. A senha não é exibida nem salva no código. Não existe administrador ou senha padrão nos dados de demonstração.
+
+O administrador da instalação online dedicada já foi criado. Esse bootstrap é para um banco novo e não precisa ser repetido para entrar na loja existente.
 
 O comando cria somente o primeiro administrador, no mesmo banco configurado para o servidor. Não promove outra conta silenciosamente. Entre em `/entrar` e abra `/admin`. No Supabase, o bootstrap usa a conexão PostgreSQL privada do `.env` local; não exponha a conexão no navegador.
 
@@ -54,7 +58,7 @@ Em pedidos pendentes, unidades ficam reservadas. Aprovação efetiva a baixa uma
 
 ## Supabase e hospedagem
 
-Veja [docs/DEPLOY.md](docs/DEPLOY.md) para as etapas exatas. A publicação Vercel usa frontend em `dist/` e uma função Node para `/api/*`; não depende de um processo Node permanente. PostgreSQL e uploads devem estar no Supabase. O filesystem da Vercel nunca é usado como armazenamento persistente.
+Veja [docs/DEPLOY.md](docs/DEPLOY.md) para o estado implantado e as etapas exatas. A publicação Vercel usa frontend em `dist/` e uma função Node para `/api/*`; não depende de um processo Node permanente. PostgreSQL e uploads estão no projeto Supabase dedicado `bkm-tcg-demo`, região São Paulo, plano Free. O filesystem da Vercel nunca é usado como armazenamento persistente.
 
 O upload administrativo aceita PNG/JPEG/WebP de até 8 MB. Imagens grandes são otimizadas no navegador antes de atravessar o limite do servidor de hospedagem. O servidor valida o formato e envia a imagem a um bucket Supabase dedicado. O fallback `uploads/` é permitido apenas localmente.
 
