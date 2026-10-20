@@ -6,6 +6,7 @@ const { openStore } = require("./store.cjs");
 const { hashPassword, verifyPassword, hashToken, publicUser } = require("./auth.cjs");
 const { accountList } = require("./accounts.cjs");
 const { paymentReadiness } = require("./payments.cjs");
+const { allowedOrigins, safeReturnPath } = require('./domain-policy.cjs');
 const uid = () => crypto.randomUUID();
 const now = () => (/* @__PURE__ */ new Date()).toISOString();
 const normalized = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\b0+(?=\d)/g, "");
@@ -80,20 +81,32 @@ async function readJson(req, max = 1024 * 1024) {
 function createApi(options = {}) {
   const root = options.root || path.resolve(__dirname, "..");
   const env = options.env || process.env;
+  const publicUrl = options.publicUrl || env.BKM_PUBLIC_URL;
+  const acceptedOrigins = allowedOrigins({publicUrl,additional:options.allowedOrigins || []});
   const effectiveEnv = { ...env, BKM_ENVIRONMENT: env.BKM_ENVIRONMENT || (env.VERCEL ? '' : 'demo'), PAYMENT_PROVIDER: env.PAYMENT_PROVIDER || 'mock' };
   const demo = effectiveEnv.BKM_ENVIRONMENT === 'demo';
   const demoPayments = demo && effectiveEnv.PAYMENT_PROVIDER === 'mock';
   const db = openStore({ ...options, env });
+  const customerProfile = require('./customer-profile.cjs').createCustomerProfile({db,ApiError,hashPassword,verifyPassword});
+  const google = require('./google-auth.cjs').createGoogleAuth({db,env:{...effectiveEnv,BKM_PUBLIC_URL:publicUrl},fetchImpl:options.googleFetch});
   const { createCollections } = require('./collections.cjs');
   const collections = createCollections({db,ApiError,audit,imageUrl});
   const { createEmailStore } = require('./email-store.cjs');
   const emailStore = createEmailStore(db);
+  const notifications=require('./email-notifications.cjs').createEmailNotifications({db,emailStore,env:effectiveEnv});
+  const market=require('./market-price-provider.cjs').createMarketPriceService({db,ApiError});
+  const personal=require('./personal-collection.cjs').createPersonalCollection({db,ApiError,fetchImpl:options.catalogFetch,priceProvider:market.provider});
   let emailDispatcher;
   async function enqueueEmail(message) { return emailStore.enqueue(message); }
   async function flushEmails() {
     const { createEmailDispatcher, createEmailProvider } = require('./email.cjs');
     emailDispatcher ||= createEmailDispatcher({store:emailStore,provider:createEmailProvider({env:effectiveEnv}),env:effectiveEnv});
     return emailDispatcher.flush({limit:10});
+  }
+  async function flushSafely() { try { return await flushEmails(); } catch { return {pending:true}; } }
+  async function inventoryNotifications(productId,eventKey) {
+    const recipients=await personal.onInventoryChange(productId,eventKey);
+    for(const recipient of recipients) await notifications.queueWishlist({userId:recipient.userId,to:recipient.email,name:recipient.name,items:recipient.items,wishlistIds:recipient.wishlistIds,eventKey});
   }
   const rateLimits = /* @__PURE__ */ new Map();
   const dummyPassword = "scrypt$32768$8$1$00000000000000000000000000000000$" + "0".repeat(128);
@@ -106,6 +119,7 @@ function createApi(options = {}) {
   }
   async function config() {
     const s = await settings();
+    s.google=google.readiness();
     const payment = paymentReadiness(effectiveEnv);
     const available=payment.enabled && (demoPayments || !s.demoDataVersion);
     return { ...s, freeShippingThresholdCents: s.shipping.freeShippingEnabled ? s.shipping.freeShippingThresholdCents : null, environment: effectiveEnv.BKM_ENVIRONMENT || 'unconfigured',demo,paymentConfigured:available, shippingConfigured:s.shipping.enabled, payments:{available,provider:payment.provider,environment:payment.environment,demo:payment.demo,canCharge:available && payment.canCharge,reason:!demo && s.demoDataVersion?'O banco demonstrativo não aceita cobranças externas.':payment.reason,...(available && payment.provider==='mercadopago'?{publicKey:effectiveEnv.MERCADO_PAGO_PUBLIC_KEY}:{})} };
@@ -148,13 +162,13 @@ function createApi(options = {}) {
   }
   function csrf(req, session) {
     const incoming = req.headers["x-csrf-token"];
-    if (!session || typeof incoming !== "string" || incoming !== session.csrf_token) throw new ApiError(403, "CSRF", "Atualize a página antes de enviar este formulário.");
+    if (!session || typeof incoming !== "string" || Buffer.byteLength(incoming)!==Buffer.byteLength(session.csrf_token) || !crypto.timingSafeEqual(Buffer.from(incoming),Buffer.from(session.csrf_token))) throw new ApiError(403, "CSRF", "Atualize a página antes de enviar este formulário.");
   }
   function origin(req) {
     if (req.headers["sec-fetch-site"] === "cross-site") throw new ApiError(403, "ORIGIN", "Origem da solicitação não permitida.");
     if (req.headers.origin) {
-      const expected = options.publicUrl ? new URL(options.publicUrl).origin : `${options.secureCookies || req.socket?.encrypted ? "https" : "http"}://${req.headers.host}`;
-      if (req.headers.origin !== expected && !(options.allowedOrigins || []).includes(req.headers.origin)) throw new ApiError(403, "ORIGIN", "Origem da solicitação não permitida.");
+      const expected = publicUrl ? new URL(publicUrl).origin : `${options.secureCookies || req.socket?.encrypted ? "https" : "http"}://${req.headers.host}`;
+      if (req.headers.origin !== expected && !acceptedOrigins.includes(req.headers.origin)) throw new ApiError(403, "ORIGIN", "Origem da solicitação não permitida.");
     }
   }
   async function product(row, admin = false) {
@@ -289,7 +303,10 @@ function createApi(options = {}) {
       }
       await audit(actor, existing ? "PRODUCT_UPDATED" : "PRODUCT_CREATED", p.id, { sku: p.sku, published: p.published });
     });
-    return await product((await db.prepare("SELECT * FROM products WHERE id=?").get(p.id)), true);
+    const saved=await db.prepare('SELECT * FROM products WHERE id=?').get(p.id);
+    await inventoryNotifications(p.id,'product:'+p.id+':'+saved.updated_at);
+    await flushSafely();
+    return await product(saved, true);
   }
   async function quote(data, lock = false) {
     if (!Array.isArray(data.items) || data.items.length < 1 || data.items.length > 100) fail("EMPTY_CART", "Adicione produtos ao carrinho.");
@@ -408,6 +425,36 @@ function createApi(options = {}) {
     };
     try {
       await db.ready;
+      if(req.method==='POST' && pathname==='/api/email/webhook/resend') {
+        limit(req,'email-webhook',120,60000);
+        const chunks=[];let length=0;
+        if(req.body!==undefined) {
+          if(typeof req.body!=='string' && !Buffer.isBuffer(req.body)) throw new ApiError(400,'EMAIL_RAW_BODY_REQUIRED','A assinatura exige o corpo original.');
+          chunks.push(Buffer.from(req.body));length=chunks[0].length;
+        } else for await(const chunk of req) {length+=chunk.length;if(length>131072)throw new ApiError(413,'BODY_TOO_LARGE','Notificação acima do limite.');chunks.push(Buffer.from(chunk));}
+        if(length>131072)throw new ApiError(413,'BODY_TOO_LARGE','Notificação acima do limite.');
+        const verified=require('./email.cjs').verifyResendWebhook({payload:Buffer.concat(chunks),headers:req.headers,secret:effectiveEnv.RESEND_WEBHOOK_SECRET});
+        return respond(200,await emailStore.applyProviderEvent(verified));
+      }
+      // Only the OAuth callback accepts a cross-site top-level GET. Its one-use
+      // state is bound to the existing HttpOnly BKM session before token exchange.
+      if(req.method==='GET' && pathname==='/api/auth/google/callback') {
+        limit(req,'oauth-callback',30);
+        const query=new URL(req.url,'https://localhost').searchParams;
+        const oauthSession=await getSession(req);
+        let target='/entrar?google=failed';
+        try {
+          const result=await google.finish({session:oauthSession,state:query.get('state'),code:query.get('code'),error:query.get('error')});
+          await newSession(res,result.user.id,oauthSession);
+          if(result.created) {await enqueueEmail({key:'welcome:'+result.user.id,template:'welcome',to:result.user.email,data:{name:result.user.name}});await flushSafely();}
+          target=safeReturnPath(result.returnTo);
+        } catch(error) {
+          const reasons={GOOGLE_ACCOUNT_LINK_REQUIRED:'link-required',GOOGLE_CANCELLED:'cancelled',GOOGLE_ADMIN_LINK_FORBIDDEN:'admin-password'};
+          target='/entrar?google='+(reasons[error.code] || 'failed');
+        }
+        res.writeHead(303,{'Location':target,'Cache-Control':'no-store','Referrer-Policy':'no-referrer'});
+        return res.end();
+      }
       origin(req);
       limit(req, "api", 500, 6e4);
       const query = new URL(req.url, "http://localhost").searchParams;
@@ -432,6 +479,13 @@ function createApi(options = {}) {
         return respond(200, { ...await product(row), related: (await listProducts(new URLSearchParams({ set: row.set_id, pageSize: "5" }))).items.filter((p) => p.id !== row.id).slice(0, 4) });
       }
       if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) csrf(req, session);
+      if(method==='POST' && pathname==='/api/auth/google/start') {
+        limit(req,'oauth-start',15);
+        const data=await readJson(req);
+        if(data.intent==='link') auth(session);
+        const result=await google.start({session,mode:data.intent || 'login',returnTo:safeReturnPath(data.next)});
+        return respond(200,{url:result.authorizationUrl});
+      }
       if (method === "POST" && ["/api/auth/login", "/api/auth/register"].includes(pathname)) {
         limit(req, "auth", 20);
         const data = await readJson(req);
@@ -447,6 +501,7 @@ function createApi(options = {}) {
           const id = uid();
           (await db.prepare("INSERT INTO users(id,email,name,password_hash,role,created_at) VALUES(?,?,?,?,?,?)").run(id, email, name, await hashPassword(password), "CUSTOMER", now()));
           await enqueueEmail({key:'welcome:'+id,template:'welcome',to:email,data:{name}});
+          await flushSafely();
           return respond(201, await newSession(res, id, session));
         }
         const valid = await verifyPassword(password, user?.password_hash || dummyPassword);
@@ -462,16 +517,17 @@ function createApi(options = {}) {
         limit(req, "recovery", 5);
         const data=await readJson(req),email=text(data.email,'email',254,true).toLowerCase();
         const user=await db.prepare('SELECT * FROM users WHERE email=?').get(email);
-        if(user) {
+        if(user && !user.password_hash.startsWith('oauth$')) {
           const token=crypto.randomBytes(32).toString('base64url');
-          const base=options.publicUrl || env.PUBLIC_URL || `http://${req.headers.host}`;
+          const base=env.BKM_PUBLIC_URL || publicUrl || env.PUBLIC_URL || `http://${req.headers.host}`;
           await db.transaction(async()=>{
             await db.prepare('DELETE FROM password_resets WHERE user_id=? OR expires_at<?').run(user.id,Date.now());
             await db.prepare('INSERT INTO password_resets VALUES(?,?,?,NULL,?)').run(hashToken(token),user.id,Date.now()+30*60000,now());
             await enqueueEmail({key:'password-reset:'+uid(),template:'password-reset',to:user.email,data:{name:user.name,resetUrl:base.replace(/\/$/,'')+'/recuperar-senha?token='+token}});
           });
         }
-        return respond(202,{message:'Se existir uma conta com este e-mail, enviaremos as instruções. No ambiente de demonstração, os e-mails ficam em prévias privadas da administração.'});
+        await flushSafely();
+        return respond(202,{message:'Se existir uma conta com este e-mail, enviaremos as instruções pelo canal disponível. Contas criadas com Google devem continuar com Google.'});
       }
       if(method==='POST' && pathname==='/api/auth/reset-password') {
         limit(req,'reset',10);
@@ -489,20 +545,61 @@ function createApi(options = {}) {
       }
       if (method === "POST" && pathname === "/api/checkout/quote") return respond(200, await quote(await readJson(req)));
       if (method === "POST" && pathname === "/api/checkout") {
-        return respond(201, {order: await orders.create(await readJson(req), auth(session))});
+        const user=auth(session),created=await orders.create(await readJson(req),user);
+        await notifications.markCartConverted(user.id);await flushSafely();
+        return respond(201,{order:created});
       }
       if (pathname.startsWith("/api/account")) {
         const user = auth(session);
+        if(pathname.startsWith('/api/account/collection/')) {
+          const body=['POST','PUT','PATCH'].includes(method)?await readJson(req,2*1024*1024):{};
+          const preferencesRoute=pathname==='/api/account/collection/preferences';
+          const perform=async()=>{
+            const result=await personal.handle({method,path:pathname,query,user,body});
+            if(result && preferencesRoute) {
+              if(method==='PUT') {
+                const mapping={notifyEmail:'wishlistEnabled',marketing:'newsEnabled',abandonedCart:'cartEnabled',priceAlerts:'priceEnabled'};
+                const explicit=Object.fromEntries(Object.entries(mapping).filter(([key])=>Object.hasOwn(body,key)).map(([key,mapped])=>[mapped,body[key]]));
+                if(Object.hasOwn(body,'digest')) {explicit.digestEnabled=body.digest!=='immediate';explicit.frequencyHours=body.digest==='weekly'?168:24;}
+                if(Object.keys(explicit).length)await notifications.setPreferences(user.id,explicit);
+              }
+              result.data.email=await notifications.getPreferences(user.id);
+            }
+            return result;
+          };
+          const result=preferencesRoute && method==='PUT'?await db.transaction(perform):await perform();
+          if(result)return respond(result.status,result.data);
+        }
+        if(pathname==='/api/account/security' && method==='GET') {
+          const identity=await db.prepare("SELECT email FROM oauth_identities WHERE user_id=? AND provider='google'").get(user.id);
+          const sessions=await db.prepare('SELECT COUNT(*) count FROM sessions WHERE user_id=? AND expires_at>?').get(user.id,Date.now());
+          return respond(200,{passwordEnabled:!user.password_hash.startsWith('oauth$'),google:{enabled:google.readiness().enabled,linked:!!identity,...(identity?{email:identity.email}:{})},sessions:{active:sessions.count}});
+        }
         if (["/api/account/cart", "/api/account/favorites"].includes(pathname) && ["GET", "PUT"].includes(method)) {
           const body = method === "PUT" ? await readJson(req) : null;
-          return respond(200, await accountList(db, user, pathname, method, body, product));
+          const result=await accountList(db,user,pathname,method,body,product);
+          if(method==='PUT' && pathname.endsWith('/cart'))await notifications.trackCart({userId:user.id,items:body.items});
+          return respond(200,result);
         }
         if (pathname === "/api/account/profile" && method === "GET") return respond(200, { user: publicUser(user), profile: JSON.parse(user.profile_json) });
         if (pathname === "/api/account/profile" && method === "PUT") {
           const data = await readJson(req);
-          const name = text(data.name || user.name, "name", 120, true), profile = { phone: text(data.phone, "phone", 30) };
-          (await db.prepare("UPDATE users SET name=?,profile_json=? WHERE id=?").run(name, JSON.stringify(profile), user.id));
+          const name = text(data.name || user.name, "name", 120, true);
+          const profile = await db.transaction(async()=>{
+            const fresh=await db.prepare('SELECT profile_json FROM users WHERE id=?'+db.lockSuffix).get(user.id);
+            const next={...JSON.parse(fresh.profile_json),phone:text(data.phone,'phone',30)};
+            await db.prepare('UPDATE users SET name=?,profile_json=? WHERE id=?').run(name,JSON.stringify(next),user.id);
+            return next;
+          });
           return respond(200, { user: publicUser({ ...user, name }), profile });
+        }
+        if (pathname.startsWith('/api/account/addresses') || pathname==='/api/account/security/password') {
+          if(pathname.endsWith('/password')) limit(req,'password-change',5);
+          const result=await customerProfile.handle({user,method,path:pathname,body:['POST','PUT'].includes(method)?await readJson(req):{}});
+          if(result) {
+            if(pathname.endsWith('/password')) return respond(200,{...result,...await newSession(res,user.id)});
+            return respond(method==='POST' && pathname.endsWith('/addresses')?201:200,result);
+          }
         }
         if (/^\/api\/account\/orders\/[^/]+\/simulate$/.test(pathname) && method === 'POST') return respond(200,{order:await orders.simulate(pathname.split('/')[4],await readJson(req),user)});
         if (/^\/api\/account\/orders\/[^/]+\/payment$/.test(pathname) && method === 'POST') return respond(200,{order:await orders.payment(pathname.split('/')[4],await readJson(req),user)});
@@ -528,15 +625,23 @@ function createApi(options = {}) {
       }
       if (pathname.startsWith("/api/admin")) {
         const user = auth(session, true);
+        if(pathname.startsWith('/api/admin/market-prices')) {
+          const result=await market.handleAdmin({user,method,path:pathname,query,body:method==='POST'?await readJson(req,2*1024*1024):{}});
+          if(result)return respond(result.status,result.data);
+        }
+        if(pathname==='/api/admin/integrations' && method==='GET') {
+          const counts=await db.prepare("SELECT COUNT(*) count FROM personal_wishlist WHERE enabled=1").get();
+          return respond(200,{google:google.readiness(),email:require('./email.cjs').emailReadiness(effectiveEnv),payments:paymentReadiness(effectiveEnv),publicUrl,prices:{provider:'admin_manual',automatic:false,reason:'Referências manuais autorizadas em BRL; integração automática Liga pendente de autorização.'},wishlist:{subscriptions:counts.count},abandonedCart:{enabled:false},shipping:require('./shipping-provider.cjs').shippingReadiness(effectiveEnv)});
+        }
         if(pathname==='/api/admin/collections' && method==='GET') return respond(200,await collections.list(query));
         if(pathname==='/api/admin/collections' && method==='POST') return respond(201,await collections.save(await readJson(req),user));
         if(/^\/api\/admin\/collections\/[^/]+$/.test(pathname) && method==='PUT') return respond(200,await collections.save(await readJson(req),user,pathname.split('/').at(-1)));
         if(pathname==='/api/admin/emails' && method==='GET') {
           await flushEmails();
-          const rows=await db.prepare('SELECT id,payload_json,status,created_at,preview_json,last_error,attempts FROM email_outbox ORDER BY created_at DESC LIMIT 100').all();
-          return respond(200,{items:rows.map(row=>{
+          const rows=await db.prepare('SELECT id,payload_json,status,created_at,preview_json,last_error,attempts,delivery_status,last_event_at FROM email_outbox ORDER BY created_at DESC LIMIT 100').all();
+          return respond(200,{integration:require("./email.cjs").emailReadiness(effectiveEnv),items:rows.map(row=>{
             const payload=JSON.parse(row.payload_json),preview=JSON.parse(row.preview_json || 'null');
-            return {id:row.id,to:preview?.toMasked || String(payload.to).replace(/^(.{1,2})[^@]*(@.*)$/,'$1***$2'),subject:preview?.subject || payload.template,template:payload.template,status:row.status,createdAt:row.created_at,text:preview?.text || 'Mensagem na fila de envio.',demo,attempts:row.attempts,errorCode:row.last_error};
+            return {id:row.id,to:preview?.toMasked || String(payload.to).replace(/^(.{1,2})[^@]*(@.*)$/,'$1***$2'),subject:preview?.subject || payload.template,template:payload.template,status:row.status,createdAt:row.created_at,text:preview?.text || 'Mensagem na fila de envio.',demo,attempts:row.attempts,errorCode:row.last_error,deliveryStatus:row.delivery_status,lastEventAt:row.last_event_at};
           })});
         }
         if(/^\/api\/admin\/emails\/[^/]+\/retry$/.test(pathname) && method==='POST') {

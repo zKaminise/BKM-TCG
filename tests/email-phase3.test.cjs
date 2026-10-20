@@ -1,0 +1,84 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const crypto=require('node:crypto');
+const {PGlite}=require('@electric-sql/pglite');
+const {openStore}=require('../server/store.cjs');
+const {createEmailStore}=require('../server/email-store.cjs');
+const {createEmailNotifications}=require('../server/email-notifications.cjs');
+const {ResendEmailProvider,renderEmail,verifyResendWebhook,createEmailDispatcher,emailReadiness,TEMPLATES}=require('../server/email.cjs');
+const env={BKM_ENVIRONMENT:'demo',HOSTING_DEMO_ONLY:'true',BKM_PUBLIC_URL:'https://bkm.example.test',EMAIL_PROVIDER:'resend',RESEND_ENABLED:'true',RESEND_DOMAIN_VERIFIED:'true',RESEND_API_KEY:'fixture-no-real-provider-key',RESEND_FROM:'BKM TCG <pedidos@bkm.example.test>',RESEND_DEMO_TEST_ENABLED:'true',RESEND_TEST_RECIPIENTS:'owner@example.test'};
+async function fixture(t){const pg=new PGlite(),db=openStore({pgClient:{query:async(sql,args)=>args?.length?pg.query(sql,args):(await pg.exec(sql)).at(-1),end:()=>pg.close()}});await db.ready;t.after(()=>db.close());const store=createEmailStore(db);return{db,store};}
+test('Resend Fase 3 demo controlado exige optin, allowlist, domínio e impede marketing/carrinho',async()=>{
+  let sends=0;const provider=new ResendEmailProvider({env,fetchImpl:async()=>{sends++;return new Response(JSON.stringify({id:'fixture-accepted-email'}));}});
+  assert.equal(TEMPLATES.length,15);assert.equal(emailReadiness(env).controlledDemo,true);
+  assert.equal(emailReadiness({...env,RESEND_DEMO_TEST_ENABLED:'false'}).provider,'development');
+  await provider.send({...renderEmail('welcome',{}, {env}),to:'owner@example.test',data:{}},{idempotencyKey:'controlled/welcome'});
+  await assert.rejects(provider.send({...renderEmail('welcome',{}, {env}),to:'stranger@example.test',data:{}},{idempotencyKey:'controlled/forbidden'}),e=>e.code==='EMAIL_TEST_RECIPIENT_FORBIDDEN');
+  await assert.rejects(provider.send({...renderEmail('abandoned-cart',{}, {env}),to:'owner@example.test',data:{}},{idempotencyKey:'controlled/cart'}),e=>e.code==='EMAIL_TEST_RECIPIENT_FORBIDDEN');
+  await assert.rejects(provider.send({...renderEmail('wishlist-available',{}, {env}),to:'owner@example.test',data:{}},{idempotencyKey:'controlled/wishlist-without-proof'}),e=>e.code==='EMAIL_TEST_RECIPIENT_FORBIDDEN');
+  await provider.send({...renderEmail('wishlist-available',{}, {env}),to:'owner@example.test',data:{consentVerified:true}},{idempotencyKey:'controlled/wishlist-consent'});
+  assert.equal(sends,2);
+});
+test('Resend Fase 3 Svix verifica corpo original, timestamp e assinatura sem confiar em JSON parseado',()=>{
+  const secret='whsec_'+Buffer.from('fixture-webhook-secret-32-bytes').toString('base64'),now=Date.now(),timestamp=String(Math.floor(now/1000));
+  const event={type:'email.delivered',created_at:new Date(now).toISOString(),data:{email_id:'fixture-email-provider-id'}},payload=JSON.stringify(event),id='msg_fixture_event';
+  const signature='v1,'+crypto.createHmac('sha256',Buffer.from(secret.slice(6),'base64')).update(id+'.'+timestamp+'.'+payload).digest('base64');
+  const headers={'svix-id':id,'svix-timestamp':timestamp,'svix-signature':signature};
+  assert.deepEqual(verifyResendWebhook({payload,headers,secret,now}),{id,event});
+  assert.throws(()=>verifyResendWebhook({payload:payload+' ',headers,secret,now}));
+  assert.throws(()=>verifyResendWebhook({payload:event,headers,secret,now}));
+  assert.throws(()=>verifyResendWebhook({payload,headers,secret,now:now+301000}));
+  assert.throws(()=>verifyResendWebhook({payload,headers:{...headers,'svix-signature':'v1,Zm9yZ2Vk'},secret,now}));
+});
+test('Resend Fase 3 eventos persistem accepted vs delivered, replay e supressão fora de ordem',async t=>{
+  const {db,store}=await fixture(t),message={key:'phase3/event1',template:'welcome',to:'owner@example.test',data:{}};
+  const {id}=await store.enqueue(message);const [claimed]=await store.claimDue({limit:1});
+  await store.complete(id,{providerId:'fixture-provider-email',accepted:true,claim:claimed.claim});
+  assert.equal((await db.prepare('SELECT delivery_status FROM email_outbox WHERE id=?').get(id)).delivery_status,'ACCEPTED');
+  const delivered={id:'msg_fixture_delivered',event:{type:'email.delivered',created_at:'2026-10-19T16:00:00.000Z',data:{email_id:'fixture-provider-email'}}};
+  assert.equal((await store.applyProviderEvent(delivered)).duplicate,false);assert.equal((await store.applyProviderEvent(delivered)).duplicate,true);
+  assert.equal((await db.prepare('SELECT delivery_status FROM email_outbox WHERE id=?').get(id)).delivery_status,'DELIVERED');
+  await store.applyProviderEvent({id:'msg_fixture_bounced',event:{type:'email.bounced',created_at:'2026-10-19T17:00:00.000Z',data:{email_id:'fixture-provider-email'}}});
+  assert.equal(await store.isSuppressed('OWNER@example.test'),true);
+  await store.applyProviderEvent({id:'msg_fixture_late_delivered',event:{...delivered.event,created_at:'2026-10-19T18:00:00.000Z'}});
+  assert.equal((await db.prepare('SELECT delivery_status FROM email_outbox WHERE id=?').get(id)).delivery_status,'BOUNCED');
+  await assert.rejects(store.applyProviderEvent({...delivered,event:{...delivered.event,type:'email.failed'}}),e=>e.code==='EMAIL_EVENT_CONFLICT');
+  await store.enqueue({...message,key:'phase3/event2'});let sends=0;
+  const result=await createEmailDispatcher({store,env,provider:{name:'resend',async send(){sends++;}}}).flush();assert.equal(sends,0);assert.equal(result.failed,1);
+});
+test('Resend Fase 3 evento anterior à resposta do envio é conciliado sem fingir entrega',async t=>{
+  const {db,store}=await fixture(t);const {id}=await store.enqueue({key:'phase3/race',template:'welcome',to:'owner@example.test',data:{}});
+  await store.applyProviderEvent({id:'msg_fixture_early',event:{type:'email.complained',created_at:'2026-10-19T16:00:00.000Z',data:{email_id:'fixture-early-provider'}}});
+  assert.equal(await store.isSuppressed('owner@example.test'),false);
+  const [row]=await store.claimDue({limit:1});await store.complete(id,{providerId:'fixture-early-provider',accepted:true,claim:row.claim});
+  assert.equal((await db.prepare('SELECT delivery_status FROM email_outbox WHERE id=?').get(id)).delivery_status,'COMPLAINED');assert.equal(await store.isSuppressed('owner@example.test'),true);
+});
+test('Resend Fase 3 preferências não consentem por padrão e carrinho somente persiste',async t=>{
+  const {db,store}=await fixture(t),id=crypto.randomUUID();await db.prepare("INSERT INTO users(id,email,name,password_hash,role,created_at) VALUES(?,?,?,'fixture','CUSTOMER',?)").run(id,'owner@example.test','Cliente',new Date().toISOString());
+  const notifications=createEmailNotifications({db,emailStore:store,env});
+  const prefs=await notifications.getPreferences(id);assert.equal(prefs.wishlistEnabled,false);assert.equal(prefs.cartEnabled,false);assert.equal(prefs.abandonedCartAutomationEnabled,false);
+  const updated=await notifications.setPreferences(id,{wishlistEnabled:true,frequencyHours:24});assert.equal(updated.wishlistEnabled,true);assert.ok(updated.consentedAt);
+  assert.equal((await notifications.queueWishlist({userId:id,to:'owner@example.test',items:[],eventKey:'none'})).queued,false);
+  await notifications.trackCart({userId:id,items:[{variantId:'fixture-variant',quantity:1}]});assert.equal((await db.prepare('SELECT COUNT(*) n FROM email_outbox').get()).n,0);
+  await notifications.markCartConverted(id);assert.ok((await db.prepare('SELECT converted_at FROM email_cart_tracking WHERE user_id=?').get(id)).converted_at);
+  await notifications.setPreferences(id,{wishlistEnabled:false});assert.equal((await notifications.getPreferences(id)).wishlistEnabled,false);
+});
+test('Resend Fase 3 alerta valida consentimento, dedupe, frequência e revalida estoque/preço antes do disparo',async t=>{
+  const {db,store}=await fixture(t),userId=crypto.randomUUID(),stamp=new Date().toISOString();
+  await db.prepare("INSERT INTO users(id,email,name,password_hash,role,created_at) VALUES(?,?,?,'fixture','CUSTOMER',?)").run(userId,'owner@example.test','Cliente',stamp);
+  await db.prepare("INSERT INTO products(id,slug,kind,name,description,sku,tcg,set_id,set_name,images_json,attributes_json,search_text,published,created_at,updated_at) VALUES('phase3-product','phase3-card','SINGLE','Carta de teste','Fixture','PHASE3-EMAIL','pokemon','fixture','Fixture','[]','{}','fixture',1,?,?)").run(stamp,stamp);
+  await db.prepare("INSERT INTO variants VALUES('phase3-variant','phase3-product','pt','NM','HOLO',990,NULL,1,1)").run();
+  await db.prepare("INSERT INTO card_metadata VALUES('phase3-metadata','phase3/001','pokemon','fixture','001','pt',?,?)").run(JSON.stringify({providerId:'fixture-001',number:'001'}),stamp);
+  await db.prepare("UPDATE products SET card_id='phase3-metadata' WHERE id='phase3-product'").run();
+  await db.prepare('INSERT INTO personal_preferences VALUES(?,?,?)').run(userId,JSON.stringify({notifyEmail:true}),stamp);
+  await db.prepare("INSERT INTO personal_wishlist(id,user_id,set_id,card_id,reference_language,preferences_json,metadata_json,enabled,created_at,updated_at) VALUES('phase3-wish',?,'fixture','fixture-001','pt',?,?,1,?,?)").run(userId,JSON.stringify({notifyEmail:true,languages:['pt'],conditions:['NM'],variants:['HOLO']}),JSON.stringify({id:'fixture-001',number:'001',setId:'fixture'}),stamp,stamp);
+  const notifications=createEmailNotifications({db,emailStore:store,env}),input={userId,to:'owner@example.test',name:'Cliente',items:[{productId:'phase3-product',variantId:'phase3-variant'}],wishlistIds:['phase3-wish'],eventKey:'published-1'};
+  assert.equal((await notifications.queueWishlist(input)).reason,'consent');
+  await notifications.setPreferences(userId,{wishlistEnabled:true});
+  assert.equal((await notifications.queueWishlist(input)).queued,true);assert.equal((await notifications.queueWishlist(input)).reason,'duplicate');assert.equal((await notifications.queueWishlist({...input,eventKey:'published-2'})).reason,'frequency');
+  const saved=JSON.parse((await db.prepare('SELECT payload_json FROM email_outbox').get()).payload_json);assert.equal(await store.notificationAllowed(saved),true);
+  await db.prepare("UPDATE variants SET price_cents=1000 WHERE id='phase3-variant'").run();assert.equal(await store.notificationAllowed(saved),false);
+  await db.prepare("UPDATE variants SET price_cents=990,stock=0 WHERE id='phase3-variant'").run();assert.equal(await store.notificationAllowed(saved),false);
+  let sends=0;const result=await createEmailDispatcher({store,env,provider:{name:'resend',async send(){sends++;}}}).flush();assert.equal(sends,0);assert.equal(result.failed,1);
+  await notifications.setPreferences(userId,{wishlistEnabled:false});assert.equal(await store.notificationAllowed(saved),false);
+});

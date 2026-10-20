@@ -1,3 +1,5 @@
+import { createPersonalUI, svgIcon } from "./personal-ui.js";
+
 const navMount = document.querySelector("#store-nav");
 const mount = document.querySelector("#storefront");
 const overlay = document.querySelector("#store-overlay");
@@ -12,7 +14,6 @@ const orderLabels = {CONFIRMED:"Confirmado",PENDING:"Aguardando pagamento",PAYME
 const isLocalHost = () => ["localhost","127.0.0.1","::1","[::1]", ""].includes(location.hostname);
 const isDemo = () => state.config.demo === true || state.config.environment === "demo" || (!state.apiReady && !isLocalHost());
 const demoNotice = () => isDemo() ? el("div",{class:"shop-demo-note"},el("strong",{},"AMBIENTE DE DEMONSTRAÇÃO"),el("span",{},"Produtos e valores ilustrativos. Pedidos de teste, sem cobranças ou envios reais.")) : null;
-const icons = { search: "\u2315", heart: "\u2661", bag: "\u25B1", user: "\u25EF", menu: "\u2630", close: "\xD7", arrow: "\u2197", plus: "+", minus: "\u2212" };
 let pageVersion = 0;
 let routeCleanup=null;
 let mercadoPagoSdkPromise=null;
@@ -253,12 +254,15 @@ function renderNav() {
     e.preventDefault();
     const q = new FormData(form).get("q").trim();
     navigate(`/busca${q ? `?q=${encodeURIComponent(q)}` : ""}`);
-  } }, el("label", { class: "sr-only", for: "shop-search-q" }, "Buscar produtos"), el("input", { id: "shop-search-q", name: "q", type: "search", placeholder: "Busque sua pr\xF3xima carta", autocomplete: "off", value: new URLSearchParams(location.search).get("q") || "" }), button(icons.search, () => form.requestSubmit(), "shop-icon", { "aria-label": "Buscar produtos" }));
+  } }, el("label", { class: "sr-only", for: "shop-search-q" }, "Buscar produtos"), el("input", { id: "shop-search-q", name: "q", type: "search", placeholder: "Busque sua pr\xF3xima carta", autocomplete: "off", value: new URLSearchParams(location.search).get("q") || "" }), button(svgIcon("search"), () => form.requestSubmit(), "shop-icon", { "aria-label": "Buscar produtos" }));
   const links = el("nav", { class: "shop-navigation", "aria-label": "Navega\xE7\xE3o da loja" }, link("Loja", "/busca"), link("Lacrados", "/lacrados"), link("Cartas avulsas", "/cartas"), link("Coleções", "/colecoes"), state.user?.role === "ADMIN" ? link("Administrar", "/admin") : link("Sobre a BKM", "/sobre"));
-  const actions = el("div", { class: "shop-nav-actions" }, link(el("span", { "aria-hidden": true }, icons.heart), "/favoritos", "shop-icon"), link(el("span", { "aria-hidden": true }, icons.user), state.user ? "/conta" : "/entrar", "shop-icon"), button([el("span", { "aria-hidden": true }, icons.bag), el("span", { class: "shop-cart-count" }, count)], () => openCart(), "shop-icon", { "aria-label": `Abrir carrinho, ${count} ${count === 1 ? "item" : "itens"}` }));
-  actions.children[0].setAttribute("aria-label", "Meus favoritos");
-  actions.children[1].setAttribute("aria-label", state.user ? "Minha conta" : "Entrar na conta");
-  navMount.replaceChildren(el("div", { class: "shop-nav-content" }, button(icons.menu, () => {
+  const profileMenu=el("details",{class:"shop-profile-menu"}),profileSummary=el("summary",{class:"shop-icon","aria-label":state.user?"Abrir menu da minha conta":"Entrar ou criar conta"},svgIcon("user"),el("span",{class:"sr-only"},state.user?"Minha conta":"Entrar ou cadastrar"));
+  profileMenu.append(profileSummary,el("nav",{class:"shop-profile-dropdown","aria-label":"Acesso à conta"},state.user?[el("strong",{},state.user.name),link("Minha conta","/conta"),link("Minha coleção","/conta/colecao"),link("Lista de desejos","/conta/desejos"),link("Meus pedidos","/conta/pedidos"),link("Produtos favoritos","/favoritos"),link("Configurações","/conta/preferencias"),button([svgIcon("logout"),"Sair"],()=>logout(),"shop-text-link")]:[link("Entrar","/entrar","shop-button"),link("Criar uma conta","/cadastro","shop-button secondary")]));
+  profileMenu.addEventListener("keydown",event=>{if(event.key==="Escape"){profileMenu.open=false;profileSummary.focus();}});
+  profileMenu.addEventListener("focusout",()=>queueMicrotask(()=>{if(!profileMenu.contains(document.activeElement))profileMenu.open=false;}));
+  const actions = el("div", { class: "shop-nav-actions" }, link(svgIcon("heart"), state.user?"/conta/desejos":"/favoritos", "shop-icon"), profileMenu, button([svgIcon("bag"), el("span", { class: "shop-cart-count" }, count)], () => openCart(), "shop-icon", { "aria-label": `Abrir carrinho, ${count} ${count === 1 ? "item" : "itens"}` }));
+  actions.children[0].setAttribute("aria-label", state.user ? "Minha lista de desejos" : "Meus favoritos");
+  navMount.replaceChildren(el("div", { class: "shop-nav-content" }, button(svgIcon("menu"), () => {
     const open = links.classList.toggle("is-open");
     navMount.querySelector(".shop-menu-toggle")?.setAttribute("aria-expanded", String(open));
   }, "shop-icon shop-menu-toggle", { "aria-label": "Abrir menu", "aria-expanded": "false" }), links, form, actions));
@@ -336,13 +340,19 @@ async function renderRoute() {
     else if (path === "/checkout") node = await checkoutPage();
     else if (path === "/entrar" || path === "/cadastro") node = authPage(path);
     else if(path === "/recuperar-senha")node=recoveryPage();
-    else if (path === "/conta") node = await accountPage();
     else if (path.startsWith("/conta/pedidos/")) node = await orderPage(decodeURIComponent(path.split("/").at(-1)));
+    else if (path === "/conta" || path.startsWith("/conta/")) node = await personalUI.page(path);
     else if (path === "/colecoes") node = await collectionsPage();
     else if (path.startsWith("/admin")) node = await adminPage(path);
     else node = infoPage(path);
     if (version !== pageVersion) return;
     mount.replaceChildren(node);
+    const sectionTitle=path.startsWith('/conta')?'Minha conta':path.startsWith('/admin')?'Administração':node.querySelector('h1')?.textContent?.replace(/\s+/g,' ').trim();
+    if(sectionTitle)document.title=sectionTitle.slice(0,110)+' · BKM TCG';
+    const canonical=new URL(path==='/'||path==='/index.html'||path==='/ABRIR.html'?'/':path,'https://lojabkm.com.br').href;
+    document.querySelector('link[rel="canonical"]')?.setAttribute('href',canonical);
+    document.querySelector('meta[property="og:url"]')?.setAttribute('content',canonical);
+    document.querySelector('meta[property="og:title"]')?.setAttribute('content',document.title);
     mount.querySelector("h1")?.setAttribute("tabindex", "-1");
   } catch (error) {
     if (version !== pageVersion) return;
@@ -365,7 +375,7 @@ function productCard(product) {
   catalogCache.set(product.id, product);
   const favorited = state.favorites.some((f) => f.id === product.id);
   const photo = productImage(product);
-  return el("article", { class: "shop-product-card" }, el("div", { class: "shop-product-picture" }, link(image(photo.url, product.name), `/produto/${encodeURIComponent(product.slug)}`), button(favorited ? "\u2665" : "\u2661", (event) => toggleFavorite(product, event.currentTarget), "shop-favorite", { "aria-label": `${favorited ? "Remover" : "Adicionar"} ${product.name} ${favorited ? "dos" : "aos"} favoritos`, "aria-pressed": String(favorited) }), !available(product) ? badge("Indispon\xEDvel") : null), el("div", { class: "shop-product-meta" }, isDemo()?el("span",{class:"shop-demo-product"},"DEMONSTRAÇÃO"):null,el("p", { class: "shop-product-set" }, product.setName || "Pok\xE9mon TCG"), link(el("h3", {}, product.name), `/produto/${encodeURIComponent(product.slug)}`), el("p", { class: "shop-product-detail" }, product.kind === "SINGLE" ? [product.card?.number, asArray(product.variants).map((v) => languages[v.language] || v.language).filter((v, i, a) => a.indexOf(v) === i).join(" \xB7 ")].filter(Boolean).join(" \xB7 ") : "Produto lacrado"), el("p", { class: "shop-price" }, asArray(product.variants).length > 1 ? el("span", {}, "A partir de ") : null, money(lowest(product))), link(available(product) ? "Escolher op\xE7\xE3o \u2197" : "Ver detalhes \u2197", `/produto/${encodeURIComponent(product.slug)}`, "shop-product-action")));
+  return el("article", { class: "shop-product-card" }, el("div", { class: "shop-product-picture" }, link(image(photo.url, product.name), `/produto/${encodeURIComponent(product.slug)}`), button(svgIcon("heart",favorited), (event) => toggleFavorite(product, event.currentTarget), "shop-favorite", { "aria-label": `${favorited ? "Remover" : "Adicionar"} ${product.name} ${favorited ? "dos" : "aos"} favoritos`, "aria-pressed": String(favorited) }), !available(product) ? badge("Indispon\xEDvel") : null), el("div", { class: "shop-product-meta" }, isDemo()?el("span",{class:"shop-demo-product"},"DEMONSTRAÇÃO"):null,el("p", { class: "shop-product-set" }, product.setName || "Pok\xE9mon TCG"), link(el("h3", {}, product.name), `/produto/${encodeURIComponent(product.slug)}`), el("p", { class: "shop-product-detail" }, product.kind === "SINGLE" ? [product.card?.number, asArray(product.variants).map((v) => languages[v.language] || v.language).filter((v, i, a) => a.indexOf(v) === i).join(" \xB7 ")].filter(Boolean).join(" \xB7 ") : "Produto lacrado"), el("p", { class: "shop-price" }, asArray(product.variants).length > 1 ? el("span", {}, "A partir de ") : null, money(lowest(product))), link(available(product) ? "Escolher op\xE7\xE3o \u2197" : "Ver detalhes \u2197", `/produto/${encodeURIComponent(product.slug)}`, "shop-product-action")));
 }
 function toggleFavorite(product, target) {
   const index = state.favorites.findIndex((f) => f.id === product.id);
@@ -373,7 +383,7 @@ function toggleFavorite(product, target) {
   else state.favorites.splice(index, 1);
   persist();
   if (target) {
-    target.textContent = index < 0 ? "\u2665" : "\u2661";
+    target.replaceChildren(svgIcon("heart",index < 0));
     target.setAttribute("aria-pressed", String(index < 0));
     target.setAttribute("aria-label", `${index < 0 ? "Remover" : "Adicionar"} ${product.name} ${index < 0 ? "dos" : "aos"} favoritos`);
   }
@@ -461,6 +471,8 @@ async function productPage(slug) {
     event.currentTarget.textContent = state.favorites.some((f) => f.id === product.id) ? "\u2665 Salvo nos favoritos" : "\u2661 Salvar nos favoritos";
   }, "shop-text-link"), shippingBox, el("details", { class: "shop-description", open: true }, el("summary", {}, "Sobre este produto"), el("p", {}, product.description || "As caracter\xEDsticas cadastradas deste produto est\xE3o acima.")), el("details", { class: "shop-description" }, el("summary", {}, "Condi\xE7\xE3o e conserva\xE7\xE3o"), el("p", {}, "Near Mint: sinais m\xEDnimos de manuseio. Levemente jogada: pequenos sinais de uso. Moderadamente jogada: desgaste vis\xEDvel. Muito jogada ou danificada: desgaste acentuado. Fotos reais, quando dispon\xEDveis, complementam essa descri\xE7\xE3o.")))));
   if(product.attributes&&Object.values(product.attributes).some(Boolean))page.querySelector(".shop-detail-info").append(el("details",{class:"shop-description"},el("summary",{},"Especificações"),el("dl",{class:"shop-specifications"},Object.entries({"Categoria":product.attributes.category,"Fabricante":product.attributes.manufacturer,"Conteúdo":product.attributes.contents,"Peso":product.attributes.weightGrams?`${product.attributes.weightGrams} g`:"","Dimensões":product.attributes.widthCm&&product.attributes.heightCm&&product.attributes.lengthCm?`${product.attributes.widthCm} × ${product.attributes.heightCm} × ${product.attributes.lengthCm} cm`:"","Detalhes":product.attributes.specifications,"Observações":product.attributes.sellerNotes}).filter(([,v])=>v).map(([label,value])=>el("div",{},el("dt",{},label),el("dd",{},value))))));
+  const personalActions=personalUI.productActions(product,()=>chosen);
+  if(personalActions)page.querySelector(".shop-purchase-actions").after(personalActions);
   const related=asArray(response.related).filter(item=>item.id!==product.id);
   if(related.length)page.append(el("section",{class:"shop-section","aria-label":"Produtos relacionados"},el("div",{class:"shop-section-top"},el("div",{},el("p",{class:"shop-kicker"},"CONTINUE EXPLORANDO"),el("h2",{},"Outras descobertas."))),productGrid(related.slice(0,4))));
   return page;
@@ -749,6 +761,10 @@ function authPage(path) {
     }
   } }, register ? field("Seu nome", "name", "text", "", { required: true, autocomplete: "name", minlength: "2" }) : null, field("E-mail", "email", "email", "", { required: true, autocomplete: "email" }), field("Senha", "password", "password", "", { required: true, autocomplete: register ? "new-password" : "current-password", minlength: register ? "12" : void 0 }), register ? el("p", { class: "shop-fine" }, "Use pelo menos 12 caracteres. Ao criar uma conta, voc\xEA concorda com os ", link("termos de uso", "/termos", "shop-text-link"), " e a ", link("pol\xEDtica de privacidade", "/privacidade", "shop-text-link"), ".") : null, status, el("button", { type: "submit", class: "shop-button" }, register ? "Criar minha conta" : "Entrar"), el("p", { class: "shop-muted" }, register ? "J\xE1 tem uma conta? " : "Sua primeira visita? ", link(register ? "Entrar" : "Crie uma conta", `${register ? "/entrar" : "/cadastro"}${location.search}`, "shop-text-link")));
   if(!register)form.append(link("Esqueci minha senha","/recuperar-senha","shop-text-link"));
+  if(state.config.google?.enabled){
+    const google=button(register?"Cadastrar com Google":"Continuar com Google",async event=>{const trigger=event.currentTarget;trigger.disabled=true;status.replaceChildren();try{const requested=new URLSearchParams(location.search).get("next"),next=requested?.startsWith("/")&&!requested.startsWith("//")?requested:"/conta",result=await api("/auth/google/start",{method:"POST",body:{intent:"login",next}});if(!result.url)throw new Error("O provedor não forneceu uma URL de autenticação.");location.assign(result.url);}catch(error){status.replaceChildren(message(displayError(error),"error"));trigger.disabled=false;}},"shop-button secondary shop-google-button");
+    form.prepend(google,el("p",{class:"personal-auth-separator"},"ou continue com e-mail"));
+  }
   return el("div", { class: "shop-shell shop-auth" }, heading("BEM-VINDO \xC0 BKM", register ? "Sua cole\xE7\xE3o.\nSua conta." : "Bom ter voc\xEA\npor aqui."), form);
 }
 function recoveryPage(){
@@ -756,7 +772,7 @@ function recoveryPage(){
   const form=el("form",{class:"shop-auth-form",onSubmit:async event=>{event.preventDefault();const values=Object.fromEntries(new FormData(form)),submit=form.querySelector("[type=submit]");submit.disabled=true;status.replaceChildren();try{if(token){if(values.password!==values.confirmPassword)throw new Error("As senhas precisam ser iguais.");await api("/auth/reset-password",{method:"POST",body:{token,password:values.password}});status.replaceChildren(message("Senha redefinida. Entre novamente para continuar.","success"),link("Entrar na conta","/entrar","shop-button"));form.querySelectorAll("input").forEach(input=>input.value="");}else{const result=await api("/auth/forgot-password",{method:"POST",body:{email:values.email}});status.replaceChildren(message(result.message||"Se a conta existir, as instruções de recuperação serão preparadas."));}}catch(error){status.replaceChildren(message(displayError(error),"error"));}finally{submit.disabled=false;}}},token?field("Nova senha","password","password","",{required:true,minlength:"12",maxlength:"128",autocomplete:"new-password"}):field("E-mail da conta","email","email","",{required:true,autocomplete:"email"}),token?field("Confirme a nova senha","confirmPassword","password","",{required:true,minlength:"12",maxlength:"128",autocomplete:"new-password"}):null,isDemo()&&!token?message("No ambiente de demonstração, os e-mails geram prévias seguras na administração. O envio externo depende da configuração do provedor."):null,status,el("button",{type:"submit",class:"shop-button"},token?"Salvar nova senha":"Solicitar recuperação"),link("Voltar para entrar","/entrar","shop-text-link"));
   return el("div",{class:"shop-shell shop-auth"},heading("SUA CONTA BKM",token?"Crie uma nova senha.":"Recupere seu acesso."),form);
 }
-async function accountPage() {
+async function legacyAccountPage() {
   if (!state.user) {
     navigate("/entrar?next=%2Fconta", { replace: true });
     return loading();
@@ -819,7 +835,7 @@ async function adminPage(path) {
     return loading();
   }
   if (state.user.role !== "ADMIN") return el("div", { class: "shop-shell" }, heading("ACESSO RESTRITO", "Esta \xE1rea \xE9 da administra\xE7\xE3o."), message("Sua conta n\xE3o possui permiss\xE3o para gerenciar a loja."), link("Voltar \xE0 minha conta", "/conta", "shop-button"));
-  const tabs = [["Painel", "/admin"], ["Produtos", "/admin/produtos"], ["Estoque", "/admin/estoque"], ["Pedidos", "/admin/pedidos"], ["Coleções", "/admin/colecoes"], ["E-mails", "/admin/emails"], ["Cupons", "/admin/cupons"], ["Configura\xE7\xF5es", "/admin/configuracoes"]];
+  const tabs = [["Painel", "/admin"], ["Produtos", "/admin/produtos"], ["Estoque", "/admin/estoque"], ["Pedidos", "/admin/pedidos"], ["Coleções", "/admin/colecoes"], ["Preços de referência", "/admin/precos"], ["E-mails", "/admin/emails"], ["Integrações", "/admin/integracoes"], ["Cupons", "/admin/cupons"], ["Configura\xE7\xF5es", "/admin/configuracoes"]];
   let content;
   if (path === "/admin") content = await adminDashboard();
   else if (path === "/admin/produtos") content = await adminProducts();
@@ -832,6 +848,8 @@ async function adminPage(path) {
   else if (/^\/admin\/pedidos\/[^/]+$/.test(path)) content = await orderPage(decodeURIComponent(path.split("/").at(-1)),true);
   else if (path === "/admin/colecoes") content = await adminCollections();
   else if(path === "/admin/emails")content=await adminEmails();
+  else if(path === "/admin/integracoes")content=await adminIntegrations();
+  else if(path === "/admin/precos")content=await adminMarketPrices();
   else content = empty("P\xE1gina n\xE3o encontrada.", "Escolha uma \xE1rea da administra\xE7\xE3o.", link("Ir para o painel", "/admin", "shop-button"));
   return el("div", { class: "shop-shell shop-admin" }, el("div", { class: "shop-admin-title" }, heading("BKM TCG / OPERA\xC7\xC3O", "Administra\xE7\xE3o."), link("Ver a loja \u2197", "/busca", "shop-text-link")), el("nav", { class: "shop-admin-nav", "aria-label": "Administra\xE7\xE3o" }, tabs.map(([label, href]) => link(label, href, path === href || href === "/admin/produtos" && path.startsWith("/admin/produtos/") ? "active" : ""))), content);
 }
@@ -1092,9 +1110,60 @@ async function adminCoupons() {
   const form=el("form",{class:"shop-coupon-editor",onSubmit:async event=>{event.preventDefault();const values=Object.fromEntries(new FormData(form)),submit=form.querySelector("[type=submit]");submit.disabled=true;try{const amount=Number(values.value),payload={code:values.code.trim().toUpperCase(),type:values.type,value:values.type==="PERCENT"?amount:Math.round(amount*100),minimumCents:Math.round(Number(values.minimum||0)*100),startsAt:editing?.startsAt||null,maxUses:values.maxUses?Number(values.maxUses):null,endsAt:values.expiresAt?new Date(`${values.expiresAt}T23:59:59-03:00`).toISOString():null,active:values.active==="on"};await api(`/admin/coupons${editing?`/${encodeURIComponent(editing.id)}`:""}`,{method:editing?"PUT":"POST",body:payload});toast(editing?"Cupom atualizado.":"Cupom criado.");navigate("/admin/cupons",{replace:true});}catch(error){status.replaceChildren(message(displayError(error),"error"));submit.disabled=false;}}},el("h3",{},editing?"Editar cupom":"Criar cupom"),el("div",{class:"shop-form-grid"},field("Código","code","text",editing?.code||"",{required:true,pattern:"[A-Za-z0-9_-]{3,40}",placeholder:"Ex.: BKMDEMO"}),selectField("Tipo","type",[["PERCENT","Percentual (%)"],["FIXED","Valor fixo (R$)"]],editing?.type||"PERCENT"),field("Desconto","value","number",editing?(editing.type==="PERCENT"?editing.value:editing.value/100):"",{required:true,min:".01",step:".01"}),field("Compra mínima (R$)","minimum","number",((editing?.minimumCents||0)/100).toFixed(2),{min:"0",step:".01"}),field("Limite de usos","maxUses","number",editing?.maxUses||"",{min:"1",step:"1",placeholder:"Sem limite"}),field("Válido até","expiresAt","date",editing?.endsAt?.slice(0,10)||"")),checkbox("Ativar cupom","active",editing?editing.active:true),status,el("div",{class:"shop-actions"},el("button",{type:"submit",class:"shop-button"},editing?"Salvar cupom":"Criar cupom"),editing?link("Cancelar edição","/admin/cupons","shop-button secondary"):null));
   return el("section",{},el("h2",{},"Cupons e promoções"),items.length?el("div",{class:"shop-table-wrap"},el("table",{class:"shop-table"},el("thead",{},el("tr",{},["Código","Desconto","Usos","Status","Validade",""].map(text=>el("th",{},text)))),el("tbody",{},items.map(coupon=>el("tr",{},el("td",{},coupon.code),el("td",{},coupon.type==="PERCENT"?`${coupon.value}%`:money(coupon.value)),el("td",{},`${coupon.usedCount||0}${coupon.maxUses?` / ${coupon.maxUses}`:""}`),el("td",{},coupon.active?"Ativo":"Inativo"),el("td",{},coupon.endsAt?new Date(coupon.endsAt).toLocaleDateString("pt-BR"):"Sem prazo"),el("td",{},link("Editar ↗",`/admin/cupons?edit=${encodeURIComponent(coupon.id)}`,"shop-text-link"))))))):message("Nenhum cupom cadastrado."),form);
 }
+async function adminMarketPrices(){
+  const query=new URLSearchParams(location.search);query.set("pageSize","30");
+  const data=await api(`/admin/market-prices?${query}`),items=asArray(data.items),status=el("div",{"aria-live":"polite"}),preview=el("div",{class:"shop-market-preview"});
+  const filters=el("form",{class:"personal-filters shop-market-filters",onSubmit:event=>{event.preventDefault();const params=new URLSearchParams();for(const [key,value]of new FormData(filters))if(value)params.set(key,String(value).trim());navigate(`/admin/precos${params.size?`?${params}`:""}`);}},field("Identificador da carta","cardId","text",query.get("cardId")||"",{placeholder:"Ex.: me02.5-276"}),field("Código da coleção","setId","text",query.get("setId")||"",{placeholder:"Ex.: me02.5"}),selectField("Idioma","language",[["","Todos os idiomas"],...Object.entries(languages)],query.get("language")||""),selectField("Condição","condition",[["","Todas as condições"],...Object.entries(conditions).filter(([key])=>key!=="SEALED")],query.get("condition")||""),selectField("Acabamento","variant",[["","Todos os acabamentos"],["NORMAL","Normal"],["HOLO","Holo"],["REVERSE","Reverse holo"],["PROMO","Promo"],["FIRST_EDITION","Primeira edição"],["OTHER","Outra variante"]],query.get("variant")||""),el("div",{class:"shop-actions"},el("button",{type:"submit",class:"shop-button secondary"},"Filtrar referências"),link("Limpar","/admin/precos","shop-text-link")));
+  let validationVersion=0,previewToken=null;
+  const dateLabel=value=>value&&Number.isFinite(Date.parse(value))?new Date(value).toLocaleString("pt-BR"):"Não informada";
+  const quoteVersion=quote=>`${languages[quote.language]||quote.language||"—"} · ${conditions[quote.condition]||quote.condition||"—"} · ${finishes[quote.variant]||quote.variant||"—"}`;
+  const sourceLink=quote=>{try{const url=new URL(quote.sourceUrl);return url.protocol==="https:"&&!url.username&&!url.password?el("a",{href:url.href,target:"_blank",rel:"noopener noreferrer",class:"shop-text-link"},quote.sourceLabel||quote.source||"Fonte informada"):el("span",{},quote.sourceLabel||quote.source||"Referência manual");}catch{return el("span",{},quote.sourceLabel||quote.source||"Referência manual");}};
+  const source=field("Fonte dos dados / identificação da autorização","sourceLabel","text","",{required:true,maxlength:"200",placeholder:"Ex.: tabela própria autorizada, referência manual da BKM"}),sourceUrl=field("Link da fonte (opcional)","sourceUrl","url","",{maxlength:"2000",placeholder:"https://…"}),quotedAt=field("Data e hora da referência","quotedAt","datetime-local","",{required:true}),csv=field("CSV de referências em BRL","csv","textarea","",{required:true,rows:"9",placeholder:"cardId,setId,language,condition,variant,valueCents,currency\nme02.5-276,me02.5,pt,NM,HOLO,1000,BRL"});
+  const localNow=new Date();localNow.setMinutes(localNow.getMinutes()-localNow.getTimezoneOffset());quotedAt.querySelector("input").value=localNow.toISOString().slice(0,16);
+  function invalidatePreview(){validationVersion++;previewToken=null;preview.replaceChildren();}
+  const file=el("input",{type:"file",accept:".csv,text/csv","aria-label":"Escolher CSV de referências",onChange:async event=>{const chosen=event.target.files?.[0];if(!chosen)return;invalidatePreview();if(chosen.size>1024*1024){status.replaceChildren(message("Escolha um CSV com até 1 MB.","error"));return;}try{csv.querySelector("textarea").value=await chosen.text();status.replaceChildren();}catch{status.replaceChildren(message("Não foi possível ler esse arquivo CSV.","error"));}}});
+  const form=el("form",{class:"shop-market-import",onInput:invalidatePreview,onSubmit:async event=>{
+    event.preventDefault();const submit=form.querySelector("[type=submit]"),version=++validationVersion;previewToken=null;preview.replaceChildren();status.replaceChildren(loading("Conferindo as referências e suas identidades…"));submit.disabled=true;
+    try{
+      const values=Object.fromEntries(new FormData(form)),quotedDate=new Date(values.quotedAt);
+      if(!Number.isFinite(quotedDate.getTime()))throw new Error("Informe a data real da referência.");
+      const result=await api("/admin/market-prices/import/preview",{method:"POST",body:{csv:values.csv,sourceLabel:values.sourceLabel.trim(),sourceUrl:values.sourceUrl.trim()||null,quotedAt:quotedDate.toISOString()}});
+      if(version!==validationVersion||!form.isConnected)return;
+      const rows=asArray(result.rows),errors=asArray(result.errors);previewToken=result.token||null;
+      const rights=checkbox("Confirmo que possuo autorização ou direitos para utilizar estes dados e publicar estas referências na BKM TCG.","rightsConfirmed",false),confirmationStatus=el("div",{"aria-live":"polite"});
+      const confirm=button("Confirmar importação autorizada",async event=>{
+        const trigger=event.currentTarget;
+        if(!previewToken||!rights.querySelector("input").checked)return;
+        trigger.disabled=true;confirmationStatus.replaceChildren(loading("Importando referências validadas…"));
+        try{
+          const imported=await api("/admin/market-prices/import/confirm",{method:"POST",body:{token:previewToken,rightsConfirmed:true}});
+          previewToken=null;toast(`${imported.imported??rows.length} referências importadas com fonte e data.`);await renderRoute();
+        }catch(error){confirmationStatus.replaceChildren(message(displayError(error),"error"));trigger.disabled=!rights.querySelector("input").checked;}
+      },"shop-button",{disabled:true});
+      rights.querySelector("input").addEventListener("change",()=>{confirm.disabled=!previewToken||result.canConfirm!==true||errors.length>0||!rights.querySelector("input").checked;});
+      setChildren(preview,el("h3",{},"Confira a prévia antes de publicar"),el("p",{class:"shop-muted"},`${rows.length} referências identificadas · ${errors.length} erros · ${asArray(result.duplicates).length} duplicatas identificadas. Valores unitários em BRL; metodologia manual, sem mediana calculada automaticamente.`),el("p",{class:"shop-fine"},`Fonte informada: ${values.sourceLabel.trim()} · Referência em ${dateLabel(quotedDate.toISOString())}.`),errors.length?message(errors.map(error=>typeof error==="string"?error:`Linha ${error.line??error.row??"—"}: ${error.message||error.error||"Dados inválidos"}`).join("\n"),"error"):null,rows.length?shopTable(["Linha","Carta / coleção","Versão","Referência unitária","Moeda"],rows.slice(0,100).map((row,index)=>[row.line??index+2,el("div",{},el("strong",{},row.card?.name||row.cardId||"Identidade não informada"),el("p",{class:"shop-fine"},`${row.setId||""} · ${row.card?.number||""}`)),quoteVersion(row),money(row.valueCents),row.currency||"BRL"])):null,rows.length>100?el("p",{class:"shop-fine"},"A tabela mostra as primeiras 100 linhas da prévia. A quantidade acima corresponde ao conjunto validado."):null,result.canConfirm!==true?message("Corrija os erros e valide um novo CSV antes de confirmar.","error"):null,rights,confirmationStatus,confirm);
+      status.replaceChildren();
+    }catch(error){if(version===validationVersion)status.replaceChildren(message(displayError(error),"error"));}
+    finally{submit.disabled=false;}
+  }},el("div",{class:"shop-form-grid"},source,sourceUrl,quotedAt),el("p",{class:"shop-fine"},"O registro é uma referência manual administrada pela BKM, com fonte e data. Não representa cotação oficial da Liga Pokémon nem venda concluída. Importar dados exige direitos de utilização."),file,csv,el("p",{class:"shop-fine"},"Colunas: cardId, setId, language, condition, variant, valueCents, currency. valueCents é o preço unitário em centavos: R$ 10,00 = 1000. Use BRL na moeda. O texto de exemplo não é importado automaticamente."),el("button",{type:"submit",class:"shop-button secondary"},"Validar CSV e ver prévia"));
+  const pagination=data.pagination||{},current=Number(pagination.page||data.page)||1,total=Number(pagination.total??data.total)||0,pageSize=Number(pagination.pageSize||data.pageSize)||30,pages=Number(pagination.pages)||Math.ceil(total/pageSize);
+  return el("section",{class:"shop-market-prices"},el("div",{class:"shop-section-top"},el("h2",{},"Referências de mercado autorizadas"),button("Atualizar",()=>renderRoute(),"shop-button secondary")),message("Este painel administra referências globais autorizadas. Valores particulares informados pelos clientes permanecem privados e não aparecem nesta lista."),el("div",{class:"personal-sets"},asArray(data.providers).map(provider=>el("section",{class:"personal-panel"},el("h3",{},provider.label||provider.name||provider.id),badge((provider.enabled??provider.configured)?(provider.automatic??provider.automated)?"Automático habilitado":"Referências manuais habilitadas":"Não configurado"),el("p",{class:"shop-muted"},provider.reason||"Confira a autorização e a cobertura desta fonte.")))),el("section",{class:"shop-admin-section"},el("h3",{},"Importar dados obtidos legitimamente"),form,status,preview),el("section",{class:"shop-admin-section"},el("h3",{},"Referências registradas"),filters,el("p",{class:"shop-fine"},`${total} referências encontradas. Apenas dados globais autorizados.`),items.length?shopTable(["Carta / coleção","Versão","Referência unitária","Fonte","Metodologia","Data da referência","Registro"],items.map(quote=>[el("div",{},el("strong",{},quote.card?.name||quote.cardId),el("p",{class:"shop-fine"},quote.setId)),quoteVersion(quote),money(quote.valueCents),sourceLink(quote),quote.methodology==="manual"?"Valor manual informado":quote.methodology||"Manual",el("span",{},dateLabel(quote.quotedAt),quote.stale?el("small",{class:"shop-demo-product"},"Referência desatualizada"):null),dateLabel(quote.recordedAt)])):message("Ainda não há referências globais cadastradas. Nenhum preço de mercado foi fabricado."),pages>1?el("nav",{class:"shop-pagination","aria-label":"Paginação das referências"},button("← Anterior",()=>goPage("/admin/precos",current-1),"shop-button secondary",{disabled:current<=1}),el("span",{},`Página ${current} de ${pages}`),button("Próxima →",()=>goPage("/admin/precos",current+1),"shop-button secondary",{disabled:current>=pages})):null));
+}
+async function adminIntegrations(){
+  const data=await api("/admin/integrations"),services=[
+    ["Login Google",data.google?.enabled?"Configurado":"Aguardando configuração",data.google?.reason,data.google?.callbackUrl],
+    ["E-mails",data.email?.externalSend?"Envio externo habilitado":"Prévias privadas",data.email?.reason],
+    ["Pagamentos",data.payments?.provider==="mock"?"Simulação":data.payments?.enabled?"Configurado":"Desativado",data.payments?.reason],
+    ["Preços de referência",data.prices?.automatic?"Provedor automatizado":"Referências manuais",data.prices?.reason],
+    ["Logística",data.shipping?.configured?"Configurada":"Frete de demonstração","A cotação e a contratação de fretes dependem da homologação do provedor."],
+    ["Cartas desejadas",`${data.wishlist?.subscriptions??0} desejos ativos`,"Preferências individuais e consentimentos controlam os alertas. Um aviso não reserva estoque."],
+    ["Carrinhos abandonados",data.abandonedCart?.enabled?"Habilitado":"Desativado","A automação permanece desligada até a configuração operacional e o consentimento de cada cliente."]
+  ];
+  return el("section",{},el("div",{class:"shop-section-top"},el("h2",{},"Integrações e operação"),button("Atualizar status",()=>renderRoute(),"shop-button secondary")),message(`Domínio canônico: ${data.publicUrl||location.origin}. O status descreve a configuração atual; não substitui a homologação de cada integração.`),el("div",{class:"personal-sets"},services.map(([title,status,reason,detail])=>el("section",{class:"personal-panel"},el("h2",{},title),badge(status),el("p",{class:"shop-muted"},reason||"Consulte a configuração deste serviço."),detail?el("p",{class:"shop-fine"},detail):null))));
+}
 async function adminEmails(){
   const response=await api("/admin/emails"),items=asArray(response.items),status=el("div",{"aria-live":"polite"});
-  return el("section",{},el("div",{class:"shop-section-top"},el("h2",{},"E-mails transacionais"),button("Atualizar",()=>renderRoute(),"shop-button secondary")),isDemo()?message("Prévia de demonstração: estas mensagens não são enviadas a endereços externos. Dados sensíveis e links de recuperação são ocultados."):null,status,items.length?el("div",{class:"shop-email-list"},items.map(item=>el("details",{class:"shop-admin-section shop-email-preview"},el("summary",{},el("span",{},el("strong",{},item.subject),el("small",{},`${item.to||"Destinatário protegido"} · ${item.createdAt?new Date(item.createdAt).toLocaleString("pt-BR"):""}`)),badge(item.status||"Prévia")),el("pre",{},item.text||"Prévia de texto indisponível."),button(isDemo()?"Reprocessar prévia":"Reprocessar mensagem",async event=>{const trigger=event.currentTarget;trigger.disabled=true;try{await api(`/admin/emails/${encodeURIComponent(item.id)}/retry`,{method:"POST",body:{}});toast(isDemo()?"Prévia reprocessada, sem envio externo.":"Mensagem reencaminhada para processamento.");renderRoute();}catch(error){status.replaceChildren(message(displayError(error),"error"));trigger.disabled=false;}},"shop-button secondary")))):empty("Nenhuma mensagem neste ambiente.","Ao criar uma conta ou simular pedidos, as prévias transacionais aparecerão aqui."));
+  return el("section",{},el("div",{class:"shop-section-top"},el("h2",{},"E-mails transacionais"),button("Atualizar",()=>renderRoute(),"shop-button secondary")),message(response.integration?.externalSend?"Envio real de homologação limitado aos destinatários autorizados. Tokens de recuperação nunca aparecem nas prévias.":"Prévias privadas: nenhum envio externo. Dados sensíveis e links de recuperação são ocultados."),status,items.length?el("div",{class:"shop-email-list"},items.map(item=>el("details",{class:"shop-admin-section shop-email-preview"},el("summary",{},el("span",{},el("strong",{},item.subject),el("small",{},`${item.to||"Destinatário protegido"} · ${item.createdAt?new Date(item.createdAt).toLocaleString("pt-BR"):""}`)),badge(item.status||"Prévia")),el("p",{class:"shop-fine"},`Tentativas: ${item.attempts||0} · Entrega: ${{PREVIEW:"Prévia privada",ACCEPTED:"Aceito pelo provedor",DELIVERED:"Entregue",DEFERRED:"Entrega adiada",BOUNCED:"Devolvido",COMPLAINED:"Reclamação",FAILED:"Falhou",SUPPRESSED:"Suprimido"}[item.deliveryStatus]||"Aguardando evento do provedor"}${item.lastEventAt?` · Último evento: ${new Date(item.lastEventAt).toLocaleString("pt-BR")}`:""}`),item.errorCode?message(`Código da última falha: ${item.errorCode}`,"error"):null,el("pre",{},item.text||"Prévia de texto indisponível."),button("Reprocessar mensagem",async event=>{const trigger=event.currentTarget;trigger.disabled=true;try{await api(`/admin/emails/${encodeURIComponent(item.id)}/retry`,{method:"POST",body:{}});toast("Mensagem reencaminhada para processamento pelo provedor configurado.");renderRoute();}catch(error){status.replaceChildren(message(displayError(error),"error"));trigger.disabled=false;}},"shop-button secondary",{disabled:["SENT","PROCESSING"].includes(item.status)})))):empty("Nenhuma mensagem neste ambiente.","Ao criar uma conta ou simular pedidos, as prévias transacionais aparecerão aqui."));
 }
 async function adminCollections(){
   const response=await api("/admin/collections"),items=asArray(response.items),query=new URLSearchParams(location.search),editing=items.find(item=>item.id===query.get("edit")),status=el("div",{"aria-live":"polite"});
@@ -1152,6 +1221,7 @@ async function initialize() {
   state.initializing = false;
   renderNav();
 }
+const personalUI=createPersonalUI({el,link,button,field,selectField,checkbox,message,empty,image,money,api,navigate,toast,refresh:renderRoute,getState:()=>state,ordersList,logout});
 if (navMount && mount && overlay) {
   const path = location.pathname.replace(/\/$/, "") || "/";
   setHome(["/", "/index.html", "/ABRIR.html"].includes(path));

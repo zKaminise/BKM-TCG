@@ -140,6 +140,8 @@ function createMercadoPagoService({ db, env = process.env, ApiError = PaymentErr
       if (audit) await audit(actor, 'MERCADO_PAGO_RECONCILED', row.id, { status: nextStatus, fulfillment: orderStatus });
       const updated = await db.prepare('SELECT * FROM orders WHERE id=?').get(row.id);
       if (!approvedBefore && nextStatus === 'APPROVED') await mail(updated, 'payment-approved', 'mp-payment:' + row.id + ':approved');
+      else if (!ignored && nextStatus === 'REFUNDED' && previousStatus !== 'REFUNDED') await mail(updated, 'order-refunded', 'mp-payment:' + row.id + ':refunded');
+      else if (!ignored && previousStatus === 'PENDING' && nextStatus === 'CANCELLED') await mail(updated, 'order-cancelled', 'mp-payment:' + row.id + ':CANCELLED');
       else if (previousStatus === 'PENDING' && finalFailure.has(nextStatus)) await mail(updated, 'payment-rejected', 'mp-payment:' + row.id + ':' + nextStatus);
       return serializeOrder(updated);
     });

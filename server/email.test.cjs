@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { renderEmail, TEMPLATES, createEmailProvider, DevelopmentEmailProvider, ResendEmailProvider, emailReadiness, createEmailDispatcher, EmailError } = require('./email.cjs');
 const demo = { BKM_ENVIRONMENT: 'demo', BKM_PUBLIC_URL: 'https://bkm.example.test' };
 const production = { BKM_ENVIRONMENT: 'production', BKM_PUBLIC_URL: 'https://bkm.example.test', EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'unit-only-not-a-real-api-key', RESEND_FROM: 'BKM TCG <pedidos@bkm.example.test>', RESEND_ENABLED: 'true', RESEND_DOMAIN_VERIFIED: 'true' };
-const data = { customerName: '<script>alert(1)</script>', orderNumber: 'DEMO-0001', orderId: 'order_unit', items: [{ name: 'Pikachu <img src=x onerror=alert(1)>', quantity: 2, priceCents: 1234 }], subtotalCents: 2468, discountCents: 0, shippingCents: 500, totalCents: 2968, resetUrl: 'https://bkm.example.test/redefinir-senha?token=private-unit-token', trackingCode: 'DEMO-TRACK', trackingUrl: 'javascript:alert(1)' };
+const data = { customerName: '<script>alert(1)</script>', orderNumber: 'DEMO-0001', orderId: 'order_unit', items: [{ name: 'Pikachu <img src=x onerror=alert(1)>', quantity: 2, priceCents: 1234 }], subtotalCents: 2468, discountCents: 0, shippingCents: 500, totalCents: 2968, resetUrl: 'https://bkm.example.test/redefinir-senha?token=private-unit-token', verificationUrl:'https://bkm.example.test/conta?token=private-unit-token', trackingCode: 'DEMO-TRACK', trackingUrl: 'javascript:alert(1)' };
 
 test('todos os templates usam identidade BKM, dados escapados e simulação visível', () => {
   for (const template of TEMPLATES) {

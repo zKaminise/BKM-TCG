@@ -22,7 +22,7 @@ function openDatabase(filename) {
   const db = new DatabaseSync(filename);
   db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
   const version = db.prepare("PRAGMA user_version").get().user_version;
-  if (version > 3) {
+  if (version > 7) {
     db.close();
     throw new Error("Banco criado por uma versão mais recente; atualização recusada.");
   }
@@ -53,6 +53,26 @@ function openDatabase(filename) {
   if (version < 3) {
     db.exec('BEGIN IMMEDIATE');
     try { db.exec(fs.readFileSync(path.join(__dirname, 'migrations/002_commerce.sql'), 'utf8')); db.exec('PRAGMA user_version=3; COMMIT;'); }
+    catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+  if (version < 4) {
+    db.exec('BEGIN IMMEDIATE');
+    try { db.exec(fs.readFileSync(path.join(__dirname, 'migrations/004_personal_collection.sql'), 'utf8').split('-- POSTGRES_RLS')[0]); db.exec('PRAGMA user_version=4; COMMIT;'); }
+    catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+  if (version < 5) {
+    db.exec('BEGIN IMMEDIATE');
+    try { db.exec(fs.readFileSync(path.join(__dirname, 'migrations/005_google_auth.sql'), 'utf8').split('ALTER TABLE oauth_states ENABLE ROW LEVEL SECURITY;')[0]); db.exec('PRAGMA user_version=5; COMMIT;'); }
+    catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+  if (version < 6) {
+    db.exec('BEGIN IMMEDIATE');
+    try { db.exec(fs.readFileSync(path.join(__dirname, 'migrations/006_email_events.sql'), 'utf8').split('-- PostgreSQL access control')[0]); db.exec('PRAGMA user_version=6; COMMIT;'); }
+    catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+  if (version < 7) {
+    db.exec('BEGIN IMMEDIATE');
+    try { db.exec(fs.readFileSync(path.join(__dirname, 'migrations/007_market_prices.sql'), 'utf8').split('-- POSTGRES_RLS')[0]); db.exec('PRAGMA user_version=7; COMMIT;'); }
     catch (error) { db.exec('ROLLBACK'); throw error; }
   }
   db.prepare("INSERT OR IGNORE INTO settings(id,value_json,updated_at) VALUES(1,?,?)").run(JSON.stringify(defaultSettings), (/* @__PURE__ */ new Date()).toISOString());

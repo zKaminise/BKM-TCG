@@ -1,80 +1,77 @@
-# BKM TCG
+# BKM TCG — Fase 3
 
-Loja de demonstração de Pokémon TCG com a marca BKM, catálogo persistente, administração e abertura 3D do pacote preservada. Produtos, preços, estoques, frete e pedidos de demonstração são fictícios. Nenhuma venda, cobrança ou entrega real é feita nesse modo.
+E-commerce demonstrativo de Pokémon TCG e gerenciador privado de coleções pessoais. A identidade BKM — preto, vermelho, ciano e prata — e a animação 3D do booster com Pikachu foram preservadas.
 
-Repositório oficial: [zKaminise/BKM-TCG](https://github.com/zKaminise/BKM-TCG).
+- Site oficial: [lojabkm.com.br](https://lojabkm.com.br/).
+- Repositório: [zKaminise/BKM-TCG](https://github.com/zKaminise/BKM-TCG), branch `main`.
+- Diretório de trabalho: `D:\Importante\Codex\LP Vendas TCG Site`.
+- Endereço anterior de demonstração: [bkm-tcg-demo.vercel.app](https://bkm-tcg-demo.vercel.app/).
 
-Demonstração online: [bkm-tcg-demo.vercel.app](https://bkm-tcg-demo.vercel.app/). PostgreSQL e Storage Supabase estão conectados. Administração, upload 4K, catálogo TCGdex, checkout móvel e concorrência real de estoque foram exercitados na integração remota; os cenários e evidências estão em [docs/VALIDACAO.md](docs/VALIDACAO.md).
+**Estado em 20/10/2026, antes da publicação da Fase 3:** código local preparado para validação, 211 testes automatizados aprovados e migrations 1–7 aplicadas ao Supabase principal. O domínio canônico e o redirecionamento de `www` já foram corrigidos na hospedagem. O push/deploy da Fase 3 e a prova final dos novos fluxos no domínio público ainda precisam ser registrados em [docs/VALIDACAO.md](docs/VALIDACAO.md). Alterações locais ou variáveis configuradas não comprovam homologação online.
 
-## Abrir a loja completa
+Em 20/10 foi criado o novo projeto Supabase **BKM ecommerce** (`cxoeompxmgdzufgzxerw`) em nova conta autorizada pelo titular. Migração e configuração permanecem pendentes. A existência do projeto não significa que a loja publicada já o utilize.
 
-Use Node.js **22.13 ou mais recente na versão 22**. No Windows, dê dois cliques em **ABRIR SITE.cmd**. O inicializador instala as dependências se necessário, prepara a demonstração sem sobrescrever alterações administrativas, inicia o servidor e abre o navegador. Mantenha a janela aberta.
+A instalação principal permanece em **demonstração, sem vendas ou cobranças reais**. Preços, estoque, frete e pedidos comerciais usados no QA são ilustrativos. A homologação Mercado Pago deve ocorrer em projeto e banco separados.
 
-A entrada da loja é **http://localhost:4173/**. Administração: **http://localhost:4173/admin**.
+## Abrir localmente
 
-Para usar o terminal:
+Use Node.js **22.13 ou mais recente na versão 22**. No Windows, execute **ABRIR SITE.cmd**. O inicializador prepara as dependências e abre a loja em [localhost:4173](http://localhost:4173/). Administração: [localhost:4173/admin](http://localhost:4173/admin). Mantenha o servidor aberto.
+
+Em uma instalação nova:
 
 ```powershell
 npm ci
-# Na primeira instalação, copie .env.example para .env. Preserve um .env já existente.
 if (-not (Test-Path -LiteralPath '.env')) { Copy-Item -LiteralPath '.env.example' -Destination '.env' }
 npm run db:migrate
 npm run demo:seed
 npm start
 ```
 
-O `.env` é privado e carregado automaticamente. O servidor local escuta apenas neste computador. `ABRIR.html` é uma apresentação offline opcional, apenas da animação. No servidor, esse endereço redireciona à loja completa para evitar confusão.
+O `.env` privado determina o banco. `DATABASE_URL` usa PostgreSQL; sem ela, o desenvolvimento utiliza SQLite. Confira o destino antes de migrar, importar ou popular dados. O seed é restrito à demonstração e preserva alterações administrativas. `ABRIR.html` contém somente a animação offline; no servidor esse endereço redireciona à loja completa.
 
-## Primeiro administrador
+Para um banco novo, `CONFIGURAR ADMIN.cmd` ou `npm run admin:create` cria o primeiro administrador por entrada interativa. Não há senha padrão no código. A instalação principal já possui administração; não repita bootstrap para apenas entrar nela. Nunca publique credenciais.
 
-Depois de configurar o `.env`, execute **CONFIGURAR ADMIN.cmd** ou `npm run admin:create`. Informe nome, e-mail e uma senha de 12 a 128 caracteres. A senha não é exibida nem salva no código. Não existe administrador ou senha padrão nos dados de demonstração.
+## Loja e administração
 
-O administrador da instalação online dedicada já foi criado. Esse bootstrap é para um banco novo e não precisa ser repetido para entrar na loja existente.
+- Catálogo persistente de lacrados e cartas avulsas, organizado por coleção, com busca, filtros, ordenação, imagens, zoom e relacionados.
+- Carrinho com drawer, favoritos de produtos, cupons e checkout demonstrativo. Pedidos mantêm snapshots, histórico, reserva e baixa transacional de estoque; repetições idempotentes não criam nova baixa.
+- Painel para produtos, variantes, estoque, imagens, coleções e aliases, pedidos, rastreamento informado, cupons, banners, configurações, e-mails e status das integrações.
+- Importação de identidade e metadados pela TCGdex, separada do preço, condição e estoque comercial.
+- Header com SVGs locais reconhecíveis e navegação de perfil em desktop e celular.
 
-O comando cria somente o primeiro administrador, no mesmo banco configurado para o servidor. Não promove outra conta silenciosamente. Entre em `/entrar` e abra `/admin`. No Supabase, o bootstrap usa a conexão PostgreSQL privada do `.env` local; não exponha a conexão no navegador.
+O seed inicial contém 14 produtos e quatro coleções; o conteúdo atual pode incluir edições e produtos de QA posteriores. Números históricos de estoque ou preços de teste não constituem oferta comercial vigente.
 
-## O que a demonstração permite
+## Minha conta e Minha coleção
 
-- Navegar pela home, animação, lacrados, avulsas, coleções e páginas de produto com zoom e relacionados.
-- Buscar por nome ou número e filtrar coleção, idioma, condição, acabamento, preço e disponibilidade.
-- Gerenciar favoritos e carrinho com drawer, quantidades, cupons, subtotal e progresso para frete grátis.
-- Cadastrar conta, entrar e consultar pedidos próprios.
-- Simular checkout aprovado, pendente, recusado, cancelado ou expirado, com pedidos persistidos, snapshots de preço, histórico e controle transacional de estoque.
-- Administrar produtos, variantes, imagens, coleções e aliases, cupons, estoque, pedidos, rastreamento, banners e configurações.
-- Importar a identidade de uma carta pela TCGdex, conferindo idioma + coleção + número antes de preencher os campos comerciais e publicar.
-- Ver prévias privadas de e-mails de teste e reenviar mensagens transacionais pela fila administrativa.
+`/conta` reúne visão geral, fichários, cartas pessoais, faltantes, desejos, pedidos, endereços, dados, preferências, segurança e notificações. Essas informações são privadas por padrão, protegidas no servidor por sessão e propriedade dos registros.
 
-O seed cria 14 produtos e quatro coleções em banco dedicado: cartas em português/inglês, variantes, lacrados e exemplos esgotados. O cupom ilustrativo `BKMDEMO` concede 10% a partir de R$ 50. O frete demonstrativo é R$ 15, com gratuidade a partir de R$ 150 em CEPs cobertos. Tudo pode ser alterado no painel. Reexecutar o seed preserva as edições; um banco com produtos sem a identificação de demonstração é recusado.
+O cliente pode acompanhar coleções de referência, definir objetivo básico ou personalizado, consultar checklist visual e adicionar cartas individualmente ou em lote. Lotes distintos preservam quantidade, idioma, condição, variante, custo unitário, aquisição e notas. Cartas pessoais não precisam estar anunciadas na loja e não alteram seu estoque. Uma compra não é marcada automaticamente como carta recebida.
 
-## Arquitetura e persistência
+Desejos guardam identidade e preferências, inclusive para cartas sem anúncio. Disponibilidade considera anúncio publicado, estoque e compatibilidade. Há notificações internas e preparação de alertas por e-mail com consentimento e deduplicação. Preferências de marketing e carrinho são separadas; a automação de carrinho abandonado permanece desligada.
 
-Frontend HTML/CSS/JavaScript; Three.js local para a animação. Backend Node modular. `server/store.cjs` usa PostgreSQL quando `DATABASE_URL` está configurada e SQLite somente no desenvolvimento local. Não há catálogo fixo no frontend nem dependência de localStorage como banco principal.
+Importação CSV oferece validação, prévia, erros, duplicatas, confirmação e consolidação opcional; exportação preserva lotes e referências disponíveis. Fotos pessoais são URLs HTTPS informadas pelo titular; **não existe upload privado de fotos pessoais nesta entrega**. O upload administrativo de produtos continua no Storage Supabase.
 
-As migrations PostgreSQL versionadas ficam em `server/migrations/` e são aplicadas transacionalmente. As tabelas incluem usuários, sessões, cartas, produtos, variantes, coleções, carrinho/favoritos de contas, cupons, pedidos/itens, reservas, movimentos, pagamentos/eventos, endereços, remessas, configurações, auditoria e outbox de e-mails. As tabelas da aplicação têm RLS e não concedem acesso direto aos papéis anon/authenticated. A API aplica propriedade da conta e autorização administrativa.
+## Referências de valor
 
-A autenticação existente foi preservada: scrypt com salt, sessões com tokens armazenados como hash, cookie HttpOnly/SameSite e CSRF. Na hospedagem HTTPS o cookie usa Secure. Não foi criado um segundo sistema paralelo de usuários no Supabase Auth.
+A avaliação mostra valor conhecido, unidades sem cotação e cobertura, mantendo custo de aquisição separado. Histórico nasce de registros e snapshots reais, sem reconstruir preços passados.
 
-Em pedidos pendentes, unidades ficam reservadas. Aprovação efetiva a baixa uma vez; recusa, cancelamento e expiração liberam a reserva. Alterações no anúncio não mudam o snapshot de um pedido existente. Preços, estoque, cupom e entrega são sempre recalculados no servidor.
+Há referências manuais privadas do cliente e referências globais administradas em `/admin/precos`, com CSV, fonte, data, moeda BRL e confirmação de direitos. Elas são armazenadas separadamente. O conjunto global está vazio nesta etapa: não foram inventadas cotações para preencher a interface. Referência manual não é mediana automática nem preço oficial da Liga Pokémon.
 
-## Supabase e hospedagem
+Não foi estabelecido acesso automatizado autorizado à Liga Pokémon. Não há scraping, contorno de bloqueios ou equivalência presumida entre preços estrangeiros e o mercado brasileiro. Consulte [docs/PRECOS.md](docs/PRECOS.md).
 
-Veja [docs/DEPLOY.md](docs/DEPLOY.md) para o estado implantado e as etapas exatas. A publicação Vercel usa frontend em `dist/` e uma função Node para `/api/*`; não depende de um processo Node permanente. PostgreSQL e uploads estão no projeto Supabase dedicado `bkm-tcg-demo`, região São Paulo, plano Free. O filesystem da Vercel nunca é usado como armazenamento persistente.
+## Arquitetura e integrações
 
-O upload administrativo aceita PNG/JPEG/WebP de até 8 MB. Imagens grandes são otimizadas no navegador antes de atravessar o limite do servidor de hospedagem. O servidor valida o formato e envia a imagem a um bucket Supabase dedicado. O fallback `uploads/` é permitido apenas localmente.
+Frontend HTML/CSS/JavaScript, `personal-ui.js` para o espaço do colecionador e Three.js local para a animação. Backend Node modular, PostgreSQL Supabase e Storage dedicado. A publicação Vercel usa frontend em `dist/` e função Node em `api/index.js`; não depende de processo permanente ou filesystem persistente da função.
 
-Para importar um SQLite existente em um PostgreSQL dedicado vazio, use `npm run db:import -- "caminho/do/banco.sqlite"`. O script recusa um destino já populado e invalida sessões, sem apagar o banco de origem.
+A autenticação BKM foi mantida: scrypt, sessões com token armazenado como hash, cookie HttpOnly/SameSite/Secure em HTTPS, CSRF e RBAC. As migrations versionadas incluem coleção pessoal, identidades OAuth, eventos de e-mail e referências globais; RLS protege tabelas da aplicação. Não houve migração para um segundo cadastro Supabase Auth.
 
-O deploy Hobby é **exclusivamente demonstrativo e não comercial**. `HOSTING_DEMO_ONLY=true` mantém pagamentos e e-mails externos desativados. Antes de vendas reais, use infraestrutura/plano comercialmente compatível, domínio e políticas definitivas, logística e as validações dos provedores. Consulte as [regras Hobby da Vercel](https://vercel.com/docs/plans/hobby).
+Google OIDC usa Authorization Code, PKCE, state/nonce e validação no servidor. Resend utiliza outbox, idempotência e webhook Svix com corpo bruto. Cliente Google e segredos Resend foram guardados privadamente e configurados nas variáveis Production; **OAuth real e entrega de e-mail ainda dependem de prova externa**. A configuração não equivale à homologação.
 
-## Mercado Pago e Resend
+Mercado Pago permanece mock na instalação principal. A conta de vendedor de teste foi conferida; a homologação externa de Pix/cartão, webhook e reconciliação ocorrerá em infraestrutura separada. Produção financeira continua desativada.
 
-Há adaptadores, fluxo de pedidos, interface oficial tokenizada de cartão/Pix, webhook com validação de assinatura e confirmação remota, idempotência e reconciliação. A demonstração usa exclusivamente `MockPaymentProvider` e não carrega o SDK de cartão. Não existe QR Pix fictício.
+O adaptador Melhor Envio permite somente cotação e consulta de etiquetas existentes no sandbox; foi testado com transporte controlado, está sem chave e não está ligado ao checkout. Não compra etiquetas. Detalhes: [docs/LOGISTICA.md](docs/LOGISTICA.md).
 
-E-mails usam `DevelopmentEmailProvider` em demonstração. `ResendEmailProvider` depende de chave, remetente/domínio verificado e ativação explícita. A outbox persiste tentativas, falhas e reenvios. Templates BKM incluem boas-vindas, pedido, estados de pagamento, envio, rastreio e recuperação de senha. Prévias de desenvolvimento não divulgam tokens de recuperação.
-
-As integrações externas reais **ainda exigem credenciais seguras e validação de sandbox/domínio**. Testes com transporte controlado não equivalem a cobranças ou envios reais aprovados pelos provedores. Configurações em `.env.example`; detalhes em [docs/INTEGRACOES.md](docs/INTEGRACOES.md).
-
-## Verificação e builds
+## Segurança operacional, testes e publicação
 
 ```powershell
 npm run check
@@ -82,10 +79,16 @@ npm test
 npm run build
 ```
 
-Os testes usam bancos e identidades sintéticas isoladas, incluindo PostgreSQL via PGlite. Não enviam e-mail externo nem cobram pagamentos. `npm run build` gera o frontend da loja para hospedagem. `npm run build:offline` reconstrói somente a animação autônoma e requer esbuild.
+A rodada integral da Fase 3 registrou **211 testes aprovados**. Os testes usam identidades e bancos isolados; não comprovam OAuth, entrega Resend ou pagamento externo por conta própria. Confira o escopo em [docs/VALIDACAO.md](docs/VALIDACAO.md).
 
-Estado de provisionamento e evidências reais: [docs/VALIDACAO.md](docs/VALIDACAO.md). Bloqueios externos e ativação comercial: [docs/PENDENCIAS.md](docs/PENDENCIAS.md).
+Backup manual criptografado com AES-256-GCM e restauração isolada foram executados com dados reais, sem publicar conteúdo. A chave fica no `.env` privado e deve ter cópia segura separada; não integra Git ou ZIP público. Retenção é um procedimento manual, sem agendamento ativo. Veja [docs/BACKUP.md](docs/BACKUP.md).
+
+O Vercel Hobby continua destinado a demonstração não comercial, com `noindex`. Abertura comercial requer infraestrutura elegível, dados empresariais e políticas definitivas, logística e homologações. Não há autorização automática para cobranças reais.
+
+Configuração e estado: [docs/DEPLOY.md](docs/DEPLOY.md). Contratos: [docs/INTEGRACOES.md](docs/INTEGRACOES.md). Dependências restantes: [docs/PENDENCIAS.md](docs/PENDENCIAS.md).
 
 ## Recursos visuais
 
-Logo, frente do pacote e Pikachu fornecidos pelo proprietário. Imagens de referência e fontes dos produtos de teste: [docs/IMAGENS-DEMO.md](docs/IMAGENS-DEMO.md). Three.js inclui licença MIT em `vendor/LICENSE`. A animação é uma reconstrução própria em tempo real inspirada no material de referência; não reutiliza os frames da Star Grading nem inclui graduação/slab.
+Logo, pacote e Pikachu foram fornecidos pelo proprietário. Fontes dos produtos demonstrativos: [docs/IMAGENS-DEMO.md](docs/IMAGENS-DEMO.md). Three.js mantém licença MIT em `vendor/LICENSE`. A animação é uma reconstrução própria em tempo real, sem reutilização dos frames de referência ou inclusão de graduação/slab.
+
+Durante a migração, `BKM_MAINTENANCE_MODE=true` permite manutenção temporária: a API responde HTTP 503 com `Retry-After: 60` antes de inicializar o banco. Esse estado não indica migração ou publicação concluída.

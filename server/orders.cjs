@@ -14,9 +14,13 @@ function createOrders({db,quote,env,audit,ApiError,enqueueEmail,paymentProvider}
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length>254) fail(422,'PAYMENT_PAYER_INVALID','Informe um e-mail válido para o pagamento.');
     if(env.MERCADO_PAGO_ENVIRONMENT==='sandbox' && !/@testuser\.com$/i.test(email)) fail(422,'PAYMENT_TEST_ACCOUNT_REQUIRED','O sandbox requer um comprador de teste do Mercado Pago.');
     const input={method:payment.method,payer:{email}};
+    for(const key of ['firstName','lastName']) if(payer[key]!==undefined) {
+      if(typeof payer[key]!=='string' || !payer[key].trim() || payer[key].length>120 || /[\u0000-\u001f\u007f]/.test(payer[key])) fail(422,'PAYMENT_PAYER_INVALID','Nome do pagador inválido.');
+      input.payer[key]=payer[key].trim();
+    }
     if(payer.identification) {
       const identification=payer.identification;
-      if(!['CPF','CNPJ'].includes(identification.type) || typeof identification.number!=='string' || !/^\d{11,14}$/.test(identification.number)) fail(422,'PAYMENT_PAYER_INVALID','Documento do pagador inválido.');
+      if(!['CPF','CNPJ'].includes(identification.type) || typeof identification.number!=='string' || !(identification.type==='CPF'?/^\d{11}$/:/^\d{14}$/).test(identification.number)) fail(422,'PAYMENT_PAYER_INVALID','Documento do pagador inválido.');
       input.payer.identification={type:identification.type,number:identification.number};
     }
     if(payment.method==='card') {

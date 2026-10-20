@@ -122,6 +122,9 @@ for(const engine of ['sqlite','postgres'])test('ledger Mercado Pago com banco '+
   await t.test('notificação antiga e aprovação após reembolso não desfazem nem repetem baixa',async()=>{
     const order=await f.order();f.approve(order);await f.service.createPayment(order,input);assert.equal(await f.stock(order),1);
     f.now+=1000;f.remote(order,{status:'refunded',status_detail:'refunded'});assert.equal((await f.service.reconcile(order.id)).status,'REFUNDED');
+    const refundEmails=await db.prepare("SELECT COUNT(*) n FROM email_outbox WHERE key=?").get('mp-payment:'+order.id+':refunded');assert.equal(Number(refundEmails.n),1);
+    assert.equal(JSON.parse((await db.prepare('SELECT payload_json FROM email_outbox WHERE key=?').get('mp-payment:'+order.id+':refunded')).payload_json).template,'order-refunded');
+    await f.service.reconcile(order.id);assert.equal(Number((await db.prepare('SELECT COUNT(*) n FROM email_outbox WHERE key=?').get('mp-payment:'+order.id+':refunded')).n),1);
     f.now-=2000;f.approve(order);const stale=await f.service.reconcile(order.id);assert.equal(stale.payment_status,'REFUNDED');assert.equal(await f.stock(order),1);
     f.now+=5000;f.approve(order);const reversed=await f.service.reconcile(order.id);assert.equal(reversed.payment_status,'REFUNDED');assert.equal(await f.stock(order),1);
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM stock_movements WHERE variant_id=?').get(order.variantId)).n,1);

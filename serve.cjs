@@ -8,7 +8,7 @@ const mime = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=u
 function createServer(options = {}) {
   const root = options.root || __dirname;
   const api = createApi({ ...options, root });
-  const publicFiles = /* @__PURE__ */ new Set(["index.html", "styles.css", "app.js", "store.js", "store.css", "ABRIR.html", "favicon.ico", "robots.txt", "sitemap.xml"]);
+  const publicFiles = /* @__PURE__ */ new Set(["index.html", "styles.css", "app.js", "store.js", "personal-ui.js", "store.css", "ABRIR.html", "favicon.ico", "robots.txt", "sitemap.xml"]);
   const server = http.createServer(async (req, res) => {
     if (!/^(?:127\.0\.0\.1|localhost)(?::\d{1,5})?$/.test(req.headers.host || "")) {
       res.writeHead(400);
@@ -79,7 +79,7 @@ function createServer(options = {}) {
 if (require.main === module) {
   const port = Number(process.env.PORT || 4173);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PORT inválida.");
-  const server = createServer();
+  const server = createServer({publicUrl:`http://localhost:${port}`,allowedOrigins:[`http://127.0.0.1:${port}`]});
   server.on("error", (e) => {
     console.error(e.code === "EADDRINUSE" ? `A porta ${port} já está em uso. Encerre a prévia anterior ou configure PORT.` : e.message);
     process.exitCode = 1;

@@ -170,6 +170,7 @@ class MercadoPagoPaymentProvider extends PaymentProvider {
     if (data.live_mode !== undefined && data.live_mode !== (this.env.MERCADO_PAGO_ENVIRONMENT === 'production')) throw invalid();
     let status;
     if (data.status === 'processed' && data.status_detail === 'accredited') status = 'APPROVED';
+    else if (['canceled','failed'].includes(data.status) && data.status_detail === 'expired') status = 'EXPIRED';
     else status = ({ created: 'PENDING', processing: 'PENDING', action_required: 'PENDING', canceled: 'CANCELLED', expired: 'EXPIRED', failed: 'REJECTED', refunded: 'REFUNDED', charged_back: 'CHARGEBACK' })[data.status] || 'REVIEW';
     const payments = data.transactions?.payments;
     // The transaction's paid_amount can be net of provider fees. Reconcile the
@@ -177,7 +178,7 @@ class MercadoPagoPaymentProvider extends PaymentProvider {
     if (status === 'APPROVED' && (moneyCents(data.total_paid_amount) !== input.amountCents || !Array.isArray(payments) || payments.length !== 1 || payments[0].status !== 'processed' || payments[0].status_detail !== 'accredited' || moneyCents(payments[0].amount) !== input.amountCents)) throw invalid();
     const method = payments?.[0]?.payment_method || {};
     const pix = method.id === 'pix' && typeof method.qr_code === 'string' && method.qr_code.length <= 10000 ? { copyPaste: method.qr_code } : null;
-    const updatedAt = typeof data.last_updated_date === 'string' ? data.last_updated_date : null;
+    const updatedAt = typeof data.last_updated_date === 'string' && Number.isFinite(Date.parse(data.last_updated_date)) ? data.last_updated_date : null;
     return { id: data.id, provider: 'mercadopago', demo: false, sandbox: this.env.MERCADO_PAGO_ENVIRONMENT === 'sandbox', status, providerStatus: String(data.status || '').slice(0, 40), providerStatusDetail: String(data.status_detail || '').slice(0, 80),
       orderId: input.orderId, amountCents: input.amountCents, currency: 'BRL', sellerId: String(data.user_id), pix,
       eventId: `mp_evt_${hash(`${data.id}:${data.status}:${data.status_detail}:${updatedAt || ''}:${data.total_paid_amount || ''}`).slice(0, 48)}`, providerUpdatedAt: updatedAt && Number.isFinite(Date.parse(updatedAt)) ? updatedAt : null, occurredAt: updatedAt || new Date(this.now()).toISOString() };
@@ -196,8 +197,14 @@ class MercadoPagoPaymentProvider extends PaymentProvider {
       paymentMethod = { id: card.paymentMethodId, type: card.type, token: card.token, installments: card.installments };
     } else throw new PaymentError(400, 'PAYMENT_METHOD_INVALID', 'Meio de pagamento inválido.');
     const payerBody = { email: payer.email };
+    for(const [key,target] of [['firstName','first_name'],['lastName','last_name']]) {
+      if(payer[key]!==undefined) {
+        if(typeof payer[key]!=='string'||!payer[key].trim()||payer[key].trim().length>120||/[\u0000-\u001f\u007f]/.test(payer[key]))throw new PaymentError(400,'PAYMENT_PAYER_INVALID','Nome do pagador inválido.');
+        payerBody[target]=payer[key].trim();
+      }
+    }
     if (payer.identification) {
-      if (!['CPF', 'CNPJ'].includes(payer.identification.type) || !/^\d{11,14}$/.test(payer.identification.number || '')) throw new PaymentError(400, 'PAYMENT_PAYER_INVALID', 'Documento do pagador inválido.');
+      if (!['CPF', 'CNPJ'].includes(payer.identification.type) || !(payer.identification.type==='CPF'?/^\d{11}$/:/^\d{14}$/).test(payer.identification.number || '')) throw new PaymentError(400, 'PAYMENT_PAYER_INVALID', 'Documento do pagador inválido.');
       payerBody.identification = { type: payer.identification.type, number: payer.identification.number };
     }
     const amount = (payment.amountCents / 100).toFixed(2);

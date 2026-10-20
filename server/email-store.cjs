@@ -4,7 +4,19 @@ const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof v
 const fingerprint=value=>crypto.createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 function createEmailStore(db) {
   const fence=claim=>claim&&Number.isInteger(claim.attempts)&&Number.isFinite(claim.leaseUntil)?{sql:" AND status='PROCESSING' AND attempts=? AND locked_until=?",args:[claim.attempts,claim.leaseUntil]}:{sql:'',args:[]};
-  return {
+  const recipientHash=value=>crypto.createHash('sha256').update(String(value).trim().toLowerCase()).digest('hex');
+  const statuses={'email.sent':'ACCEPTED','email.delivered':'DELIVERED','email.delivery_delayed':'DEFERRED','email.bounced':'BOUNCED','email.complained':'COMPLAINED','email.failed':'FAILED','email.suppressed':'SUPPRESSED'};
+  async function apply(row,event) {
+    const status=statuses[event.type];if(!row||!status)return;
+    const severe=['BOUNCED','COMPLAINED','SUPPRESSED'];
+    if(severe.includes(status)) {
+      const address=JSON.parse(row.payload_json).to,stamp=new Date().toISOString();
+      await db.prepare('INSERT INTO email_suppressions VALUES(?,?,?,?) ON CONFLICT(recipient_hash) DO UPDATE SET reason=excluded.reason,updated_at=excluded.updated_at').run(recipientHash(address),status,stamp,stamp);
+    }
+    if((severe.includes(row.delivery_status)&&!severe.includes(status))||(row.last_event_at&&row.last_event_at>event.created_at))return;
+    await db.prepare('UPDATE email_outbox SET delivery_status=?,last_event_at=? WHERE id=?').run(status,event.created_at,row.id);
+  }
+  const store={
     async enqueue(message) {
       const id=crypto.randomUUID(),now=Date.now();
       await db.prepare("INSERT INTO email_outbox(id,key,payload_json,status,attempts,next_attempt_at,created_at) VALUES(?,?,?,'PENDING',0,?,?) ON CONFLICT(key) DO NOTHING").run(id,message.key,JSON.stringify(message),now,new Date(now).toISOString());
@@ -19,9 +31,58 @@ function createEmailStore(db) {
         return rows.map(row=>({id:row.id,...JSON.parse(row.payload_json),attempts:row.attempts,createdAt:row.created_at,claim:{attempts:row.attempts+1,leaseUntil}}));
       });
     },
-    async complete(id,{providerId,preview,now=Date.now(),claim}) { const f=fence(claim);return db.prepare("UPDATE email_outbox SET status='SENT',provider_id=?,preview_json=?,sent_at=?,locked_until=NULL,last_error=NULL WHERE id=?"+f.sql).run(providerId || null,preview?JSON.stringify(preview):null,new Date(now).toISOString(),id,...f.args); },
+    async complete(id,{providerId,preview,accepted=false,now=Date.now(),claim}) { const f=fence(claim);return db.transaction(async()=>{
+      const result=await db.prepare("UPDATE email_outbox SET status='SENT',provider_id=?,preview_json=?,delivery_status=?,sent_at=?,locked_until=NULL,last_error=NULL WHERE id=?"+f.sql).run(providerId || null,preview?JSON.stringify(preview):null,accepted?'ACCEPTED':'PREVIEW',new Date(now).toISOString(),id,...f.args);
+      if(result.changes&&providerId){const events=await db.prepare('SELECT * FROM email_events WHERE provider_id=? ORDER BY occurred_at').all(providerId);for(const saved of events){const row=await db.prepare('SELECT * FROM email_outbox WHERE id=?'+db.lockSuffix).get(id);await apply(row,JSON.parse(saved.payload_json));await db.prepare('UPDATE email_events SET outbox_id=? WHERE id=?').run(id,saved.id);}}
+      return result;
+    }); },
     async retry(id,{attempts,nextAttemptAt,errorCode,claim}) { const f=fence(claim);return db.prepare("UPDATE email_outbox SET status='PENDING',attempts=?,next_attempt_at=?,last_error=?,locked_until=NULL WHERE id=?"+f.sql).run(attempts,nextAttemptAt,errorCode,id,...f.args); },
-    async fail(id,{errorCode,claim}) { const f=fence(claim);return db.prepare("UPDATE email_outbox SET status='FAILED',last_error=?,locked_until=NULL WHERE id=?"+f.sql).run(errorCode,id,...f.args); }
+    async fail(id,{errorCode,claim}) { const f=fence(claim);return db.prepare("UPDATE email_outbox SET status='FAILED',delivery_status=?,last_error=?,locked_until=NULL WHERE id=?"+f.sql).run(errorCode==='EMAIL_SUPPRESSED'?'SUPPRESSED':'FAILED',errorCode,id,...f.args); },
+    async isSuppressed(address) {return !!await db.prepare('SELECT recipient_hash FROM email_suppressions WHERE recipient_hash=?').get(recipientHash(address));},
+    async eligibleWishlistItems({userId,wishlistIds,items}={}) {
+      if(!userId||!Array.isArray(wishlistIds)||!wishlistIds.length||wishlistIds.length>100||wishlistIds.some(id=>typeof id!=='string'||!id||id.length>100)||!Array.isArray(items)||!items.length||items.length>50)return [];
+      const personal=await db.prepare('SELECT preferences_json FROM personal_preferences WHERE user_id=?').get(userId);
+      if(!personal||JSON.parse(personal.preferences_json).notifyEmail!==true)return [];
+      const ids=[...new Set(wishlistIds)],wishes=await db.prepare('SELECT * FROM personal_wishlist WHERE user_id=? AND enabled=1 AND id IN ('+ids.map(()=>'?').join(',')+')').all(userId,...ids);
+      const normalized=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\b0+(?=\d)/g,'');
+      const variantIds=[...new Set(items.map(item=>item?.variantId).filter(id=>typeof id==='string'&&id&&id.length<=100))];if(!variantIds.length||!wishes.length)return [];
+      const variants=await db.prepare("SELECT v.id,v.product_id,v.language,v.condition,v.finish,v.price_cents,p.set_id,p.tcg,cm.number,cm.metadata_json FROM variants v JOIN products p ON p.id=v.product_id JOIN card_metadata cm ON cm.id=p.card_id WHERE v.id IN ("+variantIds.map(()=>'?').join(',')+") AND v.active=1 AND p.kind='SINGLE' AND p.published=1 AND p.archived=0").all(...variantIds);
+      return items.filter(item=>{
+        const variant=variants.find(row=>row.id===item.variantId&&row.product_id===item.productId);if(!variant)return false;
+        const card=JSON.parse(variant.metadata_json);
+        return wishes.some(wish=>{
+          const prefs=JSON.parse(wish.preferences_json),reference=JSON.parse(wish.metadata_json);
+          return prefs.notifyEmail===true&&normalized(variant.tcg)==='pokemon'&&wish.set_id===variant.set_id&&(card.providerId===wish.card_id||normalized(card.number||variant.number)===normalized(reference.number))&&(!prefs.languages?.length||prefs.flexible||prefs.languages.includes(variant.language))&&(!prefs.conditions?.length||prefs.flexible||prefs.conditions.includes(variant.condition))&&(!prefs.variants?.length||prefs.flexible||prefs.variants.includes(variant.finish))&&(prefs.maxPriceCents==null||variant.price_cents<=prefs.maxPriceCents);
+        });
+      });
+    },
+    async notificationAllowed(message) {
+      if(!message.data?.notificationUserId||message.data.consentVerified!==true||!['wishlist-available','wishlist-digest'].includes(message.template))return false;
+      const row=await db.prepare('SELECT p.*,u.email FROM email_preferences p JOIN users u ON u.id=p.user_id WHERE p.user_id=?').get(message.data.notificationUserId);
+      if(!row||row.email.toLowerCase()!==message.to.toLowerCase()||!row.wishlist_enabled||!row.consented_at||(message.template==='wishlist-digest'&&!row.digest_enabled)||!Array.isArray(message.data.items)||!message.data.items.length)return false;
+      const eligible=await store.eligibleWishlistItems({userId:message.data.notificationUserId,wishlistIds:message.data.wishlistIds,items:message.data.items});
+      if(eligible.length!==message.data.items.length)return false;
+      for(const item of message.data.items) {
+        const variant=await db.prepare('SELECT v.*,p.published,p.archived FROM variants v JOIN products p ON p.id=v.product_id WHERE v.id=? AND p.id=?').get(item.variantId,item.productId);
+        if(!variant||!variant.active||!variant.published||variant.archived||variant.price_cents!==item.priceCents||variant.language!==item.language||variant.condition!==item.condition||variant.finish!==item.finish)return false;
+        const reserved=Number((await db.prepare("SELECT COALESCE(SUM(quantity),0) n FROM inventory_reservations WHERE variant_id=? AND status='ACTIVE' AND expires_at>?").get(variant.id,Date.now())).n);
+        if(variant.stock-reserved<1)return false;
+      }
+      return true;
+    },
+    async applyProviderEvent({id,event}) {
+      const payload={type:event.type,created_at:new Date(event.created_at).toISOString(),data:{email_id:event.data.email_id}};
+      return db.transaction(async()=>{
+        if(db.engine==='postgres')await db.prepare('SELECT pg_advisory_xact_lock(hashtext(?))').get('resend:'+id);
+        const prior=await db.prepare('SELECT payload_json FROM email_events WHERE id=?').get(id);
+        if(prior){if(fingerprint(JSON.parse(prior.payload_json))!==fingerprint(payload))throw new EmailError('EMAIL_EVENT_CONFLICT','O evento de e-mail já foi recebido com outro conteúdo.');return {duplicate:true};}
+        const row=await db.prepare('SELECT * FROM email_outbox WHERE provider_id=?'+db.lockSuffix).get(payload.data.email_id);
+        await db.prepare('INSERT INTO email_events VALUES(?,?,?,?,?,?,?)').run(id,payload.data.email_id,row?.id||null,payload.type,JSON.stringify(payload),payload.created_at,new Date().toISOString());
+        await apply(row,payload);
+        return {duplicate:false,matched:!!row,deliveryStatus:statuses[payload.type]||null};
+      });
+    }
   };
+  return store;
 }
 module.exports={createEmailStore};

@@ -159,3 +159,16 @@ test('falhas não vazam payload ou token; timeout/conflito exigem reconciliaçã
     await assert.rejects(provider.createPayment(input), error => { assert.equal(error.code, item.code); assert.equal(error.message.includes(staging.MERCADO_PAGO_ACCESS_TOKEN), false); assert.equal(error.reconciliationRequired, true); if (item.retry) assert.equal(error.retryAfterMs, item.retry); return true; });
   }
 });
+test('auditoria Orders distingue expiração de cancelamento e permite nome Pix de teste sem simular aprovação local',async()=>{
+  for(const status of ['canceled','failed']) {
+    const provider=new MercadoPagoPaymentProvider({env:staging,fetchImpl:async()=>json(remote({status,status_detail:'expired',total_paid_amount:'0.00'}))});
+    assert.equal((await provider.getPayment(remoteId,input)).status,'EXPIRED');
+  }
+  let posted;
+  const provider=new MercadoPagoPaymentProvider({env:staging,fetchImpl:async(_,options)=>{if(options.method==='POST')posted=JSON.parse(options.body);return json(remote({status:'action_required',status_detail:'waiting_transfer',total_paid_amount:'0.00'}));}});
+  const result=await provider.createPayment({...input,payer:{email:'buyer@testuser.com',firstName:'APRO'}});
+  assert.equal(posted.payer.first_name,'APRO');assert.equal(result.status,'PENDING');
+  assert.equal(JSON.stringify(result).includes('APRO'),false);
+  for(const identification of [{type:'CPF',number:'12345678901234'},{type:'CNPJ',number:'12345678901'},{type:'CPF',number:'123456789012'}])await assert.rejects(provider.createPayment({...input,payer:{email:'buyer@testuser.com',identification}}),error=>error.code==='PAYMENT_PAYER_INVALID');
+  await assert.rejects(provider.createPayment({...input,payer:{email:'buyer@testuser.com',firstName:'APRO\r\nInjected'}}),error=>error.code==='PAYMENT_PAYER_INVALID');
+});

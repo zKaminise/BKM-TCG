@@ -1,7 +1,8 @@
 'use strict';
 
-const { createHash } = require('node:crypto');
-const TEMPLATES = Object.freeze(['welcome', 'order-confirmation', 'payment-approved', 'payment-rejected', 'order-shipped', 'tracking-update', 'password-reset']);
+const { createHash, createHmac, timingSafeEqual } = require('node:crypto');
+const TEMPLATES = Object.freeze(['welcome','email-verification','password-reset','order-confirmation','payment-approved','payment-rejected','order-preparing','order-shipped','order-delivered','order-cancelled','order-refunded','wishlist-available','wishlist-digest','abandoned-cart','tracking-update']);
+const NON_TRANSACTIONAL = new Set(['wishlist-available','wishlist-digest','abandoned-cart']);
 const sha = value => createHash('sha256').update(value).digest('hex');
 const clean = (value, max = 500) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, max);
 const escape = value => clean(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
@@ -9,7 +10,7 @@ const money = cents => new Intl.NumberFormat('pt-BR', { style: 'currency', curre
 const emailValid = value => typeof value === 'string' && value.length <= 254 && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(value);
 
 class EmailError extends Error {
-  constructor(code, message, { retryable = false, retryAfterMs = null } = {}) { super(message); this.name = 'EmailError'; this.code = code; this.status = 503; this.statusCode = 503; this.retryable = retryable; this.retryAfterMs = retryAfterMs; }
+  constructor(code, message, { retryable = false, retryAfterMs = null } = {}) { super(message); this.name = 'EmailError'; this.code = code; this.status = code==='EMAIL_WEBHOOK_INVALID'?401:['EMAIL_EVENT_CONFLICT','EMAIL_QUEUE_CONFLICT'].includes(code)?409:['EMAIL_PREFERENCES_INVALID','EMAIL_CART_INVALID','EMAIL_TEMPLATE_INVALID'].includes(code)?422:503; this.statusCode = this.status; this.retryable = retryable; this.retryAfterMs = retryAfterMs; }
 }
 
 function publicBase(env) {
@@ -41,17 +42,26 @@ function renderEmail(template, data = {}, { env = process.env, redactSecrets = f
     'payment-approved': [`Pagamento do pedido ${number} aprovado`, `Olá, ${name}. O pagamento do pedido ${number} foi aprovado${demo ? ' na simulação' : ''}. Acompanhe os próximos passos na sua conta.`, 'Acompanhar pedido', orderLink],
     'payment-rejected': [`Pagamento do pedido ${number} recusado`, `Olá, ${name}. O pagamento do pedido ${number} não foi aprovado${demo ? ' na simulação' : ''}. Consulte o pedido para conferir o resultado.`, 'Ver pedido', orderLink],
     'order-shipped': [`Pedido ${number} enviado`, `Olá, ${name}. O pedido ${number} foi enviado${demo ? ' no fluxo de demonstração' : ''}. Consulte os detalhes de entrega.`, 'Acompanhar entrega', orderLink],
-    'tracking-update': [`Rastreamento do pedido ${number}`, `Olá, ${name}. Há uma atualização no rastreamento do pedido ${number}.`, 'Ver rastreamento', safeLink(data.trackingUrl, base, { sameOrigin: false }) || orderLink],
+    'tracking-update': [`Rastreamento do pedido ${number}`, `Olá, ${name}. Há uma atualização no rastreamento do pedido ${number}.`, 'Ver rastreamento', orderLink],
     'password-reset': ['Recuperação de senha — BKM TCG', `Olá, ${name}. Recebemos uma solicitação para redefinir sua senha. Se você não fez essa solicitação, ignore esta mensagem. O link é de uso único e expira em 30 minutos.`, 'Redefinir senha', redactSecrets ? `${base}/recuperar-senha` : safeLink(data.resetUrl, base)],
+    'email-verification': ['Confirme seu e-mail — BKM TCG', `Olá, ${name}. Confirme o endereço de e-mail da sua conta pelo link seguro. Se não criou a conta, ignore esta mensagem.`, 'Confirmar e-mail', redactSecrets ? `${base}/conta` : safeLink(data.verificationUrl,base)],
+    'order-preparing': [`Pedido ${number} em preparação`, `Olá, ${name}. Seu pedido ${number} está em preparação. Acompanhe as informações na sua conta.`, 'Ver pedido', orderLink],
+    'order-delivered': [`Pedido ${number} entregue`, `Olá, ${name}. A entrega do pedido ${number} foi confirmada. Você pode conferir os itens e adicionar cartas recebidas à sua coleção.`, 'Ver pedido',orderLink],
+    'order-cancelled': [`Pedido ${number} cancelado`, `Olá, ${name}. O pedido ${number} foi cancelado. Confira o histórico na sua conta.`, 'Ver pedido',orderLink],
+    'order-refunded': [`Reembolso do pedido ${number}`, `Olá, ${name}. Há uma atualização de reembolso confirmada para o pedido ${number}. Consulte os detalhes na sua conta.`, 'Ver pedido',orderLink],
+    'wishlist-available': ['Uma carta que você procura chegou à BKM TCG!', `Olá, ${name}. Uma carta compatível com suas preferências está disponível. A disponibilidade pode mudar e este aviso não reserva estoque.`, 'Ver carta na loja',safeLink(data.productUrl || (data.items?.[0]?.slug ? '/produto/'+encodeURIComponent(data.items[0].slug):'/cartas'),base)||`${base}/cartas`],
+    'wishlist-digest': ['Suas cartas desejadas na BKM TCG', `Olá, ${name}. Confira as cartas disponíveis compatíveis com sua lista de desejos. Preços e disponibilidade são os do momento da consulta; nenhum item foi reservado.`, 'Ver cartas desejadas',`${base}/minha-colecao?tab=desejos`],
+    'abandoned-cart': ['Sua próxima descoberta espera por você', `Olá, ${name}. Você deixou itens no carrinho. Confira os preços e o estoque atuais antes de concluir; este lembrete não garante preço anterior nem reserva produtos.`, 'Rever carrinho',`${base}/carrinho`],
   };
   const [subject, message, cta, url] = messages[template];
   if (template === 'password-reset' && !url) throw new EmailError('EMAIL_RESET_URL_INVALID', 'Link de recuperação inválido.');
+  if(template==='email-verification'&&!url)throw new EmailError('EMAIL_VERIFICATION_URL_INVALID','Link de verificação inválido.');
   const items = Array.isArray(data.items) ? data.items.slice(0, 50) : [];
   const tableRows = items.map(item => `<tr><td style="padding:12px 0;border-bottom:1px solid #282d33;color:#f4f5f6">${escape(item.name || item.productName)} <span style="color:#a1a6ad">× ${Number.isInteger(item.quantity) ? item.quantity : 1}</span></td><td style="padding:12px 0;text-align:right;border-bottom:1px solid #282d33;white-space:nowrap;color:#f4f5f6">${escape(money(item.subtotalCents ?? ((item.priceCents ?? item.unitPriceCents ?? 0) * (item.quantity || 1))))}</td></tr>`).join('');
   const totals = items.length ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:24px 0;font-size:14px">${tableRows}<tr><td style="padding-top:16px;color:#a1a6ad">Subtotal</td><td align="right" style="padding-top:16px;color:#f4f5f6">${escape(money(data.subtotalCents))}</td></tr><tr><td style="color:#a1a6ad">Desconto</td><td align="right" style="color:#f4f5f6">− ${escape(money(data.discountCents))}</td></tr><tr><td style="color:#a1a6ad">Frete${demo ? ' demonstrativo' : ''}</td><td align="right" style="color:#f4f5f6">${escape(money(data.shippingCents))}</td></tr><tr><td style="padding-top:12px;font-weight:bold;color:#f4f5f6">Total</td><td align="right" style="padding-top:12px;font-size:22px;font-weight:bold;color:#44e5ed">${escape(money(data.totalCents))}</td></tr></table>` : '';
   const notice = demo ? '<p style="padding:12px;background:#29191d;border:1px solid #ff3038;color:#ff969b;font-size:12px">DEMONSTRAÇÃO — dados e pagamentos de teste. Nenhuma cobrança ou entrega comercial foi realizada.</p>' : '';
   const tracking = data.trackingCode ? `<p style="color:#d0d5db">Código de rastreamento: <strong>${escape(data.trackingCode)}</strong></p>` : '';
-  const redacted = redactSecrets && template === 'password-reset' ? '<p style="color:#a1a6ad;font-size:12px">Prévia segura: o token de recuperação foi omitido. Nenhum e-mail foi enviado.</p>' : '';
+  const redacted = redactSecrets && ['password-reset','email-verification'].includes(template) ? '<p style="color:#a1a6ad;font-size:12px">Prévia segura: o token de recuperação foi omitido. Nenhum e-mail foi enviado.</p>' : '';
   const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(subject)}</title></head><body style="margin:0;padding:28px 12px;background:#070809;font-family:Arial,Helvetica,sans-serif;color:#f4f5f6"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><table role="presentation" width="560" cellspacing="0" cellpadding="0" style="width:100%;max-width:560px;background:#111417;border:1px solid #282d33;border-top:3px solid #ff3038;border-radius:16px"><tr><td style="padding:32px"><a href="${escape(base)}"><img src="${escape(`${base}/assets/bkm-logo-original.png`)}" width="96" height="96" alt="BKM TCG" style="display:block;border:0"></a><p style="font-size:11px;letter-spacing:3px;color:#44e5ed">SUA PRÓXIMA DESCOBERTA</p>${notice}<h1 style="font-size:26px;line-height:1.2;color:#f4f5f6">${escape(subject)}</h1><p style="font-size:15px;line-height:1.7;color:#d0d5db">${escape(message)}</p>${totals}${tracking}<p style="margin:28px 0"><a href="${escape(url || base)}" style="display:inline-block;background:#ff3038;color:#fff;font-weight:bold;text-decoration:none;padding:15px 22px;border-radius:8px">${escape(cta)}</a></p>${redacted}<p style="margin-top:32px;border-top:1px solid #282d33;padding-top:20px;font-size:12px;line-height:1.7;color:#a1a6ad">${escape(storeName)}<br>E-mail transacional referente à sua conta ou pedido.<br>${escape(data.storeContact || '')}</p></td></tr></table></td></tr></table></body></html>`;
   const lines = [demo ? 'DEMONSTRAÇÃO — nenhuma cobrança ou entrega comercial.' : '', subject, message, ...items.map(item => `${clean(item.name || item.productName)} × ${item.quantity || 1}`), items.length ? `Total: ${money(data.totalCents)}` : '', data.trackingCode ? `Rastreamento: ${clean(data.trackingCode)}` : '', `${cta}: ${url || base}`, redactSecrets && template === 'password-reset' ? 'Prévia segura: token de recuperação omitido; nenhum envio externo.' : '', storeName].filter(Boolean);
   return { template, demo, subject: `${demo ? '[DEMONSTRAÇÃO] ' : ''}${subject}`, html, text: lines.join('\n\n') };
@@ -77,10 +87,12 @@ class DevelopmentEmailProvider extends EmailProvider {
 }
 
 function emailReadiness(env = process.env) {
-  const development = env.HOSTING_DEMO_ONLY === 'true' || env.BKM_ENVIRONMENT === 'demo' || !env.EMAIL_PROVIDER || env.EMAIL_PROVIDER === 'development';
+  const allowlist=(env.RESEND_TEST_RECIPIENTS||'').split(',').map(value=>value.trim().toLowerCase()).filter(emailValid);
+  const controlledDemo=env.BKM_ENVIRONMENT==='demo'&&env.RESEND_DEMO_TEST_ENABLED==='true'&&allowlist.length>0;
+  const development = !controlledDemo && (env.HOSTING_DEMO_ONLY === 'true' || env.BKM_ENVIRONMENT === 'demo' || !env.EMAIL_PROVIDER || env.EMAIL_PROVIDER === 'development');
   const from = env.RESEND_FROM || '', parsedFrom = from.match(/^(?:[^<>\r\n]+ <)?([^<>\s]+@[^<>\s]+)>?$/)?.[1];
-  const enabled = !development && ['staging', 'production'].includes(env.BKM_ENVIRONMENT) && env.EMAIL_PROVIDER === 'resend' && env.RESEND_ENABLED === 'true' && env.RESEND_DOMAIN_VERIFIED === 'true' && typeof env.RESEND_API_KEY === 'string' && env.RESEND_API_KEY.length > 10 && emailValid(parsedFrom);
-  return { provider: development ? 'development' : 'resend', enabled, externalSend: enabled, reason: development ? 'Prévias privadas; nenhum envio externo.' : enabled ? 'Resend configurado; envio requer domínio realmente verificado no provedor.' : 'Resend desativado até configurar chave, remetente e domínio verificado.' };
+  const enabled = !development && (controlledDemo || ['staging','production'].includes(env.BKM_ENVIRONMENT)) && env.EMAIL_PROVIDER === 'resend' && env.RESEND_ENABLED === 'true' && env.RESEND_DOMAIN_VERIFIED === 'true' && typeof env.RESEND_API_KEY === 'string' && env.RESEND_API_KEY.length > 10 && emailValid(parsedFrom);
+  return { provider: development ? 'development' : 'resend', enabled, externalSend: enabled, controlledDemo:enabled&&controlledDemo, reason: development ? 'Prévias privadas; nenhum envio externo.' : enabled ? controlledDemo?'Teste transacional restrito aos destinatários autorizados.':'Resend configurado; entrega confirmada somente por evento do provedor.' : 'Resend desativado até configurar chave, remetente e domínio verificado.' };
 }
 
 class ResendEmailProvider extends EmailProvider {
@@ -91,7 +103,12 @@ class ResendEmailProvider extends EmailProvider {
   }
   async send(message, { idempotencyKey } = {}) {
     validateMessage(message, idempotencyKey);
-    if (!emailReadiness(this.env).enabled || message.demo === true) throw new EmailError('EMAIL_DEMO_SEND_FORBIDDEN', 'E-mails de simulação não podem ser enviados pelo Resend.');
+    const ready=emailReadiness(this.env);
+    if (!ready.enabled || (message.demo===true&&!ready.controlledDemo)) throw new EmailError('EMAIL_DEMO_SEND_FORBIDDEN', 'E-mails de simulação exigem teste controlado explícito.');
+    const base=new URL(publicBase(this.env));
+    if(base.protocol!=='https:'||['localhost','127.0.0.1'].includes(base.hostname)||base.hostname.endsWith('.vercel.app'))throw new EmailError('EMAIL_CANONICAL_REQUIRED','Configure o domínio canônico HTTPS antes do envio real.');
+    const controlledWishlist=['wishlist-available','wishlist-digest'].includes(message.template)&&message.data?.consentVerified===true;
+    if(ready.controlledDemo && (!(this.env.RESEND_TEST_RECIPIENTS||'').split(',').map(value=>value.trim().toLowerCase()).includes(message.to.toLowerCase()) || (NON_TRANSACTIONAL.has(message.template)&&!controlledWishlist)))throw new EmailError('EMAIL_TEST_RECIPIENT_FORBIDDEN','O teste permite destinatários autorizados e alertas desejados com consentimento verificado.');
     const controller = new AbortController(); let timer;
     try {
       return await Promise.race([(async () => {
@@ -148,9 +165,13 @@ function createEmailDispatcher({ store, provider, env = process.env, now = () =>
           // than 23 h require manual reconciliation, never an automatic resend.
           const created = Date.parse(row.createdAt || row.created_at || '');
           if (mailer.name === 'resend' && attempts > 1 && Number.isFinite(created) && now() - created > 23 * 3600000) throw new EmailError('EMAIL_IDEMPOTENCY_WINDOW_EXPIRED', 'Envio antigo exige reconciliação antes de um novo disparo.');
+          if(mailer.name==='resend'&&store.isSuppressed&&await store.isSuppressed(row.to))throw new EmailError('EMAIL_SUPPRESSED','O destinatário está suprimido por bounce ou reclamação.');
+          if(mailer.name==='resend'&&NON_TRANSACTIONAL.has(row.template)) {
+            if(row.template==='abandoned-cart'||!store.notificationAllowed||!await store.notificationAllowed(row))throw new EmailError('EMAIL_CONSENT_REQUIRED','O alerta não tem consentimento ativo; lembretes de carrinho permanecem desativados.');
+          }
           const rendered = renderEmail(row.template, row.data, { env });
           const sent = await mailer.send({ ...rendered, to: row.to, data: row.data }, { idempotencyKey: row.key });
-          await store.complete(row.id, { providerId: sent.id, preview: sent.preview || null, now: now(), claim: row.claim });
+          await store.complete(row.id, { providerId: sent.id, preview: sent.preview || null, accepted:sent.accepted===true, now: now(), claim: row.claim });
           if (sent.accepted) result.sent++; else result.previewed++;
         } catch (error) {
           const errorCode = error instanceof EmailError ? error.code : 'EMAIL_DELIVERY_FAILED';
@@ -165,4 +186,17 @@ function createEmailDispatcher({ store, provider, env = process.env, now = () =>
   };
 }
 
-module.exports = { EmailError, EmailProvider, DevelopmentEmailProvider, ResendEmailProvider, renderEmail, emailReadiness, createEmailProvider, createEmailDispatcher, TEMPLATES };
+function verifyResendWebhook({payload,headers={},secret,now=Date.now()}={}) {
+  const body=Buffer.isBuffer(payload)?payload:typeof payload==='string'?Buffer.from(payload):null;
+  const id=headers['svix-id'],timestamp=headers['svix-timestamp'],signature=headers['svix-signature'];
+  if(!body||body.length>1024*1024||typeof secret!=='string'||!/^whsec_[A-Za-z0-9+/=]+$/.test(secret)||typeof id!=='string'||!/^[A-Za-z0-9_-]{5,200}$/.test(id)||typeof timestamp!=='string'||!/^\d{10}$/.test(timestamp)||Math.abs(now/1000-Number(timestamp))>300||typeof signature!=='string'||signature.length>4096)throw new EmailError('EMAIL_WEBHOOK_INVALID','Webhook de e-mail inválido.');
+  const key=Buffer.from(secret.slice(6),'base64');
+  if(key.length<16)throw new EmailError('EMAIL_WEBHOOK_INVALID','Chave do webhook inválida.');
+  const expected=createHmac('sha256',key).update(id+'.'+timestamp+'.').update(body).digest();
+  const valid=signature.split(' ').some(part=>{const pieces=part.split(',');if(pieces.length!==2||pieces[0]!=='v1'||!/^[A-Za-z0-9+/=]+$/.test(pieces[1]))return false;const received=Buffer.from(pieces[1],'base64');return received.length===expected.length&&timingSafeEqual(received,expected);});
+  if(!valid)throw new EmailError('EMAIL_WEBHOOK_INVALID','Assinatura do webhook de e-mail inválida.');
+  let event;try{event=JSON.parse(body);}catch{throw new EmailError('EMAIL_WEBHOOK_INVALID','Conteúdo do webhook inválido.');}
+  if(!event||typeof event.type!=='string'||!event.type.startsWith('email.')||typeof event.data?.email_id!=='string'||!/^[-A-Za-z0-9_]{5,128}$/.test(event.data.email_id)||!Number.isFinite(Date.parse(event.created_at)))throw new EmailError('EMAIL_WEBHOOK_INVALID','Evento de e-mail inválido.');
+  return {id,event};
+}
+module.exports = { EmailError, EmailProvider, DevelopmentEmailProvider, ResendEmailProvider, renderEmail, emailReadiness, createEmailProvider, createEmailDispatcher, verifyResendWebhook, TEMPLATES };

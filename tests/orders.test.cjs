@@ -94,7 +94,7 @@ for(const engine of ['sqlite','postgres']) test(`checkout demonstrativo persiste
     assert.equal((await other.call('/api/auth/reset-password',{method:'POST',body:{token,password:'another-new-password'}})).status,422);
   });
   if(engine==='postgres') await t.test('migrations PostgreSQL idempotentes e tabelas protegidas por RLS',async()=>{
-    const migrations=await db.prepare('SELECT version FROM bkm_migrations ORDER BY version').all();assert.deepEqual(migrations.map(x=>x.version),[1,2,3]);
+    const migrations=await db.prepare('SELECT version FROM bkm_migrations ORDER BY version').all();assert.deepEqual(migrations.map(x=>x.version),[1,2,3,4,5,6,7]);
     const rows=await db.prepare("SELECT tablename,rowsecurity FROM pg_tables WHERE schemaname='public'").all();assert.ok(rows.length>=20);assert.ok(rows.every(x=>x.rowsecurity));
   });
 });
