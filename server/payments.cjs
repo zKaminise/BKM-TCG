@@ -87,23 +87,27 @@ class MockPaymentProvider extends PaymentProvider {
 }
 
 function verifyWebhookSignature({ signature, requestId, dataId, secret, now = Date.now(), maxAgeMs = 600000 } = {}) {
-  const invalid = () => new PaymentError(401, 'PAYMENT_WEBHOOK_INVALID', 'Assinatura da notificação inválida.');
+  const invalid = diagnosticCode => {
+    const error = new PaymentError(401, 'PAYMENT_WEBHOOK_INVALID', 'Assinatura da notificação inválida.');
+    if (['HEADER_FORMAT', 'SIGNATURE_FORMAT', 'TIMESTAMP_WINDOW', 'HMAC_MISMATCH'].includes(diagnosticCode)) Object.defineProperty(error, 'diagnosticCode', { value: diagnosticCode, enumerable: false });
+    return error;
+  };
   if (typeof secret !== 'string' || !secret.trim()) throw new PaymentError(503, 'PAYMENT_WEBHOOK_UNCONFIGURED', 'A validação de notificações de pagamento ainda não foi configurada.');
-  if (typeof signature !== 'string' || signature.length > 512 || typeof requestId !== 'string' || !/^[a-zA-Z0-9_-]{1,120}$/.test(requestId) || typeof dataId !== 'string' || !/^[a-zA-Z0-9_-]{1,120}$/.test(dataId)) throw invalid();
+  if (typeof signature !== 'string' || signature.length > 512 || typeof requestId !== 'string' || !/^[a-zA-Z0-9_-]{1,120}$/.test(requestId) || typeof dataId !== 'string' || !/^[a-zA-Z0-9_-]{1,120}$/.test(dataId)) throw invalid('HEADER_FORMAT');
   const fields = new Map();
   for (const part of signature.split(',')) {
     const match = part.trim().match(/^(ts|v1)=([^=]+)$/);
-    if (!match || fields.has(match[1])) throw invalid();
+    if (!match || fields.has(match[1])) throw invalid('SIGNATURE_FORMAT');
     fields.set(match[1], match[2]);
   }
   const timestamp = fields.get('ts'), digest = fields.get('v1');
-  if (!/^(?:\d{10}|\d{13})$/.test(timestamp || '') || !/^[a-fA-F0-9]{64}$/.test(digest || '') || fields.size !== 2) throw invalid();
+  if (!/^(?:\d{10}|\d{13})$/.test(timestamp || '') || !/^[a-fA-F0-9]{64}$/.test(digest || '') || fields.size !== 2) throw invalid('SIGNATURE_FORMAT');
   const timestampMs = timestamp.length === 10 ? Number(timestamp) * 1000 : Number(timestamp);
-  if (!Number.isFinite(now) || !Number.isFinite(maxAgeMs) || maxAgeMs < 1 || Math.abs(now - timestampMs) > Math.min(maxAgeMs, 86400000)) throw invalid();
+  if (!Number.isFinite(now) || !Number.isFinite(maxAgeMs) || maxAgeMs < 1 || Math.abs(now - timestampMs) > Math.min(maxAgeMs, 86400000)) throw invalid('TIMESTAMP_WINDOW');
   // dataId must come from the URL query, never an unsigned body substitute.
   const normalizedId = dataId.toLowerCase();
   const expected = createHmac('sha256', secret).update(`id:${normalizedId};request-id:${requestId};ts:${timestamp};`).digest(), received = Buffer.from(digest, 'hex');
-  if (received.length !== expected.length || !timingSafeEqual(expected, received)) throw invalid();
+  if (received.length !== expected.length || !timingSafeEqual(expected, received)) throw invalid('HMAC_MISMATCH');
   return { verified: true, dataId, requestId, timestampMs, replayKey: hash(`mercadopago:${normalizedId}:${requestId}:${timestamp}:${digest.toLowerCase()}`) };
 }
 

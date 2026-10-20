@@ -46,6 +46,20 @@ Esse arquivo foi efetivamente restaurado em um SQLite novo e isolado: `backups/r
 
 O backup criptografado, a restauração com dados privados e a chave permanecem fora do Git e da publicação. O hash identifica este arquivo específico; não substitui a chave privada nem demonstra uma rotina automática de retenção ou recuperação remota.
 
+## Nova prova após o vínculo Google — 20/10/2026
+
+Após a confirmação do vínculo e do novo login Google na conta existente, foi criada outra cópia completa do principal: `backups/bkm-2026-10-20T15-25-24-674Z.bkmbackup`, com **40 tabelas, 244 registros e 2 objetos Storage**, criptografada com **AES-256-GCM**.
+
+SHA-256 desse novo arquivo criptografado:
+
+```text
+3D795060290F65BFCA6811F98FE5973733BD57E9FD04F4B0866835F564B240CA
+```
+
+A restauração foi efetivamente executada em um novo SQLite isolado, `backups/restore-google-linked-20261020-152524.sqlite`, com os **2 objetos** recuperados. O resultado confirmou **`restored=true`, `integrity=ok` e `remoteTarget=false`**; nenhum PostgreSQL recebeu essa restauração. Backup, SQLite restaurado, objetos e chave continuam privados e fora do Git e da publicação.
+
+Os **230 registros transferidos na migração**, os **233 registros do backup anterior** e os **244 registros desta cópia posterior** são contagens de momentos distintos. Esta prova acrescenta um novo snapshot e não substitui nem altera as evidências anteriores.
+
 ## Rotina operacional
 
 Não há agendamento ou exclusão automática. Como política inicial manual, mantenha **sete cópias diárias e quatro semanais**, com pelo menos uma cópia em local seguro separado do computador de trabalho. Revise os arquivos e a confirmação de restauração antes de remover cópias antigas. Faça um novo teste isolado após mudanças de schema e periodicamente; apenas gerar o arquivo não comprova a capacidade de recuperação.

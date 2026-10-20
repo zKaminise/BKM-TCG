@@ -9,13 +9,67 @@ const {DatabaseSync}=require('node:sqlite');
 const {PGlite}=require('@electric-sql/pglite');
 const {createServer}=require('../serve.cjs');
 const {hashPassword}=require('../server/auth.cjs');
-const {PaymentError}=require('../server/payments.cjs');
+const {PaymentError,verifyWebhookSignature}=require('../server/payments.cjs');
 
 // All provider traffic is replaced by this injected transport. The fixture
 // credentials are deliberately unusable and never call Mercado Pago's network.
 const sandboxEnv={BKM_ENVIRONMENT:'staging',PAYMENT_PROVIDER:'mercadopago',EMAIL_PROVIDER:'disabled',
   MERCADO_PAGO_ENABLED:'true',MERCADO_PAGO_ENVIRONMENT:'sandbox',MERCADO_PAGO_ACCESS_TOKEN:'fixture-not-a-real-token',
   MERCADO_PAGO_PUBLIC_KEY:'fixture-not-a-real-public-key',MERCADO_PAGO_WEBHOOK_SECRET:'fixture-webhook-secret',MERCADO_PAGO_SELLER_ID:'123456'};
+
+test('diagnóstico interno MP mantém rejeição pública e motivo não enumerável sem dados assinados',()=>{
+  const secret='diagnostic-fixture-secret-never-real',requestId='diagnostic-private-request',dataId='ORDDIAGNOSTIC123456',ts=String(Date.now());
+  const sign=(timestamp=ts,key=secret)=>`ts=${timestamp},v1=${crypto.createHmac('sha256',key).update(`id:${dataId.toLowerCase()};request-id:${requestId};ts:${timestamp};`).digest('hex')}`;
+  const valid={secret,requestId,dataId,signature:sign(),now:Number(ts)};
+  assert.equal(verifyWebhookSignature(valid).verified,true);
+  const cases=[
+    ['HEADER_FORMAT',{requestId:undefined}],['HEADER_FORMAT',{dataId:'private.invalid/resource'}],['HEADER_FORMAT',{signature:undefined}],
+    ['SIGNATURE_FORMAT',{signature:sign()+`,ts=${ts}`}],['SIGNATURE_FORMAT',{signature:`ts=${ts},v1=not-hex`}],
+    ['TIMESTAMP_WINDOW',{now:Number(ts)+600001}],['TIMESTAMP_WINDOW',{now:Number(ts)-600001}],
+    ['HMAC_MISMATCH',{signature:sign(ts,'different-private-fixture-secret')}],['HMAC_MISMATCH',{dataId:'ORDOTHERDIAGNOSTIC123'}]
+  ];
+  for(const [reason,patch]of cases)assert.throws(()=>verifyWebhookSignature({...valid,...patch}),error=>{
+    assert.equal(error.status,401);assert.equal(error.statusCode,401);assert.equal(error.code,'PAYMENT_WEBHOOK_INVALID');assert.equal(error.message,'Assinatura da notificação inválida.');
+    assert.equal(error.diagnosticCode,reason);assert.equal(Object.getOwnPropertyDescriptor(error,'diagnosticCode').enumerable,false);
+    const serialized=JSON.stringify(error),spread=JSON.stringify({...error});
+    for(const sensitive of [secret,requestId,dataId,valid.signature,patch.signature,patch.dataId,reason,'diagnosticCode'].filter(Boolean)){
+      assert.equal(serialized.includes(sensitive),false);assert.equal(spread.includes(sensitive),false);assert.equal(String(error).includes(sensitive),false);
+    }
+    return true;
+  });
+  assert.throws(()=>verifyWebhookSignature({...valid,secret:''}),error=>error.status===503&&!Object.hasOwn(error,'diagnosticCode'));
+});
+
+test('diagnóstico interno MP registra só marcador e reason permitido na rota, sem alterar HTTP401',async t=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'bkm-mp-diagnostic-'));
+  let providerReads=0;
+  const gateway={async request(){providerReads++;const error=new PaymentError(401,'PAYMENT_WEBHOOK_INVALID','Assinatura da notificação inválida.');Object.defineProperty(error,'diagnosticCode',{value:'private-untrusted-reason'});throw error;}};
+  const server=createServer({root:directory,dbPath:path.join(directory,'isolated.sqlite'),databaseUrl:'',env:sandboxEnv,paymentProvider:gateway});
+  await server.api.ready;server.listen(0,'127.0.0.1');await once(server,'listening');
+  t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await server.api.close();fs.rmSync(directory,{recursive:true,force:true});});
+  const warnings=[];t.mock.method(console,'warn',(...args)=>warnings.push(args));
+  const base='http://127.0.0.1:'+server.address().port,requestId='private-diagnostic-request-id',dataId='ORDPRIVATE123456789',secret=sandboxEnv.MERCADO_PAGO_WEBHOOK_SECRET;
+  const sign=(timestamp=String(Date.now()),key=secret)=>`ts=${timestamp},v1=${crypto.createHmac('sha256',key).update(`id:${dataId.toLowerCase()};request-id:${requestId};ts:${timestamp};`).digest('hex')}`;
+  const call=async(headers)=>{const response=await fetch(base+'/api/payments/webhook/mercadopago?data.id='+dataId,{method:'POST',headers:{'content-type':'application/json',...headers},body:JSON.stringify({privateBodyMarker:'private-body-must-not-log',secret})});return{status:response.status,body:await response.json()};};
+  const fixtures=[
+    ['HEADER_FORMAT',{'x-signature':sign()}],
+    ['SIGNATURE_FORMAT',{'x-request-id':requestId,'x-signature':'ts=1,v1=invalid-private-signature'}],
+    ['TIMESTAMP_WINDOW',{'x-request-id':requestId,'x-signature':sign(String(Date.now()-600001))}],
+    ['HMAC_MISMATCH',{'x-request-id':requestId,'x-signature':sign(String(Date.now()),'wrong-private-diagnostic-secret')}]
+  ];
+  for(const [reason,headers]of fixtures){
+    const response=await call(headers);assert.equal(response.status,401);assert.deepEqual(response.body,{error:{code:'PAYMENT_WEBHOOK_INVALID',message:'Assinatura da notificação inválida.'}});
+    assert.deepEqual(warnings.at(-1),['BKM_MP_WEBHOOK_REJECTED',{reason}]);
+    const output=JSON.stringify({response:response.body,warnings});
+    for(const sensitive of [secret,requestId,dataId,headers['x-signature'],'private-body-must-not-log','127.0.0.1'])assert.equal(output.includes(sensitive),false);
+    assert.equal(JSON.stringify(response.body).includes(reason),false);
+  }
+  assert.equal(providerReads,0,'assinaturas recusadas não devem consultar o provedor');
+  assert.equal(warnings.length,4);
+  const forged=await call({'x-request-id':requestId,'x-signature':sign()});assert.equal(forged.status,401);assert.equal(providerReads,1);
+  assert.equal(warnings.length,4,'um diagnóstico fora da whitelist não deve ser registrado');
+  const other=await fetch(base+'/api/account/orders');assert.equal(other.status,401);assert.equal(warnings.length,4,'outras rotas não devem emitir o marcador de webhook');
+});
 
 for(const engine of ['sqlite','postgres']) test(`Mercado Pago ligado à API, com transporte isolado: ${engine}`,async t=>{
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'bkm-mp-api-')),dbPath=path.join(directory,'sandbox.sqlite');

@@ -5,7 +5,7 @@ const { defaultSettings } = require("./db.cjs");
 const { openStore } = require("./store.cjs");
 const { hashPassword, verifyPassword, hashToken, publicUser } = require("./auth.cjs");
 const { accountList } = require("./accounts.cjs");
-const { paymentReadiness } = require("./payments.cjs");
+const { PaymentError, paymentReadiness } = require("./payments.cjs");
 const { allowedOrigins, safeReturnPath } = require('./domain-policy.cjs');
 const uid = () => crypto.randomUUID();
 const now = () => (/* @__PURE__ */ new Date()).toISOString();
@@ -463,7 +463,12 @@ function createApi(options = {}) {
         limit(req,'payment-webhook',120,6e4);
         await readJson(req,65536);
         if(query.getAll('data.id').length!==1) throw new ApiError(400,'PAYMENT_ID_INVALID','Informe um único identificador do recurso assinado.');
-        await orders.webhook({signature:req.headers['x-signature'],requestId:req.headers['x-request-id'],dataId:query.get('data.id')});
+        try {
+          await orders.webhook({signature:req.headers['x-signature'],requestId:req.headers['x-request-id'],dataId:query.get('data.id')});
+        } catch(error) {
+          if(error instanceof PaymentError && error.status===401 && error.code==='PAYMENT_WEBHOOK_INVALID' && ['HEADER_FORMAT','SIGNATURE_FORMAT','TIMESTAMP_WINDOW','HMAC_MISMATCH'].includes(error.diagnosticCode)) console.warn('BKM_MP_WEBHOOK_REJECTED',{reason:error.diagnosticCode});
+          throw error;
+        }
         return respond(200,{received:true});
       }
       let session = await getSession(req);
