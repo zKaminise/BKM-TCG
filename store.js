@@ -259,7 +259,10 @@ function renderNav() {
   const profileMenu=el("details",{class:"shop-profile-menu"}),profileSummary=el("summary",{class:"shop-icon","aria-label":state.user?"Abrir menu da minha conta":"Entrar ou criar conta"},svgIcon("user"),el("span",{class:"sr-only"},state.user?"Minha conta":"Entrar ou cadastrar"));
   profileMenu.append(profileSummary,el("nav",{class:"shop-profile-dropdown","aria-label":"Acesso à conta"},state.user?[el("strong",{},state.user.name),link("Minha conta","/conta"),link("Minha coleção","/conta/colecao"),link("Lista de desejos","/conta/desejos"),link("Meus pedidos","/conta/pedidos"),link("Produtos favoritos","/favoritos"),link("Configurações","/conta/preferencias"),button([svgIcon("logout"),"Sair"],()=>logout(),"shop-text-link")]:[link("Entrar","/entrar","shop-button"),link("Criar uma conta","/cadastro","shop-button secondary")]));
   profileMenu.addEventListener("keydown",event=>{if(event.key==="Escape"){profileMenu.open=false;profileSummary.focus();}});
-  profileMenu.addEventListener("focusout",()=>queueMicrotask(()=>{if(!profileMenu.contains(document.activeElement))profileMenu.open=false;}));
+  profileMenu.addEventListener("focusout",event=>{
+    if(event.relatedTarget&&profileMenu.contains(event.relatedTarget))return;
+    setTimeout(()=>{if(profileMenu.isConnected&&!profileMenu.contains(document.activeElement))profileMenu.open=false;},0);
+  });
   const actions = el("div", { class: "shop-nav-actions" }, link(svgIcon("heart"), state.user?"/conta/desejos":"/favoritos", "shop-icon"), profileMenu, button([svgIcon("bag"), el("span", { class: "shop-cart-count" }, count)], () => openCart(), "shop-icon", { "aria-label": `Abrir carrinho, ${count} ${count === 1 ? "item" : "itens"}` }));
   actions.children[0].setAttribute("aria-label", state.user ? "Minha lista de desejos" : "Meus favoritos");
   navMount.replaceChildren(el("div", { class: "shop-nav-content" }, button(svgIcon("menu"), () => {
@@ -739,7 +742,16 @@ function summaryRow(label, value) {
 function authPage(path) {
   const register = path === "/cadastro";
   if (state.user) return el("div", { class: "shop-shell shop-auth" }, heading("SUA CONTA", "Voc\xEA j\xE1 est\xE1 por aqui."), link("Ir para minha conta", "/conta", "shop-button"));
-  const status = el("div", { "aria-live": "polite" });
+  const authParams = new URLSearchParams(location.search);
+  const googleReason = authParams.get("google");
+  const googleMessages = new Map([
+    ["link-required", "Este e-mail já possui uma conta BKM. Entre com sua senha BKM e, em Minha conta > Segurança, escolha Vincular Google para conectar os acessos com segurança."],
+    ["cancelled", "O acesso com Google foi cancelado. Você pode tentar novamente ou entrar com sua senha BKM."],
+    ["admin-password", "Para acessar a administração, entre com sua senha BKM."],
+    ["failed", "Não foi possível concluir o acesso com Google. Tente novamente ou entre com sua senha BKM."]
+  ]);
+  const status = el("div", { role: "status", "aria-live": "polite", "aria-atomic": "true" });
+  if (googleMessages.has(googleReason)) status.append(message(googleMessages.get(googleReason)));
   const form = el("form", { class: "shop-auth-form", onSubmit: async (event) => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(form));
@@ -752,8 +764,8 @@ function authPage(path) {
       state.csrfToken = result.csrfToken || state.csrfToken;
       await syncAccount();
       renderNav();
-      const next = new URLSearchParams(location.search).get("next");
-      navigate(next && next.startsWith("/") && !next.startsWith("//") ? next : register ? "/conta" : state.user?.role === "ADMIN" ? "/admin" : "/conta");
+      const next = authParams.get("next");
+      navigate(next && next.startsWith("/") && !next.startsWith("//") ? next : register ? "/conta" : state.user?.role === "ADMIN" ? "/admin" : googleReason === "link-required" ? "/conta/seguranca" : "/conta");
       toast(register ? "Conta criada. Bem-vindo \xE0 BKM." : "Voc\xEA entrou na sua conta.");
     } catch (error) {
       status.replaceChildren(message(displayError(error), "error"));

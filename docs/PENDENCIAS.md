@@ -1,28 +1,36 @@
 # Pendências e ativação — Fase 3
 
-Estado em **20/10/2026, antes do push/deploy da Fase 3**. O código local e as migrations 1–7 do Supabase principal foram preparados; a rodada integral registrou 211 testes aprovados. O domínio canônico é [lojabkm.com.br](https://lojabkm.com.br/), com `www` redirecionando por 308. A publicação final do novo código ainda não foi registrada nesta versão do documento.
+Estado em **20/10/2026**: núcleo da Fase 3 publicado no [commit `d109af2`](https://github.com/zKaminise/BKM-TCG/commit/d109af2), deployment Ready e [CI histórico 39399711168 com 211 testes aprovado](https://github.com/zKaminise/BKM-TCG/actions/runs/39399711168). A rodada local posterior aprovou **213 testes**, sintaxe e build. O redeploy `NMSQa4gw1WfNTMa1BYQtvLVH1KFA` também ficou Ready. O domínio canônico é [lojabkm.com.br](https://lojabkm.com.br/), com `www` redirecionando por 308.
 
-## Publicação e prova online
+## Principal migrado e continuidade
 
-- Publicar a Fase 3 na branch `main` de [zKaminise/BKM-TCG](https://github.com/zKaminise/BKM-TCG), verificar CI, deploy Ready e commit efetivamente servido.
-- Conferir o alias histórico `bkm-tcg-demo.vercel.app`, a configuração canônica e os redirecionamentos finais. Não presumir que a configuração ainda pendente desse alias já foi aplicada.
-- No domínio publicado, exercitar cadastro por raiz e `www`, login/logout, sessão, carrinho autenticado, painel, conta, fichário, lotes, desejos, CSV e referências autorizadas. Registrar evidências em [VALIDACAO.md](VALIDACAO.md).
-- Completar QA visual desktop/mobile dos novos fluxos. A tentativa de QA pelo subagente não teve navegador habilitado e não gerou screenshots; isso não conta como validação visual.
+O cutover para o Supabase **BKM ecommerce** (`cxoeompxmgdzufgzxerw`) foi concluído: **40 tabelas, 230 registros e 2 objetos Storage** migrados, com SHA-256, integridade, RLS e origem inalterada conferidos. Migrations **1–7**, RLS nas 40 tabelas e zero grants de tabelas para `anon`, `authenticated` ou `PUBLIC`. Auditoria posterior: 3 usuários, 4 pedidos e 2 referências de imagens no novo Storage, nenhuma no antigo.
+
+Vercel Production e `.env` local já usam o novo principal. O banco anterior (`nxrvmanifngjmdtgnzoq`) e o `.env.old-main` continuam preservados. A manutenção foi encerrada e HTTP 200 confirmado; `/api/config` indica demo, mock, `canCharge=false` e Google habilitado, com 15 produtos observados no catálogo. Um backup posterior do novo principal (40 tabelas/233 registros/2 objetos) foi restaurado isoladamente com integridade `ok`; detalhes em [BACKUP.md](BACKUP.md).
+
+- Manter as cópias e a configuração anterior preservadas até encerrar a janela de acompanhamento e definir retenção/plano de retorno.
+- Completar a prova dos fluxos no destino; migração íntegra e HTTP 200 não substituem QA funcional e visual.
+
+## Prova online restante
+
+- Conferir o alias histórico `bkm-tcg-demo.vercel.app`, caminhos e redirecionamentos após cada publicação.
+- Completar e registrar os fluxos de cadastro por raiz e `www`, login/logout, sessão, carrinho autenticado, painel, conta, fichário, lotes, desejos, CSV e referências autorizadas em [VALIDACAO.md](VALIDACAO.md).
+- Completar QA visual desktop/mobile dos novos fluxos. A tentativa anterior de QA pelo subagente não teve navegador habilitado e não gerou screenshots; isso não conta como validação visual.
 
 ## Google e recuperação por e-mail
 
 Cliente Google e chaves Resend estão guardados privadamente e foram configurados nas variáveis Production. Ainda faltam:
 
-- Google: provar cadastro, retorno, cancelamento, login recorrente, vínculo seguro e preservação dos dados no domínio oficial. O código valida state/nonce, PKCE e tokens; isso não comprova consentimento/callback externo funcionando.
-- Resend: conferir domínio/remetente, eventos assinados, aceitação e entrega real. Exercitar recuperação por link de uso único no domínio canônico, redefinição e invalidação de sessões. Não marcar envio como entregue apenas pelo HTTP da API.
+- Google: o titular já fez login BKM, confirmou o vínculo explícito e conseguiu sair/entrar pelo Google na mesma conta. Foram observadas 0 coleções; não houve prova de acervo preenchido nesse teste. A audiência foi publicada como **Externo / Em produção**, com scopes básicos `openid`, `email` e `profile`. Publicação básica não equivale a verificação avançada nem comprova ausência de limites. Faltam cadastro novo, cancelamento e demais caminhos no domínio oficial; vínculo e novo login controlados não homologam todo o OAuth.
+- Resend: envio e entrega de uma recuperação para o titular já foram confirmados por webhook assinado HTTP 200; replay idempotente também foi conferido, sem novo envio e sem alterar a senha. Falta exercitar a redefinição completa pelo link, invalidação de sessões e os demais modelos/automações. Preservar `NODEJS_HELPERS=0` em Production e redeploy ao alterar essa variável, conforme [DEPLOY.md](DEPLOY.md).
 - Testes controlados em demonstração exigem destinatários exatos autorizados e ativação específica. Campanhas e envio indiscriminado não ficam habilitados por salvar uma chave.
 - Contas exclusivamente Google não devem receber promessa de definir senha local por um formulário não suportado. A interface identifica essa limitação.
 
 ## Mercado Pago
 
-A consulta autenticada de `/users/me` confirmou que a conta configurada é de teste. A instalação principal permanece mock, com produção financeira desativada. Em 19/10, a organização anterior ainda mostrava dois projetos Free após o relato de liberação. Em 20/10, foi criado o projeto Supabase **BKM ecommerce**, referência `cxoeompxmgdzufgzxerw`, em nova conta autorizada pelo titular. Migração, configuração e conexão da aplicação a esse projeto permanecem pendentes; isso não comprova deploy, isolamento financeiro ou homologação. Nenhuma pausa ou exclusão de outro projeto foi executada pelo agente.
+A instalação principal permanece mock, com produção financeira desativada. O sandbox tem deployment Vercel Ready **`35ZhSh55MLGoEqW9BEaaBFLxd3pT`** e Supabase separado **`secapcqqznlokiqhojsa`**, com TLS verificado e 40 tabelas. A verificação real confirmou conta de vendedor de teste, staging/sandbox e `canCharge=false`. O banco estava vazio antes da fixture; agora existem os registros técnicos do teste.
 
-Faltam testes externos de Pix/cartão, estados financeiros, webhook, repetição, reconciliação e isolamento dos ambientes. Não reutilizar o banco principal nem ativar cobranças reais para concluir essa homologação.
+O `--run` real criou duas orders Pix de teste de R$ 50,00 nominais: uma `APPROVED` após reconciliação e outra `PENDING`. Reservas `COMMITTED=1`/`ACTIVE=1`, estoque 2 → 1 apenas uma vez e idempotência foram comprovados. **`webhookProven=false`**: aprovação por consulta não comprova recebimento de notificação. Foi observada divergência entre aplicação emissora da order e aplicação configurada no painel, sem relação ou causa confirmadas. Falta conferir a configuração/HMAC na aplicação associada à credencial, com autenticação/MFA do titular, e provar webhook legítimo/repetido. Cartão, recusa, expiração, cancelamento e reembolso seguem pendentes. Não reutilizar o principal nem liberar produção para concluir a homologação. Detalhes em [INTEGRACOES.md](INTEGRACOES.md) e [VALIDACAO.md](VALIDACAO.md).
 
 ## Coleções e preços
 
@@ -30,7 +38,7 @@ Faltam testes externos de Pix/cartão, estados financeiros, webhook, repetição
 - Fotos pessoais aceitam URL HTTPS; upload privado de fotos pessoais continua ausente.
 - Importação administrativa de referências globais autorizadas está implementada, mas o conjunto está vazio. Preços privados dos clientes não são expostos pelo painel global.
 - Não foi encontrada/configurada API pública licenciada da Liga Pokémon. O acesso encontrado com bloqueio não foi contornado. Integração automática depende de autorização/licença efetiva; até lá, referências manuais identificadas e CSV legítimo.
-- Alertas por e-mail exigem consentimento, frequência e entrega homologada. Carrinho abandonado continua sem automação ativa.
+- Alertas por e-mail exigem consentimento, frequência e validação própria do fluxo; a entrega comprovada da recuperação não homologa alertas ou campanhas. Carrinho abandonado continua sem automação ativa.
 
 ## Operação comercial e continuidade
 
@@ -41,4 +49,4 @@ Faltam testes externos de Pix/cartão, estados financeiros, webhook, repetição
 
 Segredos, conexões, chaves de backup, arquivos de banco e restaurações privadas não pertencem ao Git, screenshots ou ZIP público. Abertura comercial exige decisão explícita posterior à homologação; nenhuma configuração desta fase a autoriza automaticamente.
 
-A migração pode manter temporariamente `BKM_MAINTENANCE_MODE=true`: toda a API retorna HTTP 503 com `Retry-After: 60`. Retirar a manutenção e conferir os fluxos após validar o destino continua parte do fechamento; não anunciar o site funcional durante esse bloqueio.
+O guard `BKM_MAINTENANCE_MODE=true` permanece disponível para futuras manutenções, bloqueando a API com HTTP 503 e `Retry-After: 60`. Nesta etapa, Production já está com `BKM_MAINTENANCE_MODE=false` e HTTP 200 confirmado; as pendências são os fluxos específicos registrados acima.

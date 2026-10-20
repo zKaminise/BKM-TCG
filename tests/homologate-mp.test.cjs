@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseArguments, validateSandboxEnv, assertTestSeller, assertRemoteConfig, verifyEnvironment, createState, validateState, fixtureProduct, checkoutPayload, assertDedicatedData, publicOrder } = require('../scripts/homologate-mp.cjs');
+const { parseArguments, validateSandboxEnv, assertTestSeller, assertRemoteConfig, verifyEnvironment, waitForApprovalAndWebhook, createState, validateState, fixtureProduct, checkoutPayload, assertDedicatedData, publicOrder } = require('../scripts/homologate-mp.cjs');
 const project = 'abcdefghijklmnopqrst', seller = '123456789';
 function envFixture() { return { SUPABASE_URL: `https://${project}.supabase.co`, DATABASE_URL: `postgresql://postgres.${project}:fictitious-password@aws-1-sa-east-1.pooler.supabase.com:6543/postgres`, BKM_ENVIRONMENT: 'staging', HOSTING_DEMO_ONLY: 'false', BKM_PUBLIC_URL: 'https://bkm-tcg-sandbox.vercel.app', PAYMENT_PROVIDER: 'mercadopago', MERCADO_PAGO_ENABLED: 'true', MERCADO_PAGO_ENVIRONMENT: 'sandbox', MERCADO_PAGO_PRODUCTION_APPROVED: 'false', MERCADO_PAGO_ACCESS_TOKEN: 'APP_USR-fictitious-not-usable', MERCADO_PAGO_PUBLIC_KEY: 'APP_USR-public-fictitious', MERCADO_PAGO_WEBHOOK_SECRET: 'fictitious-signing-key', MERCADO_PAGO_SELLER_ID: seller, EMAIL_PROVIDER: 'development', BKM_SANDBOX_BUYER_EMAIL: 'buyer-fixture@testuser.com', BKM_SANDBOX_CONFIRMATION: `SANDBOX_ONLY:${project}:${seller}` }; }
 const options = { project, seller, mode: 'run' };
@@ -26,7 +26,10 @@ test('Homologação MP CLI exige ambiente dedicado, confirmação e TLS sem fall
     ['DATABASE_URL', env.DATABASE_URL.replace(':6543/', ':5432/'), 'DATABASE_POOLER_INVALID'], ['DATABASE_URL', env.DATABASE_URL.replace('pooler.supabase.com', 'pooler.supabase.com.evil.example'), 'DATABASE_POOLER_INVALID']
   ];
   for (const [key, value, code] of cases) refuses(() => validateSandboxEnv({ ...env, [key]: value }, options), code);
-  refuses(() => validateSandboxEnv(env, { ...options, project: 'nxrvmanifngjmdtgnzoq' }), 'DEDICATED_PROJECT_REQUIRED');
+  for (const mainProject of ['nxrvmanifngjmdtgnzoq', 'cxoeompxmgdzufgzxerw']) {
+    const mainEnv = { ...env, SUPABASE_URL: `https://${mainProject}.supabase.co`, DATABASE_URL: env.DATABASE_URL.replace(`postgres.${project}:`, `postgres.${mainProject}:`), BKM_SANDBOX_CONFIRMATION: `SANDBOX_ONLY:${mainProject}:${seller}` };
+    for (const mode of ['verify', 'run']) refuses(() => validateSandboxEnv(mainEnv, { ...options, project: mainProject, mode }), 'DEDICATED_PROJECT_REQUIRED');
+  }
   refuses(() => validateSandboxEnv(env, { ...options, seller: '999' }), 'SELLER_CONFIRMATION_REQUIRED');
   refuses(() => validateSandboxEnv({ ...env, SUPABASE_URL: 'https://nxrvmanifngjmdtgnzoq.supabase.co' }, options), 'DATABASE_PROJECT_MISMATCH');
 });
@@ -48,6 +51,10 @@ test('Homologação MP CLI verify realiza somente GETs e recusa configuração a
   assert.equal(proof.readOnly, true); assert.equal(JSON.stringify(proof).includes('private-must-not'), false); assert.equal(JSON.stringify(proof).includes(env.MERCADO_PAGO_ACCESS_TOKEN), false);
   calls.length = 0;
   await assert.rejects(verifyEnvironment({ ...env, HOSTING_DEMO_ONLY: 'true' }, options, transport), error => error.code === 'STAGING_REQUIRED'); assert.equal(calls.length, 0);
+  for (const mainProject of ['nxrvmanifngjmdtgnzoq', 'cxoeompxmgdzufgzxerw']) {
+    const mainEnv = { ...env, SUPABASE_URL: `https://${mainProject}.supabase.co`, DATABASE_URL: env.DATABASE_URL.replace(`postgres.${project}:`, `postgres.${mainProject}:`), BKM_SANDBOX_CONFIRMATION: `SANDBOX_ONLY:${mainProject}:${seller}` };
+    await assert.rejects(verifyEnvironment(mainEnv, { ...options, project: mainProject }, transport), error => error.code === 'DEDICATED_PROJECT_REQUIRED'); assert.equal(calls.length, 0);
+  }
   await assert.rejects(verifyEnvironment(env, options, async () => new Response(JSON.stringify({ id: seller, site_id: 'MLB', tags: [] }), { status: 200 })), error => error.code === 'SELLER_IS_NOT_CONFIRMED_TEST_USER');
 });
 
@@ -78,3 +85,33 @@ test('Homologação MP CLI banco recusa dados alheios e DTO de evidência elimin
   refuses(() => publicOrder({ ...input, totalCents: { email: 'leak' } }), 'ORDER_RESPONSE_INVALID');
 });
 function cryptoRandomId() { return require('node:crypto').randomUUID(); }
+
+test('Homologação MP polling aguarda callback quando GET já aprova e aprovação quando callback chega primeiro', async () => {
+  let reads = 0, callbacks = 0;
+  const approvedFirst = await waitForApprovalAndWebhook({ timeoutMs: 1000, intervalMs: 1,
+    readOrder: async () => { reads++; return { paymentStatus: 'APPROVED' }; },
+    readWebhook: async () => ++callbacks >= 3 });
+  assert.deepEqual(approvedFirst, { approved: true, webhookReceived: true, timedOut: false });
+  assert.equal(reads, 3, 'aprovação imediata não deve encerrar antes do terceiro callback consultado');
+  reads = 0; callbacks = 0;
+  const callbackFirst = await waitForApprovalAndWebhook({ timeoutMs: 1000, intervalMs: 1,
+    readOrder: async () => ({ paymentStatus: ++reads >= 3 ? 'APPROVED' : 'PENDING' }),
+    readWebhook: async () => { callbacks++; return true; } });
+  assert.deepEqual(callbackFirst, { approved: true, webhookReceived: true, timedOut: false });
+  assert.equal(callbacks, 3, 'callback inicial não deve ser confundido com aprovação financeira');
+});
+
+test('Homologação MP polling encerra prazo mesmo com leitura pendurada e não inventa recibo', async () => {
+  let signal, calls = 0;
+  const timedOut = await waitForApprovalAndWebhook({ timeoutMs: 20, intervalMs: 1,
+    readOrder: async () => { calls++; return { paymentStatus: 'APPROVED' }; },
+    readWebhook: async () => false });
+  assert.deepEqual(timedOut, { approved: true, webhookReceived: false, timedOut: true });
+  assert.ok(calls >= 1);
+  const hanging = await waitForApprovalAndWebhook({ timeoutMs: 20, intervalMs: 1,
+    readOrder: received => { signal = received; return new Promise(() => {}); },
+    readWebhook: async () => true });
+  assert.deepEqual(hanging, { approved: false, webhookReceived: false, timedOut: true });
+  assert.equal(signal.aborted, true, 'o prazo também interrompe o GET HTTP em andamento');
+  await assert.rejects(waitForApprovalAndWebhook({ timeoutMs: 60001, readOrder: async () => ({}), readWebhook: async () => true }), error => error.code === 'POLL_ARGUMENTS_INVALID');
+});

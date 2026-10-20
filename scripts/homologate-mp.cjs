@@ -6,7 +6,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { parseEnv } = require('node:util');
 const ROOT = path.resolve(__dirname, '..');
-const MAIN_PROJECT = 'nxrvmanifngjmdtgnzoq';
+const MAIN_PROJECTS = new Set(['nxrvmanifngjmdtgnzoq', 'cxoeompxmgdzufgzxerw']);
 const SANDBOX_URL = 'https://bkm-tcg-sandbox.vercel.app';
 const MP_URL = 'https://api.mercadopago.com';
 const SKU = 'HML-MP-BUTTERFREE';
@@ -30,7 +30,7 @@ function parseArguments(args) {
 
 function validateSandboxEnv(env, options) {
   const project = options.project, seller = options.seller;
-  assert(/^[a-z]{20}$/.test(project || '') && project !== MAIN_PROJECT, 'DEDICATED_PROJECT_REQUIRED');
+  assert(/^[a-z]{20}$/.test(project || '') && !MAIN_PROJECTS.has(project), 'DEDICATED_PROJECT_REQUIRED');
   assert(/^\d{1,24}$/.test(seller || '') && seller === env.MERCADO_PAGO_SELLER_ID, 'SELLER_CONFIRMATION_REQUIRED');
   assert(env.SUPABASE_URL === `https://${project}.supabase.co`, 'DATABASE_PROJECT_MISMATCH');
   let database;
@@ -62,7 +62,7 @@ function assertRemoteConfig(data, env) {
 async function jsonRequest(url, options = {}, fetchImpl = globalThis.fetch) {
   assert(url.startsWith(MP_URL + '/') || url.startsWith(SANDBOX_URL + '/'), 'REQUEST_ORIGIN_REFUSED');
   let response;
-  try { response = await fetchImpl(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(20000) }); }
+  try { response = await fetchImpl(url, { ...options, redirect: 'error', signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000) }); }
   catch { fail('REMOTE_REQUEST_FAILED'); }
   assert(Number(response.headers.get('content-length') || 0) <= 1024 * 1024, 'REMOTE_RESPONSE_TOO_LARGE');
   const reader = response.body?.getReader(), chunks = []; let size = 0;
@@ -80,6 +80,33 @@ async function verifyEnvironment(env, options, fetchImpl = globalThis.fetch) {
   const site = await jsonRequest(SANDBOX_URL + '/api/config', {}, fetchImpl);
   assert(site.ok, 'REMOTE_SANDBOX_UNAVAILABLE');
   return { ...config, ...seller, ...assertRemoteConfig(site.data, env), readOnly: true };
+}
+
+async function waitForApprovalAndWebhook({ readOrder, readWebhook, timeoutMs = 60000, intervalMs = 2000 } = {}) {
+  assert(typeof readOrder === 'function' && typeof readWebhook === 'function' && Number.isInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 60000 && Number.isInteger(intervalMs) && intervalMs > 0 && intervalMs <= 60000, 'POLL_ARGUMENTS_INVALID');
+  const controller = new AbortController();
+  let timer, latest = { approved: false, webhookReceived: false };
+  const deadline = new Promise(resolve => {
+    timer = setTimeout(() => { controller.abort(); resolve({ ...latest, timedOut: true }); }, timeoutMs);
+  });
+  const polling = (async () => {
+    while (!controller.signal.aborted) {
+      const [order, received] = await Promise.all([readOrder(controller.signal), readWebhook(controller.signal)]);
+      if (controller.signal.aborted) break;
+      latest = { approved: order?.paymentStatus === 'APPROVED', webhookReceived: received === true };
+      // The authoritative GET can approve before the asynchronous callback.
+      // Never use approval alone as the condition that ends webhook polling.
+      if (latest.approved && latest.webhookReceived) return { ...latest, timedOut: false };
+      await new Promise(resolve => {
+        const finish = () => { clearTimeout(pause); controller.signal.removeEventListener('abort', finish); resolve(); };
+        const pause = setTimeout(finish, intervalMs);
+        controller.signal.addEventListener('abort', finish, { once: true });
+      });
+    }
+    return { ...latest, timedOut: true };
+  })();
+  try { return await Promise.race([polling, deadline]); }
+  finally { clearTimeout(timer); controller.abort(); }
 }
 
 function writePrivate(filename, value) {
@@ -126,15 +153,15 @@ async function assertDedicatedData(db, state) {
 
 class SiteClient {
   constructor() { this.cookie = ''; this.csrf = ''; }
-  async request(route, method = 'GET', body) {
+  async request(route, method = 'GET', body, options = {}) {
     assert(/^\/api\/[a-zA-Z0-9/_?=&.-]+$/.test(route), 'SITE_ROUTE_REFUSED');
-    const result = await jsonRequest(SANDBOX_URL + route, { method, headers: { Accept: 'application/json', Origin: SANDBOX_URL, ...(this.cookie ? { Cookie: this.cookie } : {}), ...(body ? { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrf } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const result = await jsonRequest(SANDBOX_URL + route, { method, headers: { Accept: 'application/json', Origin: SANDBOX_URL, ...(this.cookie ? { Cookie: this.cookie } : {}), ...(body ? { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrf } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), ...(options.signal ? { signal: options.signal } : {}) });
     const cookie = result.headers.get('set-cookie');
     if (cookie) { const match = cookie.match(/(?:^|,\s*)(bkm_session=[A-Za-z0-9_-]{43});/); assert(match, 'SESSION_COOKIE_INVALID'); this.cookie = match[1]; }
     if (result.data.csrfToken) this.csrf = result.data.csrfToken;
     return result;
   }
-  async checked(route, method, body) { const result = await this.request(route, method, body); assert(result.ok, 'SITE_API_FAILED_' + result.status); return result.data; }
+  async checked(route, method, body, options) { const result = await this.request(route, method, body, options); assert(result.ok, 'SITE_API_FAILED_' + result.status); return result.data; }
   async init() { await this.checked('/api/session'); }
 }
 
@@ -199,11 +226,11 @@ async function runHomologation(env, config, { stateFile = path.join(ROOT, '.env.
     }
     // Wait for an actual provider callback; GET alone never manufactures an event.
     const approvedId = state.cases.pixApro.orderId;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      const order = await customer.checked('/api/account/orders/' + approvedId);
-      if (order.paymentStatus === 'APPROVED') break;
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    }
+    report.callbackWait = await waitForApprovalAndWebhook({
+      readOrder: signal => customer.checked('/api/account/orders/' + approvedId, 'GET', undefined, { signal }),
+      readWebhook: async () => Number((await db.prepare("SELECT COUNT(*) count FROM payment_events e JOIN payments p ON p.id=e.payment_id WHERE p.order_id=? AND e.event_key LIKE 'mercadopago-webhook:%'").get(approvedId)).count) > 0
+    });
+    saveReport();
     for (const caseName of ['pixApro', 'pixPending']) {
       const id = state.cases[caseName].orderId;
       const before = await customer.checked('/api/account/orders/' + id);
@@ -257,4 +284,4 @@ async function main(args = process.argv.slice(2)) {
 }
 
 if (require.main === module) main().catch(error => { console.error(JSON.stringify({ result: 'REFUSED_OR_INCOMPLETE', code: /^[A-Z0-9_]{1,100}$/.test(error.code || '') ? error.code : 'HOMOLOGATION_FAILED' })); process.exitCode = 1; });
-module.exports = { parseArguments, validateSandboxEnv, assertTestSeller, assertRemoteConfig, verifyEnvironment, createState, validateState, fixtureProduct, checkoutPayload, assertDedicatedData, publicOrder };
+module.exports = { parseArguments, validateSandboxEnv, assertTestSeller, assertRemoteConfig, verifyEnvironment, waitForApprovalAndWebhook, createState, validateState, fixtureProduct, checkoutPayload, assertDedicatedData, publicOrder };

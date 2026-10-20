@@ -7,9 +7,11 @@ E-commerce demonstrativo de Pokémon TCG e gerenciador privado de coleções pes
 - Diretório de trabalho: `D:\Importante\Codex\LP Vendas TCG Site`.
 - Endereço anterior de demonstração: [bkm-tcg-demo.vercel.app](https://bkm-tcg-demo.vercel.app/).
 
-**Estado em 20/10/2026, antes da publicação da Fase 3:** código local preparado para validação, 211 testes automatizados aprovados e migrations 1–7 aplicadas ao Supabase principal. O domínio canônico e o redirecionamento de `www` já foram corrigidos na hospedagem. O push/deploy da Fase 3 e a prova final dos novos fluxos no domínio público ainda precisam ser registrados em [docs/VALIDACAO.md](docs/VALIDACAO.md). Alterações locais ou variáveis configuradas não comprovam homologação online.
+**Estado em 20/10/2026:** o núcleo da Fase 3 foi publicado no domínio oficial, com o [commit `d109af2`](https://github.com/zKaminise/BKM-TCG/commit/d109af2), deployment Ready e [CI histórico aprovado com 211 testes](https://github.com/zKaminise/BKM-TCG/actions/runs/39399711168). O redeploy `NMSQa4gw1WfNTMa1BYQtvLVH1KFA` também ficou Ready. A migração do banco principal e a troca da configuração em Production foram concluídas; o site voltou a responder HTTP 200. A rodada local posterior aprovou **213 testes**, sintaxe e build. Provas e limites dos demais fluxos em [docs/VALIDACAO.md](docs/VALIDACAO.md).
 
-Em 20/10 foi criado o novo projeto Supabase **BKM ecommerce** (`cxoeompxmgdzufgzxerw`) em nova conta autorizada pelo titular. Migração e configuração permanecem pendentes. A existência do projeto não significa que a loja publicada já o utilize.
+O principal usa agora o Supabase **BKM ecommerce** (`cxoeompxmgdzufgzxerw`). A migração PostgreSQL para PostgreSQL preservou **40 tabelas, 230 registros e 2 objetos Storage**, com conferência de SHA-256, integridade, RLS e origem inalterada. As migrations **1–7** estão aplicadas, com **RLS nas 40 tabelas** e nenhum grant de tabelas para `anon`, `authenticated` ou `PUBLIC`. A auditoria posterior encontrou 3 usuários, 4 pedidos e as 2 referências de imagens apontando ao novo projeto, sem referência persistida ao Storage anterior.
+
+As variáveis privadas de banco e Storage da Vercel Production e o `.env` local apontam ao novo principal. O banco anterior (`nxrvmanifngjmdtgnzoq`) e o `.env.old-main` foram preservados para continuidade. A manutenção foi encerrada; `/api/config` confirmou demonstração, pagamento mock, `canCharge=false` e Google habilitado, com 15 produtos observados no catálogo. Esse principal permanece separado da homologação financeira.
 
 A instalação principal permanece em **demonstração, sem vendas ou cobranças reais**. Preços, estoque, frete e pedidos comerciais usados no QA são ilustrativos. A homologação Mercado Pago deve ocorrer em projeto e banco separados.
 
@@ -65,9 +67,9 @@ Frontend HTML/CSS/JavaScript, `personal-ui.js` para o espaço do colecionador e 
 
 A autenticação BKM foi mantida: scrypt, sessões com token armazenado como hash, cookie HttpOnly/SameSite/Secure em HTTPS, CSRF e RBAC. As migrations versionadas incluem coleção pessoal, identidades OAuth, eventos de e-mail e referências globais; RLS protege tabelas da aplicação. Não houve migração para um segundo cadastro Supabase Auth.
 
-Google OIDC usa Authorization Code, PKCE, state/nonce e validação no servidor. Resend utiliza outbox, idempotência e webhook Svix com corpo bruto. Cliente Google e segredos Resend foram guardados privadamente e configurados nas variáveis Production; **OAuth real e entrega de e-mail ainda dependem de prova externa**. A configuração não equivale à homologação.
+Google OIDC usa Authorization Code, PKCE, state/nonce e validação no servidor. O titular autenticou sua conta BKM, confirmou o vínculo explícito e conseguiu sair e entrar novamente pelo Google na mesma conta. Foram observadas 0 coleções nessa conta; o teste não comprova preservação de um acervo preenchido. O aplicativo foi publicado como **Externo, Em produção**, para login básico com `openid`, `email` e `profile`. Isso não constitui verificação avançada pelo Google nem prova dos demais caminhos. Cliente Google e segredos Resend estão privados e configurados em Production. Resend teve envio e entrega de recuperação confirmados em teste controlado, com webhook assinado e replay idempotente; nenhuma senha foi alterada. Na Vercel, `NODEJS_HELPERS=0` preserva o corpo bruto necessário ao webhook. Receita e limites em [docs/DEPLOY.md](docs/DEPLOY.md).
 
-Mercado Pago permanece mock na instalação principal. A conta de vendedor de teste foi conferida; a homologação externa de Pix/cartão, webhook e reconciliação ocorrerá em infraestrutura separada. Produção financeira continua desativada.
+Mercado Pago permanece mock na instalação principal. O sandbox separado está publicado no deployment Ready `35ZhSh55MLGoEqW9BEaaBFLxd3pT`, com Supabase `secapcqqznlokiqhojsa`, TLS verificado e 40 tabelas. A verificação real confirmou vendedor de teste, staging e `canCharge=false`. A execução técnica criou duas orders Pix de teste, de valor nominal **R$ 50,00** cada: uma aprovada após reconciliação e outra pendente. Idempotência passou e o estoque baixou de 2 para 1 uma única vez. **A entrega do webhook financeiro ainda não foi comprovada**; existe divergência entre a aplicação emissora e a configurada no painel, em investigação. Cartão e os demais cenários continuam pendentes. Não houve cobrança comercial ou transferência Pix real. Detalhes em [docs/VALIDACAO.md](docs/VALIDACAO.md).
 
 O adaptador Melhor Envio permite somente cotação e consulta de etiquetas existentes no sandbox; foi testado com transporte controlado, está sem chave e não está ligado ao checkout. Não compra etiquetas. Detalhes: [docs/LOGISTICA.md](docs/LOGISTICA.md).
 
@@ -79,9 +81,9 @@ npm test
 npm run build
 ```
 
-A rodada integral da Fase 3 registrou **211 testes aprovados**. Os testes usam identidades e bancos isolados; não comprovam OAuth, entrega Resend ou pagamento externo por conta própria. Confira o escopo em [docs/VALIDACAO.md](docs/VALIDACAO.md).
+A rodada integral local mais recente registrou **213 testes aprovados**, além de `npm run check` e `npm run build`. O CI publicado citado no início é o marco histórico de 211 testes. Os testes usam identidades e bancos isolados; não comprovam OAuth, entrega Resend ou pagamento externo por conta própria. Confira o escopo e as provas externas separadas em [docs/VALIDACAO.md](docs/VALIDACAO.md).
 
-Backup manual criptografado com AES-256-GCM e restauração isolada foram executados com dados reais, sem publicar conteúdo. A chave fica no `.env` privado e deve ter cópia segura separada; não integra Git ou ZIP público. Retenção é um procedimento manual, sem agendamento ativo. Veja [docs/BACKUP.md](docs/BACKUP.md).
+Após o cutover, um backup manual AES-256-GCM do novo principal registrou **40 tabelas, 233 registros e 2 objetos**. A restauração em SQLite novo e isolado confirmou integridade e nenhuma violação de chave estrangeira; não houve restauração no banco remoto. Essa contagem pertence a um snapshot posterior aos 230 registros da migração. Chave e conteúdo ficam privados, fora de Git e ZIP público. Retenção continua manual, sem agendamento ativo. Hash e procedimento em [docs/BACKUP.md](docs/BACKUP.md).
 
 O Vercel Hobby continua destinado a demonstração não comercial, com `noindex`. Abertura comercial requer infraestrutura elegível, dados empresariais e políticas definitivas, logística e homologações. Não há autorização automática para cobranças reais.
 
@@ -91,4 +93,4 @@ Configuração e estado: [docs/DEPLOY.md](docs/DEPLOY.md). Contratos: [docs/INTE
 
 Logo, pacote e Pikachu foram fornecidos pelo proprietário. Fontes dos produtos demonstrativos: [docs/IMAGENS-DEMO.md](docs/IMAGENS-DEMO.md). Three.js mantém licença MIT em `vendor/LICENSE`. A animação é uma reconstrução própria em tempo real, sem reutilização dos frames de referência ou inclusão de graduação/slab.
 
-Durante a migração, `BKM_MAINTENANCE_MODE=true` permite manutenção temporária: a API responde HTTP 503 com `Retry-After: 60` antes de inicializar o banco. Esse estado não indica migração ou publicação concluída.
+O guard `BKM_MAINTENANCE_MODE=true` permite bloquear a API antes de inicializar o banco, com HTTP 503 e `Retry-After: 60`, em futuras manutenções. Após esta migração, Production está com `BKM_MAINTENANCE_MODE=false` e HTTP 200 confirmado.
