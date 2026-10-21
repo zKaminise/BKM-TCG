@@ -129,6 +129,25 @@ function retryAfterMs(response) {
   const seconds = Number(header); return Number.isFinite(seconds) ? Math.max(1000, Math.min(seconds * 1000, 3600000)) : 1000;
 }
 
+function completeOrderRefund(data, amountCents) {
+  // Orders may retain status=processed with status_detail=refunded. Only the
+  // authenticated GET's completed refund transactions establish a full refund;
+  // a pending/partial refund must remain under financial review.
+  // https://www.mercadopago.com.br/developers/en/reference/online-payments/checkout-api/refund-order/post
+  const payments = data.transactions?.payments, refunds = data.transactions?.refunds;
+  if (!Array.isArray(payments) || payments.length !== 1 || !/^PAY[a-zA-Z0-9]{8,100}$/.test(payments[0]?.id || '') || moneyCents(payments[0].amount) !== amountCents || !Array.isArray(refunds) || !refunds.length || refunds.length > 100) return false;
+  const payment = payments[0];
+  if (!((payment.status === 'processed' && payment.status_detail === 'accredited') || (payment.status === 'refunded' && payment.status_detail === 'refunded'))) return false;
+  const seen = new Set(); let refundedCents = 0;
+  for (const refund of refunds) {
+    const cents = moneyCents(refund?.amount);
+    if (!/^REF[a-zA-Z0-9]{8,100}$/.test(refund?.id || '') || seen.has(refund.id) || refund.transaction_id !== payment.id || refund.status !== 'processed' || !Number.isSafeInteger(cents) || cents <= 0) return false;
+    seen.add(refund.id); refundedCents += cents;
+    if (!Number.isSafeInteger(refundedCents) || refundedCents > amountCents) return false;
+  }
+  return refundedCents === amountCents;
+}
+
 class MercadoPagoPaymentProvider extends PaymentProvider {
   constructor({ env = process.env, fetchImpl = globalThis.fetch, timeoutMs = 8000, now = () => Date.now() } = {}) {
     super();
@@ -180,8 +199,10 @@ class MercadoPagoPaymentProvider extends PaymentProvider {
     if (data.live_mode !== undefined && data.live_mode !== (this.env.MERCADO_PAGO_ENVIRONMENT === 'production')) throw invalid();
     let status;
     if (data.status === 'processed' && data.status_detail === 'accredited') status = 'APPROVED';
+    else if (data.status === 'processed' && data.status_detail === 'refunded') status = completeOrderRefund(data, input.amountCents) ? 'REFUNDED' : 'REVIEW';
+    else if (data.status === 'refunded') status = data.status_detail === 'refunded' && (data.transactions?.refunds === undefined || completeOrderRefund(data, input.amountCents)) ? 'REFUNDED' : 'REVIEW';
     else if (['canceled','failed'].includes(data.status) && data.status_detail === 'expired') status = 'EXPIRED';
-    else status = ({ created: 'PENDING', processing: 'PENDING', action_required: 'PENDING', canceled: 'CANCELLED', expired: 'EXPIRED', failed: 'REJECTED', refunded: 'REFUNDED', charged_back: 'CHARGEBACK' })[data.status] || 'REVIEW';
+    else status = ({ created: 'PENDING', processing: 'PENDING', action_required: 'PENDING', canceled: 'CANCELLED', expired: 'EXPIRED', failed: 'REJECTED', charged_back: 'CHARGEBACK' })[data.status] || 'REVIEW';
     const payments = data.transactions?.payments;
     // The transaction's paid_amount can be net of provider fees. Reconcile the
     // gross charged amount against the order, never against the seller payout.

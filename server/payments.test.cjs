@@ -136,6 +136,57 @@ test('reconciliação recusa outra conta, referência, país, valor ou aprovaç�
   assert.equal((await provider.getPayment(remoteId, input)).status, 'REVIEW');
 });
 
+function completedRefund(patch = {}) {
+  const data = remote({ status: 'processed', status_detail: 'refunded' });
+  data.transactions.refunds = [{ id: 'REF01UNITREFUND123', transaction_id: data.transactions.payments[0].id, amount: '123.45', status: 'processed' }];
+  return { ...data, ...patch };
+}
+
+test('Orders processed/refunded exige devolução concluída integral da própria transação', async () => {
+  const data = completedRefund();
+  const provider = new MercadoPagoPaymentProvider({ env: staging, fetchImpl: async () => json(data) });
+  const result = await provider.getPayment(remoteId, input);
+  assert.equal(result.status, 'REFUNDED'); assert.equal(result.providerStatus, 'processed'); assert.equal(result.providerStatusDetail, 'refunded');
+  assert.equal(result.amountCents, 12345); assert.equal(result.sandbox, true);
+  assert.equal(JSON.stringify(result).includes('REF01UNITREFUND123'), false);
+  // Prior partial refunds may sum to the whole amount, but every receipt must
+  // be completed, unique and linked to this single payment transaction.
+  data.transactions.refunds = [{ id: 'REF01UNITREFUND123', transaction_id: data.transactions.payments[0].id, amount: '23.45', status: 'processed' }, { id: 'REF01UNITREFUND124', transaction_id: data.transactions.payments[0].id, amount: '100.00', status: 'processed' }];
+  assert.equal((await provider.getPayment(remoteId, input)).status, 'REFUNDED');
+});
+
+test('reembolso parcial, pendente ou com transações inconsistentes não vira devolução total', async () => {
+  const changes = [
+    data => { data.status_detail = 'partially_refunded'; },
+    data => { data.transactions.refunds[0].amount = '23.45'; },
+    data => { data.transactions.refunds[0].status = 'processing'; },
+    data => { data.transactions.refunds[0].transaction_id = 'PAY01OTHERPAYMENT'; },
+    data => { data.transactions.refunds.push({ ...data.transactions.refunds[0] }); },
+    data => { data.transactions.refunds[0].amount = '124.00'; },
+    data => { data.transactions.payments[0].amount = '1.00'; },
+    data => { data.transactions.payments[0].status = 'failed'; },
+    data => { data.transactions.payments.push({ ...data.transactions.payments[0] }); },
+    data => { delete data.transactions.refunds; },
+    data => { data.status = 'refunded'; data.status_detail = 'partially_refunded'; },
+    data => { data.status = 'refunded'; data.transactions.refunds[0].status = 'processing'; },
+  ];
+  for (const change of changes) {
+    const data = completedRefund(); change(data);
+    const provider = new MercadoPagoPaymentProvider({ env: staging, fetchImpl: async () => json(data) });
+    assert.equal((await provider.getPayment(remoteId, input)).status, 'REVIEW');
+  }
+  const invalid = completedRefund(); invalid.transactions.refunds[0].amount = '-123.45';
+  const provider = new MercadoPagoPaymentProvider({ env: staging, fetchImpl: async () => json(invalid) });
+  await assert.rejects(provider.getPayment(remoteId, input), error => error.code === 'PAYMENT_RESPONSE_INVALID');
+});
+
+test('reembolso moderno preserva as guardas de vendedor, referência, ID, país, moeda e bruto', async () => {
+  for (const patch of [{ user_id: 'other' }, { external_reference: 'other' }, { id: 'ORD01OTHERORDER123' }, { country_code: 'ARG' }, { currency_id: 'USD' }, { total_amount: '1.00' }, { live_mode: true }]) {
+    const provider = new MercadoPagoPaymentProvider({ env: staging, fetchImpl: async () => json(completedRefund(patch)) });
+    await assert.rejects(provider.getPayment(remoteId, input), error => error.code === 'PAYMENT_RECONCILIATION_MISMATCH');
+  }
+});
+
 test('webhook autenticado consulta recurso remoto e ignora corpo; repetições têm mesmo evento', async () => {
   let calls = 0;
   const provider = new MercadoPagoPaymentProvider({ env: staging, now: () => Number(ts), fetchImpl: async () => { calls++; return json(remote()); } });

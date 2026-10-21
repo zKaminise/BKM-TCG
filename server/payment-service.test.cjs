@@ -129,6 +129,23 @@ for(const engine of ['sqlite','postgres'])test('ledger Mercado Pago com banco '+
     f.now+=5000;f.approve(order);const reversed=await f.service.reconcile(order.id);assert.equal(reversed.payment_status,'REFUNDED');assert.equal(await f.stock(order),1);
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM stock_movements WHERE variant_id=?').get(order.variantId)).n,1);
   });
+  await t.test('cartão aprovado e reembolso Orders processed/refunded preservam baixa e deduplicam aviso',async()=>{
+    const order=await f.order({stock:1}),cardInput={method:'card',payer:{email:'buyer@testuser.com'},card:{token:'unit-sdk-token-not-real',paymentMethodId:'master',type:'credit_card',installments:1}};
+    const paymentId='PAY01CARDREFUND123',refundId='REF01CARDREFUND123';
+    f.approve(order,{transactions:{payments:[{id:paymentId,amount:'100.00',paid_amount:'98.00',status:'processed',status_detail:'accredited',payment_method:{id:'master',type:'credit_card',installments:1}}]}});
+    assert.equal((await f.service.createPayment(order,cardInput)).status,'CONFIRMED');assert.equal(await f.stock(order),0);
+    const posts=f.posts;f.now+=1000;
+    f.remote(order,{status:'processed',status_detail:'refunded',total_paid_amount:'100.00',transactions:{payments:[{id:paymentId,amount:'100.00',paid_amount:'98.00',status:'processed',status_detail:'accredited',payment_method:{id:'master',type:'credit_card',installments:1}}],refunds:[{id:refundId,transaction_id:paymentId,amount:'100.00',status:'processed'}]}});
+    const proof=f.sign(f.remotes.get(order.id)),refunded=await f.service.webhook(proof);
+    assert.equal(refunded.status,'REFUNDED');assert.equal(refunded.payment_status,'REFUNDED');
+    await f.service.webhook(proof);await f.service.reconcile(order.id);
+    assert.equal(await f.stock(order),0);assert.equal(f.posts,posts);
+    assert.equal((await db.prepare('SELECT status FROM inventory_reservations WHERE order_id=?').get(order.id)).status,'COMMITTED');
+    assert.equal(Number((await db.prepare('SELECT COUNT(*) n FROM stock_movements WHERE variant_id=?').get(order.variantId)).n),1);
+    assert.equal(Number((await db.prepare('SELECT COUNT(*) n FROM email_outbox WHERE key=?').get('mp-payment:'+order.id+':refunded')).n),1);
+    f.now+=1000;f.approve(order);
+    assert.equal((await f.service.reconcile(order.id)).payment_status,'REFUNDED');assert.equal(await f.stock(order),0);
+  });
   await t.test('valor ou vendedor incompatível não confirma e nem baixa estoque',async()=>{
     const order=await f.order();f.approve(order,{user_id:'9999'});
     await assert.rejects(f.service.createPayment(order,input),error=>error.code==='PAYMENT_RECONCILIATION_REQUIRED');assert.equal(await f.stock(order),2);
