@@ -1,6 +1,6 @@
 # Homologação Mercado Pago — Checkout Transparente com Orders
 
-Foram criadas e consultadas duas orders efetivas no sandbox Mercado Pago: um Pix aprovado e outro inicialmente pendente, depois expirado. Os callbacks do simulador oficial para os mesmos IDs retornaram **HTTP 200**, com **2 recibos autenticados por order**. GET no provedor e leitura do banco confirmaram os estados, reservas e uma única baixa de estoque. A comprovação está limitada a esses cenários Pix de teste e não homologa cartão, reembolso ou operação comercial. Pagamentos de produção permanecem desativados.
+As duas orders Pix originais foram comprovadas no sandbox: uma aprovada e outra inicialmente pendente, depois expirada, com callbacks oficiais HTTP 200 e **2 recibos autenticados por order**. Depois, o Brick real tokenizou cartões oficiais de teste: `OTHE` foi recusado e liberou a reserva; `APRO` foi aprovado e comprometeu uma unidade. O mesmo APRO foi reembolsado integralmente, com **um POST 201**, GET e estado local REFUNDED, além de segundo recibo webhook autenticado. Permaneceram **4 pedidos, estoque 0 e 2 baixas acumuladas**. Pendência por cartão, cancelamento solicitado, reembolso parcial e demais cenários ainda estão pendentes. Pagamentos de produção permanecem desativados.
 
 ## Aplicação e credenciais corretas
 
@@ -58,7 +58,7 @@ O diagnóstico com a assinatura real confirmou **`exactIdMatches=true` em `2026-
 
 ### Prova final — 20/10 às 22:31 BRT / 21/10 às 01:31 UTC
 
-A última rodada aprovou **216 testes**, sintaxe e build. O [CI 39527731133](https://github.com/zKaminise/BKM-TCG/actions/runs/39527731133) passou no [commit `e07241b`](https://github.com/zKaminise/BKM-TCG/commit/e07241bb5f0f867f6e645d052337d263649ea3a6). Deployments Ready: principal **`Ee3sN23zaPVCWC2o88hSpDAbdsvX`** e sandbox **`3P5n5werWo7tMdtxdXX5AsJQrVaG`**.
+A rodada daquela correção aprovou **216 testes**, sintaxe e build. O [CI 39527731133](https://github.com/zKaminise/BKM-TCG/actions/runs/39527731133) passou no [commit `e07241b`](https://github.com/zKaminise/BKM-TCG/commit/e07241bb5f0f867f6e645d052337d263649ea3a6). Deployments Ready desse marco: principal **`Ee3sN23zaPVCWC2o88hSpDAbdsvX`** e sandbox **`3P5n5werWo7tMdtxdXX5AsJQrVaG`**.
 
 O simulador oficial do painel Mercado Pago enviou callbacks para as **duas orders originais**, com resposta **HTTP 200**. Capturas: `outputs/mercadopago-webhook-aprovado-200.png` e `outputs/mercadopago-webhook-expirado-200.png`. A leitura final do provedor e do PostgreSQL foi registrada em **`backups/mp-sandbox-final-evidence.json`**, observação **`2026-10-21T01:31:42.569Z`**:
 
@@ -67,7 +67,59 @@ O simulador oficial do painel Mercado Pago enviou callbacks para as **duas order
 | `ORDTST01M5CXWZ7M0K4150MAPV0MP71J` | `APPROVED` em ambos | `COMMITTED` | 2 |
 | `ORDTST01M5CXX9DH0MMGN3E8WCKB4WT1` | `EXPIRED` em ambos; antes `PENDING` | `RELEASED` | 2 |
 
-A evidência final confirma **2 pedidos**, **1 reserva comprometida**, **1 liberada**, uma única unidade baixada e estoque físico **2 → 1**. Registra **`idempotencyPreviouslyConfirmed=true`** e **`observedScenariosConfirmed=true`**. O segundo pedido expirou com o tempo; sua pendência anterior continua comprovada no snapshot histórico. Não houve order substituta, cobrança comercial, transferência bancária real ou reembolso realizado. O principal permaneceu isolado e mock.
+A evidência daquele snapshot confirma **2 pedidos**, **1 reserva comprometida**, **1 liberada**, uma única unidade baixada e estoque físico **2 → 1**. Registra **`idempotencyPreviouslyConfirmed=true`** e **`observedScenariosConfirmed=true`**. O segundo pedido expirou com o tempo; sua pendência anterior continua comprovada no snapshot histórico. Não houve order substituta, cobrança comercial, transferência bancária real ou reembolso realizado. O principal permaneceu isolado e mock. O teste de cartão posterior acrescentou outra order sem alterar esses relatórios Pix.
+
+### Correção posterior do carregador do SDK — 21/10
+
+O endereço anterior do script, `https://js.mercadopago.com/v2`, falhava por resolução DNS (`ENOTFOUND`). O [commit `09dcc61`](https://github.com/zKaminise/BKM-TCG/commit/09dcc6123d7ebb4c3dd73c8e210ea7350397d513) corrigiu o carregador para [o endereço oficial `https://sdk.mercadopago.com/js/v2`](https://github.com/mercadopago/sdk-js), que respondeu HTTP 200 com JavaScript. O [CI 39580433525](https://github.com/zKaminise/BKM-TCG/actions/runs/39580433525) terminou com sucesso em **260 testes**. Deployments Success: principal **`HHmKyEQGTwKjVstAvPqpA3SMchtQ`** e sandbox **`BK6ejxE1yYh4gUmeEKnv1E17S2e5`**.
+
+Essa evidência isolada comprova a obtenção do recurso do SDK. As provas posteriores abaixo acrescentam formulário, tokenização, recusa `OTHE`, aprovação `APRO` e reembolso integral do APRO; pendência por cartão, cancelamento solicitado e reembolso parcial continuam pendentes. A prova Pix acima permanece histórica e independente dessa correção; produção financeira continua desativada.
+
+### Recusa de cartão pelo Brick real — 21/10 às 06:56 BRT
+
+Após a correção, o navegador abriu o Card Payment Brick real, com campos seguros em iframes do Mercado Pago. Foi utilizado somente cartão oficial de teste no cenário `OTHE`, tokenizado pelo SDK, com valor nominal sandbox de **R$ 50,00**. A captura da interface é `outputs/mercadopago-cartao-primeira-observacao.png`.
+
+O registro somente de leitura `work/mp-card-rejected-observation.json`, observado em **`2026-10-21T09:56:54.075Z`**, confirmou vendedor de teste e aplicação emissora `8997426787542730`, GET autoritativo e PostgreSQL:
+
+| Dado | Resultado observado |
+| --- | --- |
+| Pedido BKM | `4f216189-84a4-44bd-8029-80219d2cfeb2` |
+| Order Mercado Pago | `ORDTST01M5EY8B02JQF2P3ZQRFP5MJW5` |
+| BKM | `CANCELLED / REJECTED` |
+| Provedor | `failed / failed`, normalizado como `REJECTED` |
+| Reserva | `RELEASED`, quantidade 1 |
+| Recibos webhook autenticados | 1 |
+| Estoque e totais naquele momento | estoque 1; 3 pedidos; 1 unidade comprometida e 1 baixada acumuladas, ambas do Pix aprovado |
+
+A tentativa ficou `creationState=CREATED`; `PAYMENT_PROVIDER_ERROR` conserva o histórico da primeira resposta inconclusiva. O evento automático e a consulta autoritativa resolveram o resultado como recusa, sem criar order substituta automaticamente. Os relatórios Pix permaneceram inalterados. Nenhuma cobrança comercial foi realizada e nenhum PAN, documento, token ou segredo é incluído nesta documentação.
+
+Essa prova confirma somente o cenário de recusa `OTHE` pelo Brick e a liberação de reserva. Aprovação e reembolso integral do APRO foram comprovados depois, abaixo. **Pendência por cartão, cancelamento solicitado, reembolso parcial e os demais cenários continuam pendentes.** O estado `CANCELLED` resultante da recusa não é prova de uma operação de cancelamento solicitada pelo lojista.
+
+### Aprovação de cartão pelo Brick real — 21/10
+
+O cenário `APRO`, tokenizado pelo Brick real com cartão oficial de teste e valor nominal sandbox de **R$ 50,00**, originou outra order. A auditoria somente de leitura `work/mp-card-approved-observation.json` confirmou vendedor de teste e aplicação emissora corretos, GET autoritativo e PostgreSQL:
+
+| Dado | Resultado observado |
+| --- | --- |
+| Pedido BKM | `7004c725-bde3-4aac-92f7-726d3293ea81` |
+| Order Mercado Pago | `ORDTST01M5EYMSJEGCBN6Z63NWFMXM78` |
+| BKM | `CONFIRMED / APPROVED` |
+| Provedor | `processed / accredited`, normalizado como `APPROVED` |
+| Reserva | `COMMITTED`, quantidade 1 |
+| Recibos webhook autenticados | 1 |
+| Estoque e totais após APRO | estoque 0; 4 pedidos; 2 unidades comprometidas e 2 baixadas acumuladas, uma do Pix e outra do cartão |
+
+Os relatórios Pix permaneceram inalterados. A prova confirma somente a aprovação observada e o comprometimento de uma unidade, sem cobrança comercial. Nenhum PAN, documento, token ou segredo integra esta documentação.
+
+### Normalização e prova externa de reembolso integral — 21/10
+
+O [commit `4ca7a0c`](https://github.com/zKaminise/BKM-TCG/commit/4ca7a0cfcf119d37dd7738afa6b9f5ea6ad02c96) reconhece o formato moderno `processed/refunded` somente quando há itens de reembolso completos vinculados ao pagamento e soma exata do valor bruto. Casos parciais ou mistos não são promovidos a reembolso integral; guardas de vendedor, referência, moeda e valores permanecem obrigatórias. A rodada local passou em **265 testes e sintaxe**, e o [CI 39581860955](https://github.com/zKaminise/BKM-TCG/actions/runs/39581860955) concluiu com sucesso. Deployments Success desse código: principal **`EGwYJx5VwaFQG9FtWPvMgsN17zkq`**, sandbox **`4KUpegP2XQUPBqTmccjLshdXdsms`**.
+
+O pedido APRO acima recebeu **um único POST de reembolso sandbox, HTTP 201**. O registro `work/mp-card-refund-post-result.json` confirmou um reembolso concluído de **5.000 centavos**, integral ao pedido, por GET autoritativo. O primeiro retorno ainda tinha estado local aprovado; a observação posterior somente de leitura `work/mp-card-refund-observation.json`, concluída em **`2026-10-21T17:15:29.873Z`**, confirmou pagamento e registro financeiro locais **REFUNDED**, com **2 recibos webhook autenticados acumulados**, um da aprovação e outro do reembolso.
+
+A conferência `work/mp-card-refund-event-counts.json` distinguiu **1 transição financeira REFUNDED e 1 recibo autenticado REFUNDED**, sem contar ambos como duas transições. A reserva permaneceu **COMMITTED/1**; **estoque 0, 2 unidades comprometidas/baixadas e 4 pedidos** não mudaram. Reembolso financeiro não repôs o produto automaticamente nem criou nova order. O e-mail `order-refunded` ficou **PENDING** no provedor development do sandbox, sem comprovação de prévia ou envio Resend.
+
+O cenário de reembolso integral observado está comprovado. Não houve segundo POST para testar repetição do reembolso; reembolso parcial, pendência por cartão, cancelamento solicitado e demais cenários continuam pendentes. Produção financeira permanece desativada. O ajuste de interface para **Reembolsado**, em [`fdbb91c`](https://github.com/zKaminise/BKM-TCG/commit/fdbb91c6bf24f0306c98e2fb17ed407d87bee1a6), teve [CI 39642646628 aprovado](https://github.com/zKaminise/BKM-TCG/actions/runs/39642646628) e deployments Success: principal **`GRuxVzXNnseYFDWhBYD1a4TrbCij`**, sandbox **`AVSCdA9YAMiJ4LPAxdMzApFMLbVM`**. A suíte continua com 265 testes; a prova externa é independente do CI.
 
 ### Assistente técnico de execução
 
@@ -95,7 +147,7 @@ O checkpoint privado `.env.sandbox.state.json` guarda credenciais técnicas alea
 
 O relatório `backups/mp-sandbox-report.json`, também ignorado pelo Git, contém somente IDs técnicos, estados, centavos, reserva/baixa e resultado das verificações. Ele exclui credenciais, cookies, e-mails, endereço, QR, token, documento e dados de cartão. O assistente espera até um minuto por **aprovação e recibo webhook**, sem encerrar a espera apenas porque um GET aprovou o pedido. O prazo também cancela o GET em andamento; `callbackWait` registra somente estados de verificação. Depois ocorre a reconciliação explícita. `webhookProven` exige um recibo válido registrado por essa rota; aprovação obtida somente por reconciliação não é apresentada como entrega de webhook. O resultado só é `SANDBOX_SCENARIOS_CONFIRMED` quando aprovação, pendência e callback foram comprovados; caso contrário o comando deixa evidência incompleta e código de saída não zero, sem criar cobranças substitutas.
 
-O assistente foi executado nos serviços isolados e comprovou os resultados Pix iniciais. Depois, o simulador oficial e a consulta final comprovaram callbacks autenticados, aprovação e expiração para os mesmos IDs, conforme a seção de prova final. O relatório inicial permaneceu inalterado; ele não deve ser confundido com a evidência final separada. Preserve o checkpoint e as orders existentes. Cartão pelo Brick, recusa, cancelamento, reembolso e demais cenários continuam no roteiro abaixo e não são declarados aprovados por essa prova Pix.
+O assistente foi executado nos serviços isolados e comprovou os resultados Pix iniciais. Depois, o simulador oficial e a consulta final comprovaram callbacks autenticados, aprovação e expiração para os mesmos IDs, conforme a seção de prova final. O relatório inicial permaneceu inalterado; ele não deve ser confundido com a evidência final separada. Preserve o checkpoint e as orders existentes. Recusa, aprovação pelo Brick e reembolso integral foram comprovados separadamente; pendência por cartão, cancelamento solicitado, reembolso parcial e demais cenários continuam no roteiro abaixo e não são declarados aprovados pela prova Pix.
 
 ## Contrato que a BKM implementa
 
@@ -140,4 +192,4 @@ Cancelamento e reembolso são ações financeiras diferentes. O código reconcil
 
 Os testes locais cobrem valores, validação de vendedor, ambiente, reserva, baixa, duplicações, respostas inconclusivas, reembolso e outbox, com transporte substituído e bancos isolados. Separadamente, as duas orders de sandbox comprovaram aprovação, pendência histórica, expiração, reconciliação, idempotência, callbacks oficiais autenticados e estoque. Os números históricos de testes da Fase 2 não são provas externas.
 
-Os callbacks oficiais dos dois cenários Pix observados foram aceitos com HTTP 200 e recibos autenticados persistidos. A correção HMAC foi comprovada sem alterar o histórico das falhas anteriores. Isso não homologa cartão, cancelamento, reembolso, retries de longa duração ou todos os fluxos do checkout. Antes da liberação comercial, conclua os cenários restantes e a validação aplicável do SDK. Produção continua desativada e exige autorização final separada.
+Os callbacks oficiais dos dois cenários Pix observados foram aceitos com HTTP 200 e recibos autenticados persistidos. A correção HMAC foi comprovada sem alterar o histórico. O Brick comprovou tokenização, recusa `OTHE` com liberação e aprovação `APRO` com comprometimento; o APRO teve depois reembolso integral confirmado por GET, estado local e recibo autenticado. Isso não homologa pendência por cartão, cancelamento solicitado, reembolso parcial, repetição do POST de reembolso, retries de longa duração ou todos os fluxos do checkout. Antes da liberação comercial, conclua os cenários restantes. Produção continua desativada e exige autorização final separada.
