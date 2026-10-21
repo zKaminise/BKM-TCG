@@ -39,6 +39,44 @@ function createEmailStore(db) {
     async retry(id,{attempts,nextAttemptAt,errorCode,claim}) { const f=fence(claim);return db.prepare("UPDATE email_outbox SET status='PENDING',attempts=?,next_attempt_at=?,last_error=?,locked_until=NULL WHERE id=?"+f.sql).run(attempts,nextAttemptAt,errorCode,id,...f.args); },
     async fail(id,{errorCode,claim}) { const f=fence(claim);return db.prepare("UPDATE email_outbox SET status='FAILED',delivery_status=?,last_error=?,locked_until=NULL WHERE id=?"+f.sql).run(errorCode==='EMAIL_SUPPRESSED'?'SUPPRESSED':'FAILED',errorCode,id,...f.args); },
     async isSuppressed(address) {return !!await db.prepare('SELECT recipient_hash FROM email_suppressions WHERE recipient_hash=?').get(recipientHash(address));},
+    async currentWishlistItems({userId,wishlistIds,items,now=Date.now()}={}) {
+      if(!Array.isArray(items)||!items.length||items.length>50||!Number.isSafeInteger(now)||now<0)return [];
+      const ids=[...new Set(items.map(item=>item?.variantId).filter(id=>typeof id==='string'&&id&&id.length<=100))];
+      if(!ids.length)return [];
+      const rows=await db.prepare("SELECT v.*,p.slug,p.name,p.set_name,p.images_json,cm.number,COALESCE(r.units,0) reserved FROM variants v JOIN products p ON p.id=v.product_id JOIN card_metadata cm ON cm.id=p.card_id LEFT JOIN (SELECT variant_id,SUM(quantity) units FROM inventory_reservations WHERE status='ACTIVE' AND expires_at>? GROUP BY variant_id) r ON r.variant_id=v.id WHERE v.id IN ("+ids.map(()=>'?').join(',')+") AND v.active=1 AND p.kind='SINGLE' AND p.published=1 AND p.archived=0").all(now,...ids);
+      const byId=new Map(rows.map(row=>[row.id,row])),seen=new Set(),current=[];
+      for(const item of items){const row=byId.get(item.variantId);if(!row||row.product_id!==item.productId||row.stock-Number(row.reserved)<1||seen.has(row.id))continue;seen.add(row.id);
+        const images=JSON.parse(row.images_json);
+        current.push({productId:row.product_id,variantId:row.id,slug:row.slug,name:row.name,setName:row.set_name,number:row.number,priceCents:row.price_cents,language:row.language,condition:row.condition,finish:row.finish,image:Array.isArray(images)?images[0]?.url||null:null,productUrl:'/produto/'+encodeURIComponent(row.slug)});
+      }
+      return store.eligibleWishlistItems({userId,wishlistIds,items:current});
+    },
+    async prepareDigest(message,{now=Date.now()}={}) {
+      // Only a first, still-owned claim can change an unsent digest. Once a
+      // provider attempt may have happened, its idempotency payload is frozen.
+      if(message?.template!=='wishlist-digest'||message.attempts!==0||message.claim?.attempts!==1||!Number.isSafeInteger(now)||now<0)return null;
+      const f=fence(message.claim);if(!f.sql||message.claim.leaseUntil<=now)return null;
+      return db.transaction(async()=>{
+        const ownerId=message.data?.notificationUserId;
+        if(!ownerId)return null;
+        if(db.engine==='postgres')await db.prepare('SELECT id FROM users WHERE id=? FOR UPDATE').get(ownerId);
+        const saved=await db.prepare('SELECT * FROM email_outbox WHERE id=?'+f.sql+db.lockSuffix).get(message.id,...f.args);
+        if(!saved)return null;
+        const payload=JSON.parse(saved.payload_json);
+        if(payload.template!=='wishlist-digest'||payload.key!==message.key||payload.to!==message.to||payload.data?.notificationUserId!==ownerId||payload.data.consentVerified!==true)return null;
+        const preferences=await db.prepare('SELECT p.*,u.email FROM email_preferences p JOIN users u ON u.id=p.user_id WHERE p.user_id=?').get(ownerId);
+        const consent=preferences&&preferences.email.toLowerCase()===payload.to.toLowerCase()&&preferences.wishlist_enabled&&preferences.digest_enabled&&preferences.consented_at&&!await store.isSuppressed(payload.to);
+        const items=consent?await store.currentWishlistItems({userId:ownerId,wishlistIds:payload.data.wishlistIds,items:payload.data.items,now}):[];
+        const variants=new Set(items.map(item=>item.variantId));
+        const events=await db.prepare("SELECT event_key,item_json FROM email_wishlist_digest_events WHERE email_id=? AND status='QUEUED'").all(message.id);
+        const discarded=events.filter(event=>!variants.has(JSON.parse(event.item_json).variantId)).map(event=>event.event_key);
+        if(discarded.length)await db.prepare("UPDATE email_wishlist_digest_events SET status='DISCARDED',processed_at=? WHERE email_id=? AND status='QUEUED' AND event_key IN ("+discarded.map(()=>'?').join(',')+")").run(now,message.id,...discarded);
+        if(!items.length)return null;
+        const prepared={...payload,data:{...payload.data,items,productUrl:items[0].productUrl}};
+        const updated=await db.prepare('UPDATE email_outbox SET payload_json=? WHERE id=?'+f.sql).run(JSON.stringify(prepared),message.id,...f.args);
+        return updated.changes?{...message,...prepared}:null;
+      });
+    },
     async eligibleWishlistItems({userId,wishlistIds,items}={}) {
       if(!userId||!Array.isArray(wishlistIds)||!wishlistIds.length||wishlistIds.length>100||wishlistIds.some(id=>typeof id!=='string'||!id||id.length>100)||!Array.isArray(items)||!items.length||items.length>50)return [];
       const personal=await db.prepare('SELECT preferences_json FROM personal_preferences WHERE user_id=?').get(userId);

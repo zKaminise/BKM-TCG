@@ -1,9 +1,17 @@
 import apiModule from '../server/api.cjs';
+import emailJobModule from '../server/email-job.cjs';
 const { createApi } = apiModule;
+const { EMAIL_JOB_PATH, emailJobAuthorized } = emailJobModule;
 let api;
 // Resend signs the original payload bytes; keep Vercel from parsing JSON first.
 export const config = { api: { bodyParser: false } };
 export default async function handler(req, res) {
+  const pathname = new URL(req.url, 'https://localhost').pathname;
+  // Reject unauthenticated scheduler probes before opening any database pool.
+  if (pathname === EMAIL_JOB_PATH && !emailJobAuthorized(req.headers, process.env)) {
+    res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(JSON.stringify({error:{code:'JOB_UNAUTHORIZED',message:'Acesso não autorizado.'}}));
+  }
   // Stop all application reads and writes before opening the database during a
   // planned migration. Some GET endpoints also create sessions or flush mail.
   if (process.env.BKM_MAINTENANCE_MODE === 'true') {
@@ -20,5 +28,5 @@ export default async function handler(req, res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-Frame-Options', 'DENY');
-  return api.handle(req, res, new URL(req.url, publicUrl).pathname);
+  return api.handle(req, res, pathname);
 }

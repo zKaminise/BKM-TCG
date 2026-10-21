@@ -7,6 +7,7 @@ const { hashPassword, verifyPassword, hashToken, publicUser } = require("./auth.
 const { accountList } = require("./accounts.cjs");
 const { PaymentError, paymentReadiness } = require("./payments.cjs");
 const { allowedOrigins, safeReturnPath } = require('./domain-policy.cjs');
+const { EMAIL_JOB_PATH, emailJobAuthorized, createEmailJob } = require('./email-job.cjs');
 const uid = () => crypto.randomUUID();
 const now = () => (/* @__PURE__ */ new Date()).toISOString();
 const normalized = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\b0+(?=\d)/g, "");
@@ -98,11 +99,12 @@ function createApi(options = {}) {
   const personal=require('./personal-collection.cjs').createPersonalCollection({db,ApiError,fetchImpl:options.catalogFetch,priceProvider:market.provider});
   let emailDispatcher;
   async function enqueueEmail(message) { return emailStore.enqueue(message); }
-  async function flushEmails() {
+  async function flushEmails({limit=10}={}) {
     const { createEmailDispatcher, createEmailProvider } = require('./email.cjs');
     emailDispatcher ||= createEmailDispatcher({store:emailStore,provider:createEmailProvider({env:effectiveEnv}),env:effectiveEnv});
-    return emailDispatcher.flush({limit:10});
+    return emailDispatcher.flush({limit});
   }
+  const runEmailJob=createEmailJob({notifications,flushEmails});
   async function flushSafely() { try { return await flushEmails(); } catch { return {pending:true}; } }
   async function inventoryNotifications(productId,eventKey) {
     const recipients=await personal.onInventoryChange(productId,eventKey);
@@ -424,6 +426,12 @@ function createApi(options = {}) {
       res.end(JSON.stringify(data));
     };
     try {
+      if(pathname===EMAIL_JOB_PATH) {
+        if(!emailJobAuthorized(req.headers,effectiveEnv))return respond(401,{error:{code:'JOB_UNAUTHORIZED',message:'Acesso não autorizado.'}});
+        if(req.method!=='GET') {res.setHeader('Allow','GET');return respond(405,{error:{code:'METHOD_NOT_ALLOWED',message:'Método não permitido.'}});}
+        await db.ready;
+        return respond(200,await runEmailJob());
+      }
       await db.ready;
       if(req.method==='POST' && pathname==='/api/email/webhook/resend') {
         limit(req,'email-webhook',120,60000);

@@ -22,7 +22,7 @@ function openDatabase(filename) {
   const db = new DatabaseSync(filename);
   db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
   const version = db.prepare("PRAGMA user_version").get().user_version;
-  if (version > 7) {
+  if (version > 8) {
     db.close();
     throw new Error("Banco criado por uma versão mais recente; atualização recusada.");
   }
@@ -73,6 +73,11 @@ function openDatabase(filename) {
   if (version < 7) {
     db.exec('BEGIN IMMEDIATE');
     try { db.exec(fs.readFileSync(path.join(__dirname, 'migrations/007_market_prices.sql'), 'utf8').split('-- POSTGRES_RLS')[0]); db.exec('PRAGMA user_version=7; COMMIT;'); }
+    catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+  if (version < 8) {
+    db.exec('BEGIN IMMEDIATE');
+    try { db.exec(fs.readFileSync(path.join(__dirname, 'migrations/008_wishlist_digests.sql'), 'utf8').split('-- POSTGRES_RLS')[0]); db.exec('PRAGMA user_version=8; COMMIT;'); }
     catch (error) { db.exec('ROLLBACK'); throw error; }
   }
   db.prepare("INSERT OR IGNORE INTO settings(id,value_json,updated_at) VALUES(1,?,?)").run(JSON.stringify(defaultSettings), (/* @__PURE__ */ new Date()).toISOString());

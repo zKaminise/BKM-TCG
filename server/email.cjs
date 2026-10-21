@@ -30,12 +30,43 @@ function safeLink(value, base, { sameOrigin = true } = {}) {
   } catch { return null; }
 }
 
+function wishlistCard(item, base) {
+  const candidates = [item.productUrl, typeof item.slug === 'string' && item.slug.trim() ? '/produto/' + encodeURIComponent(item.slug.trim()) : null];
+  let url = null;
+  for (const candidate of candidates) {
+    const link = safeLink(candidate, base);
+    if (link && /^\/produto\/[^/]+\/?$/.test(new URL(link).pathname)) { url = link; break; }
+  }
+  const imageLink = safeLink(item.image, base, { sameOrigin: false });
+  const image = imageLink && new URL(imageLink).protocol === 'https:' ? imageLink : null;
+  const name = clean(item.name || item.productName || 'Carta desejada', 200);
+  const fields = [
+    ['Coleção', clean(item.setName || 'Não informada', 160)],
+    ['Número', clean(item.number || 'Não informado', 80)],
+    ['Idioma', clean(item.language || 'Não informado', 50)],
+    ['Condição', clean(item.condition || 'Não informada', 50)],
+    ['Variante / acabamento', clean(item.finish || item.variant || 'Não informado', 80)],
+  ];
+  const price = Number.isSafeInteger(item.priceCents) && item.priceCents >= 0 ? money(item.priceCents) : 'Preço indisponível';
+  const thumbnail = image ? `<img src="${escape(image)}" alt="${escape(name)}" width="88" height="122" style="display:block;max-width:88px;height:auto;border:0;border-radius:6px">` : '<span style="font-size:11px;color:#a1a6ad">Imagem indisponível</span>';
+  const heading = url ? `<a href="${escape(url)}" style="color:#f4f5f6;text-decoration:none">${escape(name)}</a>` : escape(name);
+  const details = fields.map(([label, value]) => `<span style="display:block"><strong>${label}:</strong> ${escape(value)}</span>`).join('');
+  return {
+    url,
+    html: `<tr><td style="padding:16px 0;border-bottom:1px solid #282d33"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td width="100" valign="top" style="width:100px;padding-right:12px">${thumbnail}</td><td valign="top"><p style="margin:0 0 8px;font-size:16px;font-weight:bold">${heading}</p><p style="margin:0;font-size:12px;line-height:1.6;color:#a1a6ad">${details}</p><p style="margin:10px 0 0;font-size:16px;font-weight:bold;color:#44e5ed">Preço anunciado: ${escape(price)}</p>${url ? `<p style="margin:10px 0 0;font-size:13px"><a href="${escape(url)}" style="color:#44e5ed">Ver carta na loja</a></p>` : '<p style="margin:10px 0 0;font-size:12px;color:#a1a6ad">Consulte sua lista de desejos para localizar o anúncio.</p>'}</td></tr></table></td></tr>`,
+    text: [name, ...fields.map(([label, value]) => `${label}: ${value}`), `Preço anunciado: ${price}`, url ? `Ver carta na loja: ${url}` : `Lista de desejos: ${base}/conta/desejos`].join('\n'),
+  };
+}
+
 function renderEmail(template, data = {}, { env = process.env, redactSecrets = false } = {}) {
   if (!TEMPLATES.includes(template)) throw new EmailError('EMAIL_TEMPLATE_INVALID', 'Modelo de e-mail inválido.');
   const base = publicBase(env), demo = env.HOSTING_DEMO_ONLY === 'true' || env.BKM_ENVIRONMENT === 'demo' || data.demo === true;
   const storeName = clean(data.storeName || 'BKM TCG', 100), name = clean(data.customerName || data.name || 'colecionador', 100);
   const number = clean(data.orderNumber || data.number || '', 80);
   const orderLink = safeLink(data.orderUrl || `/conta/pedidos/${encodeURIComponent(data.orderId || '')}`, base) || `${base}/conta`;
+  const wishlist = template === 'wishlist-available' || template === 'wishlist-digest';
+  const items = Array.isArray(data.items) ? data.items.slice(0, 50) : [];
+  const cards = wishlist ? items.filter(item => item && typeof item === 'object').map(item => wishlistCard(item, base)) : [];
   const messages = {
     welcome: ['Bem-vindo à BKM TCG', `Olá, ${name}. Sua conta na ${storeName} foi criada. Acesse a loja para explorar sua próxima descoberta.`, 'Explorar a loja', base],
     'order-confirmation': [`Pedido ${number} recebido`, `Olá, ${name}. Recebemos o pedido ${number}. Você pode acompanhar os detalhes e o andamento na sua conta.`, 'Ver pedido', orderLink],
@@ -49,21 +80,23 @@ function renderEmail(template, data = {}, { env = process.env, redactSecrets = f
     'order-delivered': [`Pedido ${number} entregue`, `Olá, ${name}. A entrega do pedido ${number} foi confirmada. Você pode conferir os itens e adicionar cartas recebidas à sua coleção.`, 'Ver pedido',orderLink],
     'order-cancelled': [`Pedido ${number} cancelado`, `Olá, ${name}. O pedido ${number} foi cancelado. Confira o histórico na sua conta.`, 'Ver pedido',orderLink],
     'order-refunded': [`Reembolso do pedido ${number}`, `Olá, ${name}. Há uma atualização de reembolso confirmada para o pedido ${number}. Consulte os detalhes na sua conta.`, 'Ver pedido',orderLink],
-    'wishlist-available': ['Uma carta que você procura chegou à BKM TCG!', `Olá, ${name}. Uma carta compatível com suas preferências está disponível. A disponibilidade pode mudar e este aviso não reserva estoque.`, 'Ver carta na loja',safeLink(data.productUrl || (data.items?.[0]?.slug ? '/produto/'+encodeURIComponent(data.items[0].slug):'/cartas'),base)||`${base}/cartas`],
-    'wishlist-digest': ['Suas cartas desejadas na BKM TCG', `Olá, ${name}. Confira as cartas disponíveis compatíveis com sua lista de desejos. Preços e disponibilidade são os do momento da consulta; nenhum item foi reservado.`, 'Ver cartas desejadas',`${base}/minha-colecao?tab=desejos`],
+    'wishlist-available': ['Uma carta que você procura chegou à BKM TCG!', `Olá, ${name}. Uma carta compatível com suas preferências está disponível. A disponibilidade pode mudar e este aviso não reserva estoque.`, 'Ver carta na loja',cards[0]?.url || `${base}/conta/desejos`],
+    'wishlist-digest': ['Suas cartas desejadas na BKM TCG', `Olá, ${name}. Confira as cartas disponíveis compatíveis com sua lista de desejos. Preços e disponibilidade são os do momento da consulta; nenhum item foi reservado.`, 'Ver cartas desejadas',`${base}/conta/desejos`],
     'abandoned-cart': ['Sua próxima descoberta espera por você', `Olá, ${name}. Você deixou itens no carrinho. Confira os preços e o estoque atuais antes de concluir; este lembrete não garante preço anterior nem reserva produtos.`, 'Rever carrinho',`${base}/carrinho`],
   };
   const [subject, message, cta, url] = messages[template];
   if (template === 'password-reset' && !url) throw new EmailError('EMAIL_RESET_URL_INVALID', 'Link de recuperação inválido.');
   if(template==='email-verification'&&!url)throw new EmailError('EMAIL_VERIFICATION_URL_INVALID','Link de verificação inválido.');
-  const items = Array.isArray(data.items) ? data.items.slice(0, 50) : [];
-  const tableRows = items.map(item => `<tr><td style="padding:12px 0;border-bottom:1px solid #282d33;color:#f4f5f6">${escape(item.name || item.productName)} <span style="color:#a1a6ad">× ${Number.isInteger(item.quantity) ? item.quantity : 1}</span></td><td style="padding:12px 0;text-align:right;border-bottom:1px solid #282d33;white-space:nowrap;color:#f4f5f6">${escape(money(item.subtotalCents ?? ((item.priceCents ?? item.unitPriceCents ?? 0) * (item.quantity || 1))))}</td></tr>`).join('');
-  const totals = items.length ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:24px 0;font-size:14px">${tableRows}<tr><td style="padding-top:16px;color:#a1a6ad">Subtotal</td><td align="right" style="padding-top:16px;color:#f4f5f6">${escape(money(data.subtotalCents))}</td></tr><tr><td style="color:#a1a6ad">Desconto</td><td align="right" style="color:#f4f5f6">− ${escape(money(data.discountCents))}</td></tr><tr><td style="color:#a1a6ad">Frete${demo ? ' demonstrativo' : ''}</td><td align="right" style="color:#f4f5f6">${escape(money(data.shippingCents))}</td></tr><tr><td style="padding-top:12px;font-weight:bold;color:#f4f5f6">Total</td><td align="right" style="padding-top:12px;font-size:22px;font-weight:bold;color:#44e5ed">${escape(money(data.totalCents))}</td></tr></table>` : '';
+  const tableRows = wishlist ? '' : items.map(item => `<tr><td style="padding:12px 0;border-bottom:1px solid #282d33;color:#f4f5f6">${escape(item.name || item.productName)} <span style="color:#a1a6ad">× ${Number.isInteger(item.quantity) ? item.quantity : 1}</span></td><td style="padding:12px 0;text-align:right;border-bottom:1px solid #282d33;white-space:nowrap;color:#f4f5f6">${escape(money(item.subtotalCents ?? ((item.priceCents ?? item.unitPriceCents ?? 0) * (item.quantity || 1))))}</td></tr>`).join('');
+  const totals = wishlist ? (cards.length ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:24px 0">${cards.map(card => card.html).join('')}</table>` : '') : items.length ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:24px 0;font-size:14px">${tableRows}<tr><td style="padding-top:16px;color:#a1a6ad">Subtotal</td><td align="right" style="padding-top:16px;color:#f4f5f6">${escape(money(data.subtotalCents))}</td></tr><tr><td style="color:#a1a6ad">Desconto</td><td align="right" style="color:#f4f5f6">− ${escape(money(data.discountCents))}</td></tr><tr><td style="color:#a1a6ad">Frete${demo ? ' demonstrativo' : ''}</td><td align="right" style="color:#f4f5f6">${escape(money(data.shippingCents))}</td></tr><tr><td style="padding-top:12px;font-weight:bold;color:#f4f5f6">Total</td><td align="right" style="padding-top:12px;font-size:22px;font-weight:bold;color:#44e5ed">${escape(money(data.totalCents))}</td></tr></table>` : '';
   const notice = demo ? '<p style="padding:12px;background:#29191d;border:1px solid #ff3038;color:#ff969b;font-size:12px">DEMONSTRAÇÃO — dados e pagamentos de teste. Nenhuma cobrança ou entrega comercial foi realizada.</p>' : '';
-  const tracking = data.trackingCode ? `<p style="color:#d0d5db">Código de rastreamento: <strong>${escape(data.trackingCode)}</strong></p>` : '';
+  const tracking = !wishlist && data.trackingCode ? `<p style="color:#d0d5db">Código de rastreamento: <strong>${escape(data.trackingCode)}</strong></p>` : '';
+  const preferencesUrl = `${base}/conta/preferencias`;
+  const footer = wishlist ? `Você recebe este alerta porque autorizou notificações da sua lista de desejos.<br><a href="${escape(preferencesUrl)}" style="color:#44e5ed">Gerenciar preferências e desativar alertas</a>` : 'E-mail transacional referente à sua conta ou pedido.';
   const redacted = redactSecrets && ['password-reset','email-verification'].includes(template) ? '<p style="color:#a1a6ad;font-size:12px">Prévia segura: o token de recuperação foi omitido. Nenhum e-mail foi enviado.</p>' : '';
-  const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(subject)}</title></head><body style="margin:0;padding:28px 12px;background:#070809;font-family:Arial,Helvetica,sans-serif;color:#f4f5f6"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><table role="presentation" width="560" cellspacing="0" cellpadding="0" style="width:100%;max-width:560px;background:#111417;border:1px solid #282d33;border-top:3px solid #ff3038;border-radius:16px"><tr><td style="padding:32px"><a href="${escape(base)}"><img src="${escape(`${base}/assets/bkm-logo-original.png`)}" width="96" height="96" alt="BKM TCG" style="display:block;border:0"></a><p style="font-size:11px;letter-spacing:3px;color:#44e5ed">SUA PRÓXIMA DESCOBERTA</p>${notice}<h1 style="font-size:26px;line-height:1.2;color:#f4f5f6">${escape(subject)}</h1><p style="font-size:15px;line-height:1.7;color:#d0d5db">${escape(message)}</p>${totals}${tracking}<p style="margin:28px 0"><a href="${escape(url || base)}" style="display:inline-block;background:#ff3038;color:#fff;font-weight:bold;text-decoration:none;padding:15px 22px;border-radius:8px">${escape(cta)}</a></p>${redacted}<p style="margin-top:32px;border-top:1px solid #282d33;padding-top:20px;font-size:12px;line-height:1.7;color:#a1a6ad">${escape(storeName)}<br>E-mail transacional referente à sua conta ou pedido.<br>${escape(data.storeContact || '')}</p></td></tr></table></td></tr></table></body></html>`;
-  const lines = [demo ? 'DEMONSTRAÇÃO — nenhuma cobrança ou entrega comercial.' : '', subject, message, ...items.map(item => `${clean(item.name || item.productName)} × ${item.quantity || 1}`), items.length ? `Total: ${money(data.totalCents)}` : '', data.trackingCode ? `Rastreamento: ${clean(data.trackingCode)}` : '', `${cta}: ${url || base}`, redactSecrets && template === 'password-reset' ? 'Prévia segura: token de recuperação omitido; nenhum envio externo.' : '', storeName].filter(Boolean);
+  const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(subject)}</title></head><body style="margin:0;padding:28px 12px;background:#070809;font-family:Arial,Helvetica,sans-serif;color:#f4f5f6"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><table role="presentation" width="560" cellspacing="0" cellpadding="0" style="width:100%;max-width:560px;background:#111417;border:1px solid #282d33;border-top:3px solid #ff3038;border-radius:16px"><tr><td style="padding:32px"><a href="${escape(base)}"><img src="${escape(`${base}/assets/bkm-logo-original.png`)}" width="96" height="96" alt="BKM TCG" style="display:block;border:0"></a><p style="font-size:11px;letter-spacing:3px;color:#44e5ed">SUA PRÓXIMA DESCOBERTA</p>${notice}<h1 style="font-size:26px;line-height:1.2;color:#f4f5f6">${escape(subject)}</h1><p style="font-size:15px;line-height:1.7;color:#d0d5db">${escape(message)}</p>${totals}${tracking}<p style="margin:28px 0"><a href="${escape(url || base)}" style="display:inline-block;background:#ff3038;color:#fff;font-weight:bold;text-decoration:none;padding:15px 22px;border-radius:8px">${escape(cta)}</a></p>${redacted}<p style="margin-top:32px;border-top:1px solid #282d33;padding-top:20px;font-size:12px;line-height:1.7;color:#a1a6ad">${escape(storeName)}<br>${footer}<br>${escape(data.storeContact || '')}</p></td></tr></table></td></tr></table></body></html>`;
+  const itemLines = wishlist ? cards.map(card => card.text) : items.map(item => `${clean(item.name || item.productName)} × ${item.quantity || 1}`);
+  const lines = [demo ? 'DEMONSTRAÇÃO — nenhuma cobrança ou entrega comercial.' : '', subject, message, ...itemLines, !wishlist && items.length ? `Total: ${money(data.totalCents)}` : '', !wishlist && data.trackingCode ? `Rastreamento: ${clean(data.trackingCode)}` : '', `${cta}: ${url || base}`, redactSecrets && template === 'password-reset' ? 'Prévia segura: token de recuperação omitido; nenhum envio externo.' : '', wishlist ? `Você recebe este alerta porque autorizou notificações da sua lista de desejos.\nGerenciar preferências e desativar alertas: ${preferencesUrl}` : '', storeName].filter(Boolean);
   return { template, demo, subject: `${demo ? '[DEMONSTRAÇÃO] ' : ''}${subject}`, html, text: lines.join('\n\n') };
 }
 
@@ -157,7 +190,7 @@ function createEmailDispatcher({ store, provider, env = process.env, now = () =>
       if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new EmailError('EMAIL_QUEUE_LIMIT_INVALID', 'Limite de processamento inválido.');
       const rows = await store.claimDue({ limit, now: now(), leaseUntil: now() + 300000 });
       const result = { processed: 0, sent: 0, previewed: 0, retried: 0, failed: 0 };
-      for (const row of rows) {
+      for (let row of rows) {
         result.processed++;
         const attempts = (row.attempts || 0) + 1;
         try {
@@ -167,6 +200,11 @@ function createEmailDispatcher({ store, provider, env = process.env, now = () =>
           if (mailer.name === 'resend' && attempts > 1 && Number.isFinite(created) && now() - created > 23 * 3600000) throw new EmailError('EMAIL_IDEMPOTENCY_WINDOW_EXPIRED', 'Envio antigo exige reconciliação antes de um novo disparo.');
           if(mailer.name==='resend'&&store.isSuppressed&&await store.isSuppressed(row.to))throw new EmailError('EMAIL_SUPPRESSED','O destinatário está suprimido por bounce ou reclamação.');
           if(mailer.name==='resend'&&NON_TRANSACTIONAL.has(row.template)) {
+            if(row.template==='wishlist-digest'&&row.attempts===0&&store.prepareDigest){
+              const prepared=await store.prepareDigest(row,{now:now()});
+              if(!prepared)throw new EmailError('EMAIL_CONSENT_REQUIRED','O resumo não tem cartas com consentimento e disponibilidade ativos.');
+              row=prepared;
+            }
             if(row.template==='abandoned-cart'||!store.notificationAllowed||!await store.notificationAllowed(row))throw new EmailError('EMAIL_CONSENT_REQUIRED','O alerta não tem consentimento ativo; lembretes de carrinho permanecem desativados.');
           }
           const rendered = renderEmail(row.template, row.data, { env });
