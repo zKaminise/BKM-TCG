@@ -10,7 +10,7 @@ const languages = { pt: "Portugu\xEAs", en: "Ingl\xEAs", ja: "Japon\xEAs", es: "
 const conditions = { NM: "Near Mint", LP: "Levemente jogada", MP: "Moderadamente jogada", HP: "Muito jogada", DMG: "Danificada", SEALED: "Lacrado" };
 const finishes = { NORMAL: "Normal", HOLO: "Holo", REVERSE: "Reverse holo", FOIL: "Foil" };
 const paymentLabels = {APPROVED:"Aprovado",PENDING:"Pendente",REJECTED:"Recusado",CANCELLED:"Cancelado",EXPIRED:"Expirado",REVIEW:"Em análise",REFUNDED:"Estornado",CHARGEBACK:"Contestado"};
-const orderLabels = {CONFIRMED:"Confirmado",PENDING:"Aguardando pagamento",PAYMENT_REVIEW:"Pagamento em análise",CANCELLED:"Cancelado",EXPIRED:"Expirado",PROCESSING:"Em preparação",SHIPPED:"Enviado",DELIVERED:"Entregue",UNFULFILLED:"A preparar"};
+const orderLabels = {CONFIRMED:"Confirmado",PENDING:"Aguardando pagamento",PAYMENT_REVIEW:"Pagamento em análise",CANCELLED:"Cancelado",EXPIRED:"Expirado",REFUNDED:"Reembolsado",PROCESSING:"Em preparação",SHIPPED:"Enviado",DELIVERED:"Entregue",UNFULFILLED:"A preparar"};
 const isLocalHost = () => ["localhost","127.0.0.1","::1","[::1]", ""].includes(location.hostname);
 const isDemo = () => state.config.demo === true || state.config.environment === "demo" || (!state.apiReady && !isLocalHost());
 const demoNotice = () => isDemo() ? el("div",{class:"shop-demo-note"},el("strong",{},"AMBIENTE DE DEMONSTRAÇÃO"),el("span",{},"Produtos e valores ilustrativos. Pedidos de teste, sem cobranças ou envios reais.")) : null;
