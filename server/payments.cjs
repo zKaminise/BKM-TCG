@@ -87,10 +87,9 @@ class MockPaymentProvider extends PaymentProvider {
 }
 
 function verifyWebhookSignature({ signature, requestId, dataId, secret, now = Date.now(), maxAgeMs = 600000 } = {}) {
-  const invalid = (diagnosticCode, diagnosticExactIdMatch) => {
+  const invalid = (diagnosticCode) => {
     const error = new PaymentError(401, 'PAYMENT_WEBHOOK_INVALID', 'Assinatura da notificação inválida.');
     if (['HEADER_FORMAT', 'SIGNATURE_FORMAT', 'TIMESTAMP_WINDOW', 'HMAC_MISMATCH'].includes(diagnosticCode)) Object.defineProperty(error, 'diagnosticCode', { value: diagnosticCode, enumerable: false });
-    if (diagnosticCode === 'HMAC_MISMATCH' && typeof diagnosticExactIdMatch === 'boolean') Object.defineProperty(error, 'diagnosticExactIdMatch', { value: diagnosticExactIdMatch, enumerable: false });
     return error;
   };
   if (typeof secret !== 'string' || !secret.trim()) throw new PaymentError(503, 'PAYMENT_WEBHOOK_UNCONFIGURED', 'A validação de notificações de pagamento ainda não foi configurada.');
@@ -107,15 +106,15 @@ function verifyWebhookSignature({ signature, requestId, dataId, secret, now = Da
   if (!Number.isFinite(now) || !Number.isFinite(maxAgeMs) || maxAgeMs < 1 || Math.abs(now - timestampMs) > Math.min(maxAgeMs, 86400000)) throw invalid('TIMESTAMP_WINDOW');
   // dataId must come from the URL query, never an unsigned body substitute.
   const normalizedId = dataId.toLowerCase();
-  const expected = createHmac('sha256', secret).update(`id:${normalizedId};request-id:${requestId};ts:${timestamp};`).digest(), received = Buffer.from(digest, 'hex');
-  if (received.length !== expected.length || !timingSafeEqual(expected, received)) {
-    // Diagnostic only: an exact-query match still fails canonical validation.
-    // Never return this manifest, digest, or match result in the public error.
-    const exactExpected = createHmac('sha256', secret).update(`id:${dataId};request-id:${requestId};ts:${timestamp};`).digest();
-    const exactIdMatch = received.length === exactExpected.length && timingSafeEqual(exactExpected, received);
-    throw invalid('HMAC_MISMATCH', exactIdMatch);
-  }
-  return { verified: true, dataId, requestId, timestampMs, replayKey: hash(`mercadopago:${normalizedId}:${requestId}:${timestamp}:${digest.toLowerCase()}`) };
+  const expected = createHmac('sha256', secret).update(`id:${normalizedId};request-id:${requestId};ts:${timestamp};`).digest();
+  const exactExpected = createHmac('sha256', secret).update(`id:${dataId};request-id:${requestId};ts:${timestamp};`).digest(), received = Buffer.from(digest, 'hex');
+  // Orders notifications can sign the exact query ID or its lowercase form.
+  // Compare both full HMACs before deciding; every other signed field is identical.
+  const canonicalMatch = received.length === expected.length && timingSafeEqual(expected, received);
+  const exactMatch = received.length === exactExpected.length && timingSafeEqual(exactExpected, received);
+  if (!canonicalMatch && !exactMatch) throw invalid('HMAC_MISMATCH');
+  // Both accepted forms share the existing canonical replay key.
+  return { verified: true, dataId, requestId, timestampMs, replayKey: hash(`mercadopago:${normalizedId}:${requestId}:${timestamp}:${expected.toString('hex')}`) };
 }
 
 function moneyCents(value) {

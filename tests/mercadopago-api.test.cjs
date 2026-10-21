@@ -32,8 +32,7 @@ test('diagnóstico interno MP mantém rejeição pública e motivo não enumerá
     assert.equal(error.status,401);assert.equal(error.statusCode,401);assert.equal(error.code,'PAYMENT_WEBHOOK_INVALID');assert.equal(error.message,'Assinatura da notificação inválida.');
     assert.equal(error.diagnosticCode,reason);assert.equal(Object.getOwnPropertyDescriptor(error,'diagnosticCode').enumerable,false);
     const serialized=JSON.stringify(error),spread=JSON.stringify({...error});
-    if(reason==='HMAC_MISMATCH'){assert.equal(error.diagnosticExactIdMatch,false);assert.equal(Object.getOwnPropertyDescriptor(error,'diagnosticExactIdMatch').enumerable,false);}
-    else assert.equal(Object.hasOwn(error,'diagnosticExactIdMatch'),false);
+    assert.equal(Object.hasOwn(error,'diagnosticExactIdMatch'),false);
     for(const sensitive of [secret,requestId,dataId,valid.signature,patch.signature,patch.dataId,reason,'diagnosticCode','diagnosticExactIdMatch'].filter(Boolean)){
       assert.equal(serialized.includes(sensitive),false);assert.equal(spread.includes(sensitive),false);assert.equal(String(error).includes(sensitive),false);
     }
@@ -42,20 +41,33 @@ test('diagnóstico interno MP mantém rejeição pública e motivo não enumerá
   assert.throws(()=>verifyWebhookSignature({...valid,secret:''}),error=>error.status===503&&!Object.hasOwn(error,'diagnosticCode'));
 });
 
-test('diagnóstico interno MP identifica ID exato em maiúsculas sem aceitar assinatura alternativa',()=>{
+test('assinatura MP aceita ID exato ou canônico, unifica replay e recusa adulterações em ambas as formas',()=>{
   const secret='uppercase-diagnostic-only-fixture-secret',requestId='uppercase-private-request',dataId='ORDUPPERDIAGNOSTIC123',ts=String(Date.now());
-  const sign=(id,key=secret)=>`ts=${ts},v1=${crypto.createHmac('sha256',key).update(`id:${id};request-id:${requestId};ts:${ts};`).digest('hex')}`;
-  const rawSignature=sign(dataId),valid={secret,requestId,dataId,signature:rawSignature,now:Number(ts)};
-  for(const [patch,match]of [[{},true],[{secret:'wrong-diagnostic-private-key'},false],[{dataId:'ORDUpperDIAGNOSTIC123'},false],[{signature:sign(dataId.toLowerCase(),'wrong-signer-secret')},false]]){
-    assert.throws(()=>verifyWebhookSignature({...valid,...patch}),error=>{
+  const sign=(id,key=secret,timestamp=ts)=>`ts=${timestamp},v1=${crypto.createHmac('sha256',key).update(`id:${id};request-id:${requestId};ts:${timestamp};`).digest('hex')}`;
+  const valid={secret,requestId,dataId,now:Number(ts)},canonicalSignature=sign(dataId.toLowerCase()),rawSignature=sign(dataId);
+  const canonical=verifyWebhookSignature({...valid,signature:canonicalSignature}),exact=verifyWebhookSignature({...valid,signature:rawSignature});
+  assert.notEqual(canonicalSignature,rawSignature);assert.equal(canonical.verified,true);assert.equal(exact.verified,true);assert.equal(exact.dataId,dataId);
+  assert.equal(exact.replayKey,canonical.replayKey,'as duas formas representam o mesmo recebimento assinado');
+  const legacyReplayKey=crypto.createHash('sha256').update(`mercadopago:${dataId.toLowerCase()}:${requestId}:${ts}:${canonicalSignature.split('v1=')[1]}`).digest('hex');
+  assert.equal(canonical.replayKey,legacyReplayKey,'recibos canônicos já persistidos mantêm a chave');
+  for(const id of [dataId,dataId.toLowerCase()]){
+    const signature=sign(id),digest=signature.split('v1=')[1],alteredDigest=(digest[0]==='0'?'1':'0')+digest.slice(1);
+    for(const [reason,patch]of [
+      ['HMAC_MISMATCH',{secret:'wrong-diagnostic-private-key'}],
+      ['HMAC_MISMATCH',{requestId:requestId+'-changed'}],
+      ['HMAC_MISMATCH',{dataId:dataId.slice(0,-1)+'4'}],
+      ['HMAC_MISMATCH',{signature:`ts=${ts},v1=${alteredDigest}`}],
+      ['HMAC_MISMATCH',{signature:`ts=${Number(ts)+1},v1=${digest}`}],
+      ['TIMESTAMP_WINDOW',{signature:sign(id,secret,String(Number(ts)-600001))}],
+      ['TIMESTAMP_WINDOW',{signature:sign(id,secret,String(Number(ts)+600001))}]
+    ])assert.throws(()=>verifyWebhookSignature({...valid,signature,...patch}),error=>{
       assert.equal(error.status,401);assert.equal(error.code,'PAYMENT_WEBHOOK_INVALID');assert.equal(error.message,'Assinatura da notificação inválida.');
-      assert.equal(error.diagnosticCode,'HMAC_MISMATCH');assert.equal(error.diagnosticExactIdMatch,match);
-      assert.equal(Object.getOwnPropertyDescriptor(error,'diagnosticExactIdMatch').enumerable,false);
-      for(const serialized of [JSON.stringify(error),JSON.stringify({...error}),String(error)])for(const sensitive of [secret,requestId,dataId,rawSignature,'diagnosticCode','diagnosticExactIdMatch'])assert.equal(serialized.includes(sensitive),false);
+      assert.equal(error.diagnosticCode,reason);assert.equal(Object.getOwnPropertyDescriptor(error,'diagnosticCode').enumerable,false);assert.equal(Object.hasOwn(error,'diagnosticExactIdMatch'),false);
+      for(const serialized of [JSON.stringify(error),JSON.stringify({...error}),String(error)])for(const sensitive of [secret,requestId,dataId,signature,'diagnosticCode','diagnosticExactIdMatch'])assert.equal(serialized.includes(sensitive),false);
       return true;
     });
   }
-  assert.equal(verifyWebhookSignature({...valid,signature:sign(dataId.toLowerCase())}).verified,true,'o contrato aceito continua sendo exclusivamente o manifesto canônico');
+  assert.throws(()=>verifyWebhookSignature({...valid,signature:rawSignature,dataId:'ORDUpperDIAGNOSTIC123'}),error=>error.status===401&&error.diagnosticCode==='HMAC_MISMATCH','uma assinatura do ID exato não valida outro ID exato com caixa diferente');
 });
 
 test('diagnóstico interno MP registra só marcador e reason permitido na rota, sem alterar HTTP401',async t=>{
@@ -77,7 +89,7 @@ test('diagnóstico interno MP registra só marcador e reason permitido na rota, 
   ];
   for(const [reason,headers]of fixtures){
     const response=await call(headers);assert.equal(response.status,401);assert.deepEqual(response.body,{error:{code:'PAYMENT_WEBHOOK_INVALID',message:'Assinatura da notificação inválida.'}});
-    assert.deepEqual(warnings.at(-1),['BKM_MP_WEBHOOK_REJECTED',{reason,...(reason==='HMAC_MISMATCH'?{exactIdMatches:false}:{})}]);
+    assert.deepEqual(warnings.at(-1),['BKM_MP_WEBHOOK_REJECTED',{reason}]);
     const output=JSON.stringify({response:response.body,warnings});
     for(const sensitive of [secret,requestId,dataId,headers['x-signature'],'private-body-must-not-log','127.0.0.1'])assert.equal(output.includes(sensitive),false);
     assert.equal(JSON.stringify(response.body).includes(reason),false);
@@ -86,13 +98,13 @@ test('diagnóstico interno MP registra só marcador e reason permitido na rota, 
   assert.equal(warnings.length,4);
   const rawHeaders={'x-request-id':requestId,'x-signature':sign(String(Date.now()),secret,dataId)};
   const rawOnly=await call(rawHeaders);assert.equal(rawOnly.status,401);assert.deepEqual(rawOnly.body,{error:{code:'PAYMENT_WEBHOOK_INVALID',message:'Assinatura da notificação inválida.'}});
-  assert.deepEqual(warnings.at(-1),['BKM_MP_WEBHOOK_REJECTED',{reason:'HMAC_MISMATCH',exactIdMatches:true}]);
-  assert.equal(providerReads,0,'coincidência apenas com ID exato continua recusada antes de consultar o provedor');
+  assert.equal(warnings.length,4,'a assinatura do ID exato é validada e o erro injetado do provedor não pode registrar motivo fora da whitelist');
+  assert.equal(providerReads,1,'a assinatura do ID exato permite somente a consulta autoritativa ao provedor');
   for(const sensitive of [secret,requestId,dataId,rawHeaders['x-signature'],'private-body-must-not-log','127.0.0.1'])assert.equal(JSON.stringify(warnings).includes(sensitive),false);
   assert.equal(JSON.stringify(rawOnly.body).includes('exactIdMatches'),false);assert.equal(JSON.stringify(rawOnly.body).includes('diagnosticExactIdMatch'),false);
-  const forged=await call({'x-request-id':requestId,'x-signature':sign()});assert.equal(forged.status,401);assert.equal(providerReads,1);
-  assert.equal(warnings.length,5,'um diagnóstico fora da whitelist não deve ser registrado');
-  const other=await fetch(base+'/api/account/orders');assert.equal(other.status,401);assert.equal(warnings.length,5,'outras rotas não devem emitir o marcador de webhook');
+  const forged=await call({'x-request-id':requestId,'x-signature':sign()});assert.equal(forged.status,401);assert.equal(providerReads,2);
+  assert.equal(warnings.length,4,'um diagnóstico fora da whitelist não deve ser registrado');
+  const other=await fetch(base+'/api/account/orders');assert.equal(other.status,401);assert.equal(warnings.length,4,'outras rotas não devem emitir o marcador de webhook');
 });
 
 for(const engine of ['sqlite','postgres']) test(`Mercado Pago ligado à API, com transporte isolado: ${engine}`,async t=>{
@@ -169,13 +181,20 @@ for(const engine of ['sqlite','postgres']) test(`Mercado Pago ligado à API, com
     assert.equal((await customer.call('/api/account/orders/'+order.id+'/simulate',{method:'POST',body:{outcome:'approved'}})).status,403);
     assert.equal((await admin.call('/api/admin/orders/'+order.id+'/reconcile',{method:'POST'})).status,200);assert.equal(reads,1);
   });
-  await t.test('webhook ignora corpo não assinado, valida HMAC e confirma uma única baixa de estoque',async()=>{
+  await t.test('webhook com ID exato e canônico consulta o provedor, ignora corpo e repete sem segunda baixa',async()=>{
     const route='/api/payments/webhook/mercadopago?data.id='+order.payment.providerId;
     const invalid=await anon.call(route,{method:'POST',body:{data:{id:'ORDWRONGBODY0001'},status:'approved'},headers:{cookie:'','x-csrf-token':''}});assert.equal(invalid.status,401);assert.equal(reads,1);
     const remote=remoteById.get(order.payment.providerId);remote.status='APPROVED';remote.eventId=remote.id+':approved';
-    function signature(requestId) {const ts=String(Date.now());return 'ts='+ts+',v1='+crypto.createHmac('sha256',sandboxEnv.MERCADO_PAGO_WEBHOOK_SECRET).update('id:'+remote.id.toLowerCase()+';request-id:'+requestId+';ts:'+ts+';').digest('hex');}
-    for(const requestId of ['signed-request-one','signed-request-two']) {
-      const result=await anon.call(route,{method:'POST',body:{data:{id:'ORDWRONGBODY0001'},status:'rejected'},headers:{cookie:'','x-csrf-token':'','x-request-id':requestId,'x-signature':signature(requestId)}});assert.equal(result.status,200,JSON.stringify(result.data));assert.deepEqual(result.data,{received:true});
+    const ts=String(Date.now());
+    function signature(requestId,id) {return 'ts='+ts+',v1='+crypto.createHmac('sha256',sandboxEnv.MERCADO_PAGO_WEBHOOK_SECRET).update('id:'+id+';request-id:'+requestId+';ts:'+ts+';').digest('hex');}
+    let accepted=0;
+    for(const [requestId,id]of [['signed-request-one',remote.id],['signed-request-one',remote.id],['signed-request-one',remote.id.toLowerCase()],['signed-request-two',remote.id.toLowerCase()]]) {
+      const result=await anon.call(route,{method:'POST',body:{data:{id:'ORDWRONGBODY0001'},status:'rejected'},headers:{cookie:'','x-csrf-token':'','x-request-id':requestId,'x-signature':signature(requestId,id)}});assert.equal(result.status,200,JSON.stringify(result.data));assert.deepEqual(result.data,{received:true});
+      assert.equal(reads,1+(++accepted),'cada recebimento aceito consulta o estado autoritativo, mesmo em repetição');
+      const expectedReceipts=requestId==='signed-request-two'?2:1;
+      assert.equal((await db.prepare("SELECT COUNT(*) n FROM payment_events WHERE payment_id IN (SELECT id FROM payments WHERE order_id=?) AND event_key LIKE 'mercadopago-webhook:%'").get(order.id)).n,expectedReceipts,'ID exato, repetição e assinatura canônica compartilham o recibo');
+      assert.equal((await db.prepare('SELECT stock FROM variants WHERE id=?').get(product.variants[0].id)).stock,0);
+      assert.equal((await db.prepare("SELECT COUNT(*) n FROM stock_movements WHERE variant_id=? AND delta=-1").get(product.variants[0].id)).n,1);
     }
     const confirmed=(await customer.call('/api/account/orders/'+order.id)).data;assert.equal(confirmed.status,'CONFIRMED');assert.equal(confirmed.paymentStatus,'APPROVED');
     assert.equal((await db.prepare('SELECT stock FROM variants WHERE id=?').get(product.variants[0].id)).stock,0);
