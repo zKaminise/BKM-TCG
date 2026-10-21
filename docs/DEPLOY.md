@@ -1,12 +1,14 @@
 # Provisionamento e publicação — Fase 3
 
-## Estado em 20/10/2026 — núcleo publicado e principal migrado
+## Estado em 21/10/2026 — resumos publicados e cron registrado
+
+A revisão de resumos e consumidor de e-mails está publicada, com **260 testes** e CI aprovado. A leitura PostgreSQL confirmou esquema 8 nos dois ambientes: **41 tabelas, 41 com RLS, zero grants públicos e zero eventos de resumo pendentes** no momento da consulta. O cron está registrado como Enabled às 12 UTC; **a chave `CRON_SECRET` Production e a execução autenticada continuam pendentes**. A chamada sem chave respondeu **401 `JOB_UNAUTHORIZED`**; não houve prova de execução autenticada nem entrega real de alerta/resumo.
 
 - Domínio canônico: [lojabkm.com.br](https://lojabkm.com.br/); `www` redireciona por 308, preservando a rota.
-- Repositório: [zKaminise/BKM-TCG](https://github.com/zKaminise/BKM-TCG), branch `main`; [commit publicado `d109af2`](https://github.com/zKaminise/BKM-TCG/commit/d109af2).
-- Projeto Vercel principal: `bkm-tcg-demo`, com deployment Ready e redeploy Ready `NMSQa4gw1WfNTMa1BYQtvLVH1KFA`. Alias histórico: `bkm-tcg-demo.vercel.app`.
-- [CI 39399711168](https://github.com/zKaminise/BKM-TCG/actions/runs/39399711168) aprovado com **211 testes**.
-- Rodada local posterior: **213 testes aprovados**, `npm run check` e `npm run build` concluídos; não é uma nova execução do CI acima.
+- Repositório: [zKaminise/BKM-TCG](https://github.com/zKaminise/BKM-TCG), branch `main`; código publicado no [commit `0f8388a`](https://github.com/zKaminise/BKM-TCG/commit/0f8388a450ae3a4485d2f48c67e9e1802cb87643).
+- Projeto Vercel principal: `bkm-tcg-demo`, deployment Success `6zQ4yMe3sWHjaFwFKdXSZodhq1bv`. Sandbox separado: deployment Success `F8P43oDZD5ucUF7XeHZhw2MpycEN`. Alias histórico principal: `bkm-tcg-demo.vercel.app`.
+- Última rodada concluída: **260 testes**, `npm run check` e `npm run build` aprovados; [CI 39579166466](https://github.com/zKaminise/BKM-TCG/actions/runs/39579166466) concluído com sucesso no commit `0f8388a`. O CI de 216 testes em `e07241b` é histórico.
+- O [commit inicial `d109af2`](https://github.com/zKaminise/BKM-TCG/commit/d109af2), o redeploy `NMSQa4gw1WfNTMa1BYQtvLVH1KFA` e o [CI de 211 testes](https://github.com/zKaminise/BKM-TCG/actions/runs/39399711168) são marcos históricos.
 
 O cutover para o Supabase **BKM ecommerce** (`cxoeompxmgdzufgzxerw`) foi concluído. A migração PostgreSQL para PostgreSQL transferiu **40 tabelas, 230 registros e 2 objetos Storage**, com SHA-256 e integridade conferidos, RLS nas 40 tabelas, zero grants de tabelas para `anon`, `authenticated` ou `PUBLIC` e origem verificada como inalterada. Migrations **1–7** aplicadas. O banco principal anterior (`nxrvmanifngjmdtgnzoq`) permanece preservado.
 
@@ -20,7 +22,7 @@ A autenticação BKM foi preservada. Não há migração para Supabase Auth nem 
 | --- | --- | --- |
 | Principal demonstrativo | `cxoeompxmgdzufgzxerw`, dados e imagens migrados; origem antiga preservada | `PAYMENT_PROVIDER=mock`, `canCharge=false` |
 | Desenvolvimento isolado | SQLite dedicado ou PostgreSQL de desenvolvimento explicitamente escolhido | Testes sem cobrança externa |
-| Homologação Mercado Pago | Supabase `secapcqqznlokiqhojsa`, TLS e 40 tabelas; Vercel Ready `35ZhSh55MLGoEqW9BEaaBFLxd3pT`; verificação real em staging | `canCharge=false`; duas orders Pix técnicas de teste, webhook ainda não comprovado |
+| Homologação Mercado Pago | Supabase `secapcqqznlokiqhojsa`, TLS e 41 tabelas no esquema 8; Vercel Success `F8P43oDZD5ucUF7XeHZhw2MpycEN`; verificação real em staging | `canCharge=false`; Pix sandbox aprovado/expirado e callbacks oficiais autenticados comprovados |
 | Operação comercial futura | Infraestrutura compatível e liberação posterior | Somente após homologação e autorização explícita |
 
 Não reutilizar dados de clientes do principal em homologação financeira, nem ativar pagamentos externos no projeto principal para contornar a separação. O Vercel Hobby continua exclusivamente demonstrativo, sem vendas reais e com `noindex`.
@@ -63,7 +65,7 @@ npm run storage:configure
 npm run admin:create
 ```
 
-As migrations 1–3 cobrem a base comercial e permissões; 4 adiciona coleção pessoal; 5, identidades Google; 6, eventos e entrega de e-mail; 7, referências globais de preços e importações autorizadas. São versionadas em `server/migrations/`, com bloqueio transacional de aplicação. Não trate a contagem histórica de 22 tabelas da Fase 2 como o esquema atual.
+As migrations 1–3 cobrem a base comercial e permissões; 4 adiciona coleção pessoal; 5, identidades Google; 6, eventos e entrega de e-mail; 7, referências globais de preços e importações autorizadas. A **008**, já confirmada no principal e sandbox, acrescenta eventos persistidos de resumos de desejos, com RLS e revogação de grants públicos. São versionadas em `server/migrations/`, com bloqueio transacional de aplicação. Não trate as contagens históricas de 22 tabelas da Fase 2 ou 40 do cutover como o esquema atual de 41 tabelas.
 
 O seed é idempotente e restrito a bancos vazios/demonstrativos. Para migrar um SQLite existente para PostgreSQL **dedicado vazio**, use `npm run db:import -- "caminho/do/banco.sqlite"` no lugar do seed. O importador preserva a origem e invalida sessões; arquivos legados em `/uploads/` exigem transferência separada ao Storage.
 
@@ -100,13 +102,25 @@ Em 20/10, um único teste de recuperação para a conta existente do titular con
 
 O padrão demonstrativo continua com prévias privadas. Existe uma exceção explícita para teste transacional controlado em demo: `RESEND_DEMO_TEST_ENABLED=true` e `RESEND_TEST_RECIPIENTS` com destinatários exatos autorizados, além de todos os gates do provedor. Isso não libera pagamentos, campanhas, ou envio a qualquer cliente. Alertas de desejos continuam sujeitos ao consentimento e às regras do código. `ABANDONED_CART_ENABLED` permanece falso; não existe automação ativa de carrinho nesta etapa.
 
+## Resumos e consumidor independente de e-mails
+
+Implementados, publicados e testados, com cron registrado como Enabled; **a chave Production, a execução autenticada e a entrega real de alerta ainda não foram comprovadas** nesta revisão. A migration 008 conserva eventos elegíveis, incluindo identidade e titularidade. O resumo diário fecha às **12:00 UTC (09:00 BRT)** e o semanal, **segunda-feira às 12:00 UTC**. Antes de enfileirar e novamente antes de enviar, a aplicação confere titular, desejo atual, consentimento, supressão, anúncio, variante, preço e estoque. Eventos fora do lote ficam pendentes; cada lote examina até 50 eventos e o job, até 5 titulares.
+
+No primeiro envio do resumo, itens que perderam elegibilidade são retirados sem suprimir as demais cartas válidas. A preparação exige claim e lease vigentes, persiste o payload elegível antes da chamada ao Resend e descarta os eventos removidos. Tentativas posteriores preservam esse payload, impedindo mudança de conteúdo sob a mesma chave idempotente; continuam sujeitas às verificações que podem bloquear o envio.
+
+`GET /api/jobs/email` exige `Authorization: Bearer <CRON_SECRET>`. A chave deve ser aleatória, privada, com 32–256 caracteres base64url, salva como Secret somente em Production. A comparação usa hash e tempo constante; User-Agent não autoriza o job. Sem chave válida, o endpoint responde 401 antes de inicializar o banco. Não publicar a chave nem incluí-la em URL, documentação ou log.
+
+O `vercel.json` registra uma execução diária em **`0 12 * * *`**, conferida como Enabled no painel. No Hobby, o disparo pode ocorrer dentro da hora prevista, sem precisão de minuto, e não constitui SLA de envio comercial. O worker consolida os resumos vencidos e consome até 20 mensagens, respeitando uma janela de trabalho de 40 segundos e claims individuais. Pendências continuam duráveis para a próxima execução; o cron diário pode deixar backlog e não substitui um consumidor mais frequente na operação comercial. Referências: [limites de cron](https://vercel.com/docs/cron-jobs/usage-and-pricing), [proteção de cron](https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs).
+
+Ativação restante: concluir o salvamento privado de `CRON_SECRET` em Production, fazer novo deployment e observar a execução autenticada. Código, migration e registro do cron já foram confirmados; `/api/config` respondeu HTTP 200 com Google habilitado, demo, mock e `canCharge=false`. Registrar separadamente resposta do job, aceitação Resend e evento de entrega assinado; HTTP 200 do job não prova entrega. A lista de destinatários controlados continua restrita ao titular autorizado. Respostas ambíguas de envio com mais de **23 horas** exigem reconciliação manual em vez de reenvio automático fora da janela segura de idempotência.
+
 ## Mercado Pago, preços e logística
 
-O projeto **`bkm-tcg-sandbox`**, no Hobby, está no deployment Ready **`35ZhSh55MLGoEqW9BEaaBFLxd3pT`** e usa o Supabase separado **`secapcqqznlokiqhojsa`**, com **TLS verificado** e **40 tabelas**. O banco estava sem usuários, produtos ou pedidos antes da fixture técnica; essa contagem zero é histórica. A verificação real `--verify` confirmou vendedor de teste e `/api/config` em staging, sandbox e `canCharge=false`.
+O projeto **`bkm-tcg-sandbox`**, no Hobby, está no deployment Success **`F8P43oDZD5ucUF7XeHZhw2MpycEN`** e usa o Supabase separado **`secapcqqznlokiqhojsa`**, com **TLS verificado** e **41 tabelas no esquema 8**. O banco estava sem usuários, produtos ou pedidos antes da fixture técnica; essa contagem zero é histórica. A verificação real `--verify` confirmou vendedor de teste e `/api/config` em staging, sandbox e `canCharge=false`.
 
-O `--run` real criou duas orders Pix técnicas de valor nominal **R$ 50,00** cada: cenário `APRO` aprovado no provedor e aplicado após reconciliação, segundo cenário confirmado pendente. A prova registrou uma reserva `COMMITTED`, uma `ACTIVE`, estoque de **2 para 1 uma única vez** e idempotência aprovada. Não houve cobrança comercial ou transferência bancária real. O principal continua mock, sem alteração financeira.
+O `--run` real criou duas orders Pix técnicas de valor nominal **R$ 50,00** cada: cenário `APRO` aprovado e segundo inicialmente pendente. Esse estado inicial foi preservado separadamente. Na prova final de **20/10 às 22:31 BRT (21/10 às 01:31 UTC)**, GET no provedor e leitura do banco confirmaram **APPROVED/COMMITTED** para a primeira e **EXPIRED/RELEASED** para a segunda. Os callbacks do simulador oficial retornaram **HTTP 200** para os mesmos IDs, com **2 recibos autenticados por order**. Continuam 2 pedidos, uma única unidade baixada e estoque de **2 para 1**, sem baixa adicional. Não houve cobrança comercial ou transferência bancária real. O principal continua mock, sem alteração financeira.
 
-**`webhookProven=false`**: a aprovação por reconciliação não comprova entrega de webhook. As URLs e o tópico Orders foram configurados no painel de uma aplicação diferente daquela informada pela order emitida. É preciso conferir a aplicação associada à credencial, sua configuração de webhook e o HMAC correspondente; a relação entre as aplicações e a causa da divergência ainda não foram confirmadas. O acesso depende da autenticação/MFA do titular. Cartão e demais cenários também continuam pendentes. Consulte [INTEGRACOES.md](INTEGRACOES.md) e [VALIDACAO.md](VALIDACAO.md).
+O relatório inicial com **`webhookProven=false`** é histórico e foi preservado. A prova final está em `backups/mp-sandbox-final-evidence.json`, com **`observedScenariosConfirmed=true`**, consulta do recurso verdadeiro e recibos autenticados. A causa da rejeição foi confirmada: o emissor assinava o ID exato, enquanto a implementação validava somente a forma canônica em minúsculas. O commit `e07241b` valida integralmente ambas as formas com comparação em tempo constante e replay unificado; query, janela temporal, GET autoritativo e validações financeiras foram mantidos. Cartão, cancelamento, reembolso e outros cenários ainda exigem provas próprias. Consulte [INTEGRACOES.md](INTEGRACOES.md) e [HOMOLOGACAO-MP.md](HOMOLOGACAO-MP.md).
 
 O provedor global de preços disponível é o manual autorizado, administrado em `/admin/precos`; sua base permanece vazia nesta revisão. Não existe API licenciada Liga Pokémon configurada. Referências privadas dos clientes não são promovidas silenciosamente ao conjunto global.
 
@@ -114,7 +128,7 @@ Melhor Envio possui adaptador restrito ao sandbox, testado com transporte contro
 
 ## Backups e abertura comercial
 
-Após o cutover, backup AES-256-GCM do novo principal registrou **40 tabelas, 233 registros e 2 objetos**. A restauração em SQLite novo e isolado retornou integridade `ok`, zero violações de chave estrangeira e hashes de objetos conferidos. Os 233 registros são um snapshot posterior aos 230 da migração. `BKM_BACKUP_KEY`, arquivo criptografado e restauração privada ficam fora do Git e do ZIP público. Retenção/cópia separada são procedimentos manuais, sem agendamento ativo. Hash, comandos e limites em [BACKUP.md](BACKUP.md).
+O último backup AES-256-GCM comprovado do principal, após a migration 008, registrou **41 tabelas, 199 registros e 2 objetos**, restaurados em SQLite novo e isolado com integridade `ok` e `remoteTarget=false`. Preservam-se os snapshots anteriores de 233 e 244 registros e a migração de 230; contagens variam com o uso e a expiração de sessões. `BKM_BACKUP_KEY`, arquivos criptografados e restaurações privadas ficam fora do Git e do ZIP público. Retenção/cópia separada são procedimentos manuais, sem agendamento ativo. Hashes, comandos e limites em [BACKUP.md](BACKUP.md).
 
 Abertura comercial depende de infraestrutura elegível, dados empresariais, políticas definitivas, logística e homologações. Nada desta fase autoriza assinatura, upgrade, compra de etiqueta ou cobrança real automática. [Regras do Vercel Hobby](https://vercel.com/docs/plans/hobby).
 

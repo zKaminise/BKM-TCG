@@ -1,6 +1,6 @@
 # Homologação Mercado Pago — Checkout Transparente com Orders
 
-Foram criadas e consultadas duas orders efetivas no sandbox Mercado Pago: um Pix aprovado e outro pendente. A integração comprovou reconciliação, idempotência e estoque no banco isolado. O recebimento de webhook assinado continua pendente de confirmação após corrigir o segredo da aplicação emissora. Isso não constitui liberação comercial; pagamentos de produção permanecem desativados.
+Foram criadas e consultadas duas orders efetivas no sandbox Mercado Pago: um Pix aprovado e outro inicialmente pendente, depois expirado. Os callbacks do simulador oficial para os mesmos IDs retornaram **HTTP 200**, com **2 recibos autenticados por order**. GET no provedor e leitura do banco confirmaram os estados, reservas e uma única baixa de estoque. A comprovação está limitada a esses cenários Pix de teste e não homologa cartão, reembolso ou operação comercial. Pagamentos de produção permanecem desativados.
 
 ## Aplicação e credenciais corretas
 
@@ -34,7 +34,7 @@ A aplicação principal tem ID `3540436696764388` e aparece como `App-Checkout-P
 
 O ambiente isolado está disponível em `https://bkm-tcg-sandbox.vercel.app`, com banco Supabase `secapcqqznlokiqhojsa`, região São Paulo. O schema de 40 tabelas foi validado vazio antes da fixture. A loja principal usa `cxoeompxmgdzufgzxerw` após a migração; tanto esse projeto quanto o anterior `nxrvmanifngjmdtgnzoq` são bloqueados pelo CLI de homologação. A demonstração principal conserva seus bloqueios de cobrança externa e não participa desses pedidos.
 
-Resultados da execução, registrados em `backups/mp-sandbox-report.json`:
+Resultados da execução inicial, preservados em `backups/mp-sandbox-report.json` e no snapshot `backups/mp-sandbox-before-signature-rotation.json`:
 
 | Cenário | Order Mercado Pago existente | Resultado comprovado |
 | --- | --- | --- |
@@ -42,11 +42,32 @@ Resultados da execução, registrados em `backups/mp-sandbox-report.json`:
 | Pix sem marcador de autoaprovação | `ORDTST01M5CXX9DH0MMGN3E8WCKB4WT1` | GET retornou `action_required`; pedido BKM ficou `PENDING`, com uma unidade reservada no momento da verificação. |
 | Repetição dos dois checkouts | Mesmas duas orders | Chaves mantidas antes/depois da reconciliação, dois pedidos no total e nenhuma baixa adicional. |
 
-O estoque físico passou de 2 para 1, com uma única unidade baixada e uma reservada ao pedido pendente. A reserva pendente torna a disponibilidade pública igual a zero enquanto estiver ativa; ela não é uma segunda baixa. Cada order tem valor nominal fictício de R$ 50,00. Nenhum pagamento ou envio comercial foi realizado. Os GETs não incluíram `live_mode`; a ausência desse campo não foi convertida em `false` como suposta evidência.
+Naquele momento, o estoque físico passou de 2 para 1, com uma única unidade baixada e uma reservada ao pedido pendente. A reserva pendente tornava a disponibilidade pública igual a zero enquanto ativa; ela não representava uma segunda baixa. Cada order tem valor nominal fictício de R$ 50,00. Nenhum pagamento ou envio comercial foi realizado. Os GETs não incluíram `live_mode`; a ausência desse campo não foi convertida em `false` como suposta evidência.
 
-O relatório inicial ficou com `approvedConfirmed=true`, `pendingConfirmed=true`, `webhookProven=false` e `complete=false`. A aprovação local foi obtida por reconciliação, sem alegar recebimento de callback.
+O relatório inicial ficou com `approvedConfirmed=true`, `pendingConfirmed=true`, `webhookProven=false` e `complete=false`. A aprovação local inicial foi obtida por reconciliação. Esses valores históricos não foram reescritos como resultado do teste posterior.
 
-Na UI da aplicação emissora, as URLs de teste/produção e o evento Order já estavam configurados, mas o segredo de assinatura era diferente do segredo da aplicação principal. O segredo correto da aplicação `8997426787542730` foi salvo privadamente em `.env.sandbox` e na hospedagem sandbox, e o redeploy ficou Ready. O reenvio pelo simulador oficial usa a order APRO existente. Até haver resposta HTTP 200 e recibo assinado persistido, o webhook permanece **não comprovado**. Não é necessário criar outro pedido ou alterar status no banco para concluir essa verificação.
+Na UI da aplicação emissora `8997426787542730`, acessada como Seller Test User, foram conferidos os endereços de teste e produção apontando ao sandbox e o evento Order selecionado. Inicialmente, a configuração privada foi alinhada à assinatura dessa aplicação emissora, mas o simulador oficial continuou retornando HTTP 401. A aplicação principal `3540436696764388` é distinta; seu segredo não é tratado como intercambiável com o da emissora. Nenhum valor de credencial integra este documento.
+
+Antes da redefinição, o diagnóstico interno registrou `BKM_MP_WEBHOOK_REJECTED` com motivo `HMAC_MISMATCH` em **20/10/2026 às 15:34:24.941Z**. A requisição identificada nos logs privados tinha agente `restclient-node/5.5.0` e `data.id` correspondente à order APRO existente. Isso localiza aquela rejeição na comparação HMAC; não identifica a causa definitiva nem comprova aprovação de webhook ou recibo financeiro persistido. A instrumentação registra apenas o marcador e um motivo permitido, mantendo a mesma resposta pública HTTP 401 e todas as guardas de validação.
+
+Também antes da rotação, um POST diagnóstico assinado localmente com a chave privada então configurada, usando o identificador inválido `diagnostic`, retornou **HTTP 400 / `PAYMENT_ID_INVALID`**. Esse resultado confirmou que aquela configuração na Vercel aceitava a assinatura local antes de recusar o recurso. Ele **não** foi uma notificação enviada pelo Mercado Pago, não gerou recibo de pedido e nunca deve ser contado como prova de webhook do provedor.
+
+O **usuário redefiniu a assinatura** da aplicação de teste `8997426787542730`. Após recarregar o painel, foi conferida sua igualdade com o `.env.sandbox` privado, sem registrar o valor. A configuração foi publicada no deployment `99rM5hcQgHyBkmA8waUxQPqvgPjG`, mas o simulador oficial ainda retornou HTTP 401 nessa etapa. Essa tentativa também é histórica.
+
+O diagnóstico com a assinatura real confirmou **`exactIdMatches=true` em `2026-10-21T01:23:46.564Z`**: o emissor assinava o ID exato em maiúsculas, enquanto a implementação anterior conferia somente sua forma canônica em minúsculas. A correção calcula e compara integralmente os dois HMACs em tempo constante e usa replay unificado. Permanecem exigidos segredo, janela temporal, query única, consulta autoritativa, validação de vendedor/valor/referência e deduplicação.
+
+### Prova final — 20/10 às 22:31 BRT / 21/10 às 01:31 UTC
+
+A última rodada aprovou **216 testes**, sintaxe e build. O [CI 39527731133](https://github.com/zKaminise/BKM-TCG/actions/runs/39527731133) passou no [commit `e07241b`](https://github.com/zKaminise/BKM-TCG/commit/e07241bb5f0f867f6e645d052337d263649ea3a6). Deployments Ready: principal **`Ee3sN23zaPVCWC2o88hSpDAbdsvX`** e sandbox **`3P5n5werWo7tMdtxdXX5AsJQrVaG`**.
+
+O simulador oficial do painel Mercado Pago enviou callbacks para as **duas orders originais**, com resposta **HTTP 200**. Capturas: `outputs/mercadopago-webhook-aprovado-200.png` e `outputs/mercadopago-webhook-expirado-200.png`. A leitura final do provedor e do PostgreSQL foi registrada em **`backups/mp-sandbox-final-evidence.json`**, observação **`2026-10-21T01:31:42.569Z`**:
+
+| Order original | Provedor e BKM | Reserva | Recibos autenticados |
+| --- | --- | --- | --- |
+| `ORDTST01M5CXWZ7M0K4150MAPV0MP71J` | `APPROVED` em ambos | `COMMITTED` | 2 |
+| `ORDTST01M5CXX9DH0MMGN3E8WCKB4WT1` | `EXPIRED` em ambos; antes `PENDING` | `RELEASED` | 2 |
+
+A evidência final confirma **2 pedidos**, **1 reserva comprometida**, **1 liberada**, uma única unidade baixada e estoque físico **2 → 1**. Registra **`idempotencyPreviouslyConfirmed=true`** e **`observedScenariosConfirmed=true`**. O segundo pedido expirou com o tempo; sua pendência anterior continua comprovada no snapshot histórico. Não houve order substituta, cobrança comercial, transferência bancária real ou reembolso realizado. O principal permaneceu isolado e mock.
 
 ### Assistente técnico de execução
 
@@ -74,7 +95,7 @@ O checkpoint privado `.env.sandbox.state.json` guarda credenciais técnicas alea
 
 O relatório `backups/mp-sandbox-report.json`, também ignorado pelo Git, contém somente IDs técnicos, estados, centavos, reserva/baixa e resultado das verificações. Ele exclui credenciais, cookies, e-mails, endereço, QR, token, documento e dados de cartão. O assistente espera até um minuto por **aprovação e recibo webhook**, sem encerrar a espera apenas porque um GET aprovou o pedido. O prazo também cancela o GET em andamento; `callbackWait` registra somente estados de verificação. Depois ocorre a reconciliação explícita. `webhookProven` exige um recibo válido registrado por essa rota; aprovação obtida somente por reconciliação não é apresentada como entrega de webhook. O resultado só é `SANDBOX_SCENARIOS_CONFIRMED` quando aprovação, pendência e callback foram comprovados; caso contrário o comando deixa evidência incompleta e código de saída não zero, sem criar cobranças substitutas.
 
-O assistente já foi executado nos serviços isolados e comprovou os resultados Pix descritos acima. O callback ainda está em verificação. Preserve o checkpoint e acompanhe as orders existentes; não reinicialize a fixture para tentar produzir uma evidência nova. Cartão pelo Brick, recusa, expiração, cancelamento e reembolso continuam no roteiro abaixo e não são declarados aprovados pelo assistente.
+O assistente foi executado nos serviços isolados e comprovou os resultados Pix iniciais. Depois, o simulador oficial e a consulta final comprovaram callbacks autenticados, aprovação e expiração para os mesmos IDs, conforme a seção de prova final. O relatório inicial permaneceu inalterado; ele não deve ser confundido com a evidência final separada. Preserve o checkpoint e as orders existentes. Cartão pelo Brick, recusa, cancelamento, reembolso e demais cenários continuam no roteiro abaixo e não são declarados aprovados por essa prova Pix.
 
 ## Contrato que a BKM implementa
 
@@ -109,7 +130,7 @@ O adapter e a validação do pedido permitem fornecer `payer.firstName: 'APRO'` 
 
 ### Notificações e reconciliação
 
-No painel da **aplicação que efetivamente emitiu a order**, configure o evento **Order (Mercado Pago)**, tópico de configuração `orders`, e a URL `https://bkm-tcg-sandbox.vercel.app/api/payments/webhook/mercadopago`. A documentação Orders orienta a aba Modo de produção; no projeto, a conferência deve ser feita dentro da conta vendedora de teste e da aplicação emissora `8997426787542730`. O payload usa `type=order`. A assinatura utiliza `x-signature`, `x-request-id` e o `data.id` da query; o ID alfanumérico entra em minúsculas no manifesto HMAC. Segredos de aplicações diferentes não são intercambiáveis, mesmo que compartilhem URL e eventos selecionados. A BKM não aceita o status do corpo como fonte financeira e consulta a order assinada no provedor. [Configuração de notificações Orders](https://www.mercadopago.com.br/developers/en/docs/checkout-api-orders/notifications).
+No painel da **aplicação que efetivamente emitiu a order**, configure o evento **Order (Mercado Pago)**, tópico `orders`, e a URL `https://bkm-tcg-sandbox.vercel.app/api/payments/webhook/mercadopago`. A documentação orienta a aba Modo de produção; neste sandbox, a configuração foi conferida na conta vendedora de teste e na emissora `8997426787542730`. O payload usa `type=order`. A assinatura utiliza `x-signature`, `x-request-id` e o `data.id` exclusivo da query. A BKM compara o HMAC integral do ID exato e da forma canônica em minúsculas, em tempo constante, com replay unificado entre ambas. Segredos de aplicações diferentes não são intercambiáveis. O status do corpo não é fonte financeira: a aplicação consulta e valida o recurso verdadeiro no provedor. [Configuração de notificações Orders](https://www.mercadopago.com.br/developers/en/docs/checkout-api-orders/notifications).
 
 Teste notificações legítimas, assinatura inválida, repetição e entrega atrasada. A aplicação atualmente aplica janela de dez minutos ao timestamp assinado; a compatibilidade dessa janela com os retries observados precisa ser confirmada na homologação, sem desativar HMAC ou deduplicação. Não redirecione o webhook de sandbox para um ambiente demo que mantém o provedor desativado e espere aprovação end-to-end.
 
@@ -117,6 +138,6 @@ Cancelamento e reembolso são ações financeiras diferentes. O código reconcil
 
 ## Aceite e estado do trabalho
 
-Os testes locais cobrem valores, validação de vendedor, ambiente, reserva, baixa, duplicações, respostas inconclusivas, reembolso e outbox, com transporte substituído e bancos isolados. Separadamente, as duas orders externas de sandbox comprovaram aprovação/pendência por consulta, reconciliação, idempotência e estoque. Os números históricos de testes da Fase 2 não devem ser apresentados como homologação externa.
+Os testes locais cobrem valores, validação de vendedor, ambiente, reserva, baixa, duplicações, respostas inconclusivas, reembolso e outbox, com transporte substituído e bancos isolados. Separadamente, as duas orders de sandbox comprovaram aprovação, pendência histórica, expiração, reconciliação, idempotência, callbacks oficiais autenticados e estoque. Os números históricos de testes da Fase 2 não são provas externas.
 
-O aceite do webhook ainda exige a confirmação do reenvio oficial assinado e do recibo persistido após corrigir o segredo por aplicação. Não declare esse resultado concluído apenas porque o provedor aprovou um Pix ou o redeploy ficou Ready. Antes da liberação comercial, conclua os cenários aplicáveis do roteiro, incluindo SDK e estados ainda não executados no provedor. Produção continua desativada e exige autorização final separada.
+Os callbacks oficiais dos dois cenários Pix observados foram aceitos com HTTP 200 e recibos autenticados persistidos. A correção HMAC foi comprovada sem alterar o histórico das falhas anteriores. Isso não homologa cartão, cancelamento, reembolso, retries de longa duração ou todos os fluxos do checkout. Antes da liberação comercial, conclua os cenários restantes e a validação aplicável do SDK. Produção continua desativada e exige autorização final separada.

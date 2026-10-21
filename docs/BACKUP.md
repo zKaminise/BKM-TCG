@@ -60,6 +60,20 @@ A restauração foi efetivamente executada em um novo SQLite isolado, `backups/r
 
 Os **230 registros transferidos na migração**, os **233 registros do backup anterior** e os **244 registros desta cópia posterior** são contagens de momentos distintos. Esta prova acrescenta um novo snapshot e não substitui nem altera as evidências anteriores.
 
+## Prova após a migration 008 — 21/10/2026
+
+Após publicar o esquema 8 de resumos de desejos, foi criada uma nova cópia completa do principal: `backups/bkm-2026-10-21T09-43-45-155Z.bkmbackup`, com **41 tabelas, 199 registros e 2 objetos Storage**, criptografada com **AES-256-GCM**. A leitura PostgreSQL separada confirmou 41 tabelas com RLS e zero grants públicos nos dois ambientes.
+
+SHA-256 desse arquivo criptografado:
+
+```text
+27712CEFE92FAF01E60EC063C10EDB137E6A124B4826AE6CFCD85EA6F26222C2
+```
+
+A restauração foi efetivamente executada em um novo SQLite isolado, `backups/restore-digests-20261021-094345.sqlite`. O resultado confirmou **`restored=true`, 41 tabelas, 199 registros, 2 objetos, `integrity=ok` e `remoteTarget=false`**. Nenhum PostgreSQL recebeu essa restauração. Backup, SQLite, objetos e chave continuam privados, fora do Git e da publicação.
+
+Os snapshots anteriores permanecem preservados. A contagem total de registros pode diminuir com a expiração de sessões e aumentar com novos dados de QA; 244 e 199 são retratos de momentos distintos, sem equivalência com quantidade de clientes ou pedidos. Esta prova não apaga nem reinterpreta os snapshots anteriores e não constitui automação de backup.
+
 ## Rotina operacional
 
 Não há agendamento ou exclusão automática. Como política inicial manual, mantenha **sete cópias diárias e quatro semanais**, com pelo menos uma cópia em local seguro separado do computador de trabalho. Revise os arquivos e a confirmação de restauração antes de remover cópias antigas. Faça um novo teste isolado após mudanças de schema e periodicamente; apenas gerar o arquivo não comprova a capacidade de recuperação.
