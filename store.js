@@ -645,7 +645,7 @@ function loadMercadoPagoSDK(){
   if(typeof window.MercadoPago==="function")return Promise.resolve(window.MercadoPago);
   if(mercadoPagoSdkPromise)return mercadoPagoSdkPromise;
   mercadoPagoSdkPromise=new Promise((resolve,reject)=>{
-    const script=el("script",{src:"https://js.mercadopago.com/v2",async:true});
+    const script=el("script",{src:"https://sdk.mercadopago.com/js/v2",async:true});
     script.addEventListener("load",()=>{if(typeof window.MercadoPago==="function")resolve(window.MercadoPago);else{mercadoPagoSdkPromise=null;script.remove();reject(new Error("O formulário seguro não ficou disponível."));}},{once:true});
     script.addEventListener("error",()=>{mercadoPagoSdkPromise=null;script.remove();reject(new Error("Não foi possível carregar o formulário seguro de cartão. Tente novamente."));},{once:true});document.head.append(script);
   });return mercadoPagoSdkPromise;
