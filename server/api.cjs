@@ -466,7 +466,8 @@ function createApi(options = {}) {
         try {
           await orders.webhook({signature:req.headers['x-signature'],requestId:req.headers['x-request-id'],dataId:query.get('data.id')});
         } catch(error) {
-          if(error instanceof PaymentError && error.status===401 && error.code==='PAYMENT_WEBHOOK_INVALID' && ['HEADER_FORMAT','SIGNATURE_FORMAT','TIMESTAMP_WINDOW','HMAC_MISMATCH'].includes(error.diagnosticCode)) console.warn('BKM_MP_WEBHOOK_REJECTED',{reason:error.diagnosticCode});
+          const reason=error instanceof PaymentError?error.diagnosticCode:null;
+          if(error instanceof PaymentError && error.status===401 && error.code==='PAYMENT_WEBHOOK_INVALID' && ['HEADER_FORMAT','SIGNATURE_FORMAT','TIMESTAMP_WINDOW','HMAC_MISMATCH'].includes(reason)) console.warn('BKM_MP_WEBHOOK_REJECTED',{reason,...(reason==='HMAC_MISMATCH'?{exactIdMatches:error.diagnosticExactIdMatch===true}:{})});
           throw error;
         }
         return respond(200,{received:true});

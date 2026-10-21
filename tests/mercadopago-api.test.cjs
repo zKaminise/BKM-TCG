@@ -32,12 +32,30 @@ test('diagnóstico interno MP mantém rejeição pública e motivo não enumerá
     assert.equal(error.status,401);assert.equal(error.statusCode,401);assert.equal(error.code,'PAYMENT_WEBHOOK_INVALID');assert.equal(error.message,'Assinatura da notificação inválida.');
     assert.equal(error.diagnosticCode,reason);assert.equal(Object.getOwnPropertyDescriptor(error,'diagnosticCode').enumerable,false);
     const serialized=JSON.stringify(error),spread=JSON.stringify({...error});
-    for(const sensitive of [secret,requestId,dataId,valid.signature,patch.signature,patch.dataId,reason,'diagnosticCode'].filter(Boolean)){
+    if(reason==='HMAC_MISMATCH'){assert.equal(error.diagnosticExactIdMatch,false);assert.equal(Object.getOwnPropertyDescriptor(error,'diagnosticExactIdMatch').enumerable,false);}
+    else assert.equal(Object.hasOwn(error,'diagnosticExactIdMatch'),false);
+    for(const sensitive of [secret,requestId,dataId,valid.signature,patch.signature,patch.dataId,reason,'diagnosticCode','diagnosticExactIdMatch'].filter(Boolean)){
       assert.equal(serialized.includes(sensitive),false);assert.equal(spread.includes(sensitive),false);assert.equal(String(error).includes(sensitive),false);
     }
     return true;
   });
   assert.throws(()=>verifyWebhookSignature({...valid,secret:''}),error=>error.status===503&&!Object.hasOwn(error,'diagnosticCode'));
+});
+
+test('diagnóstico interno MP identifica ID exato em maiúsculas sem aceitar assinatura alternativa',()=>{
+  const secret='uppercase-diagnostic-only-fixture-secret',requestId='uppercase-private-request',dataId='ORDUPPERDIAGNOSTIC123',ts=String(Date.now());
+  const sign=(id,key=secret)=>`ts=${ts},v1=${crypto.createHmac('sha256',key).update(`id:${id};request-id:${requestId};ts:${ts};`).digest('hex')}`;
+  const rawSignature=sign(dataId),valid={secret,requestId,dataId,signature:rawSignature,now:Number(ts)};
+  for(const [patch,match]of [[{},true],[{secret:'wrong-diagnostic-private-key'},false],[{dataId:'ORDUpperDIAGNOSTIC123'},false],[{signature:sign(dataId.toLowerCase(),'wrong-signer-secret')},false]]){
+    assert.throws(()=>verifyWebhookSignature({...valid,...patch}),error=>{
+      assert.equal(error.status,401);assert.equal(error.code,'PAYMENT_WEBHOOK_INVALID');assert.equal(error.message,'Assinatura da notificação inválida.');
+      assert.equal(error.diagnosticCode,'HMAC_MISMATCH');assert.equal(error.diagnosticExactIdMatch,match);
+      assert.equal(Object.getOwnPropertyDescriptor(error,'diagnosticExactIdMatch').enumerable,false);
+      for(const serialized of [JSON.stringify(error),JSON.stringify({...error}),String(error)])for(const sensitive of [secret,requestId,dataId,rawSignature,'diagnosticCode','diagnosticExactIdMatch'])assert.equal(serialized.includes(sensitive),false);
+      return true;
+    });
+  }
+  assert.equal(verifyWebhookSignature({...valid,signature:sign(dataId.toLowerCase())}).verified,true,'o contrato aceito continua sendo exclusivamente o manifesto canônico');
 });
 
 test('diagnóstico interno MP registra só marcador e reason permitido na rota, sem alterar HTTP401',async t=>{
@@ -49,7 +67,7 @@ test('diagnóstico interno MP registra só marcador e reason permitido na rota, 
   t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await server.api.close();fs.rmSync(directory,{recursive:true,force:true});});
   const warnings=[];t.mock.method(console,'warn',(...args)=>warnings.push(args));
   const base='http://127.0.0.1:'+server.address().port,requestId='private-diagnostic-request-id',dataId='ORDPRIVATE123456789',secret=sandboxEnv.MERCADO_PAGO_WEBHOOK_SECRET;
-  const sign=(timestamp=String(Date.now()),key=secret)=>`ts=${timestamp},v1=${crypto.createHmac('sha256',key).update(`id:${dataId.toLowerCase()};request-id:${requestId};ts:${timestamp};`).digest('hex')}`;
+  const sign=(timestamp=String(Date.now()),key=secret,id=dataId.toLowerCase())=>`ts=${timestamp},v1=${crypto.createHmac('sha256',key).update(`id:${id};request-id:${requestId};ts:${timestamp};`).digest('hex')}`;
   const call=async(headers)=>{const response=await fetch(base+'/api/payments/webhook/mercadopago?data.id='+dataId,{method:'POST',headers:{'content-type':'application/json',...headers},body:JSON.stringify({privateBodyMarker:'private-body-must-not-log',secret})});return{status:response.status,body:await response.json()};};
   const fixtures=[
     ['HEADER_FORMAT',{'x-signature':sign()}],
@@ -59,16 +77,22 @@ test('diagnóstico interno MP registra só marcador e reason permitido na rota, 
   ];
   for(const [reason,headers]of fixtures){
     const response=await call(headers);assert.equal(response.status,401);assert.deepEqual(response.body,{error:{code:'PAYMENT_WEBHOOK_INVALID',message:'Assinatura da notificação inválida.'}});
-    assert.deepEqual(warnings.at(-1),['BKM_MP_WEBHOOK_REJECTED',{reason}]);
+    assert.deepEqual(warnings.at(-1),['BKM_MP_WEBHOOK_REJECTED',{reason,...(reason==='HMAC_MISMATCH'?{exactIdMatches:false}:{})}]);
     const output=JSON.stringify({response:response.body,warnings});
     for(const sensitive of [secret,requestId,dataId,headers['x-signature'],'private-body-must-not-log','127.0.0.1'])assert.equal(output.includes(sensitive),false);
     assert.equal(JSON.stringify(response.body).includes(reason),false);
   }
   assert.equal(providerReads,0,'assinaturas recusadas não devem consultar o provedor');
   assert.equal(warnings.length,4);
+  const rawHeaders={'x-request-id':requestId,'x-signature':sign(String(Date.now()),secret,dataId)};
+  const rawOnly=await call(rawHeaders);assert.equal(rawOnly.status,401);assert.deepEqual(rawOnly.body,{error:{code:'PAYMENT_WEBHOOK_INVALID',message:'Assinatura da notificação inválida.'}});
+  assert.deepEqual(warnings.at(-1),['BKM_MP_WEBHOOK_REJECTED',{reason:'HMAC_MISMATCH',exactIdMatches:true}]);
+  assert.equal(providerReads,0,'coincidência apenas com ID exato continua recusada antes de consultar o provedor');
+  for(const sensitive of [secret,requestId,dataId,rawHeaders['x-signature'],'private-body-must-not-log','127.0.0.1'])assert.equal(JSON.stringify(warnings).includes(sensitive),false);
+  assert.equal(JSON.stringify(rawOnly.body).includes('exactIdMatches'),false);assert.equal(JSON.stringify(rawOnly.body).includes('diagnosticExactIdMatch'),false);
   const forged=await call({'x-request-id':requestId,'x-signature':sign()});assert.equal(forged.status,401);assert.equal(providerReads,1);
-  assert.equal(warnings.length,4,'um diagnóstico fora da whitelist não deve ser registrado');
-  const other=await fetch(base+'/api/account/orders');assert.equal(other.status,401);assert.equal(warnings.length,4,'outras rotas não devem emitir o marcador de webhook');
+  assert.equal(warnings.length,5,'um diagnóstico fora da whitelist não deve ser registrado');
+  const other=await fetch(base+'/api/account/orders');assert.equal(other.status,401);assert.equal(warnings.length,5,'outras rotas não devem emitir o marcador de webhook');
 });
 
 for(const engine of ['sqlite','postgres']) test(`Mercado Pago ligado à API, com transporte isolado: ${engine}`,async t=>{
