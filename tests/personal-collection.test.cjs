@@ -125,8 +125,30 @@ for(const engine of ['sqlite','postgres'])test('Coleção pessoal privada e pers
   await t.test('cache vencido usa referência anterior na falha e migrações são aditivas e idempotentes',async()=>{
     f.offline();f.advance(25*3600000);const catalog=await call(alice,'GET','/catalog/sets',{},'language=pt');assert.equal(catalog.stale,true);
     const saved=await call(alice,'GET','/items');assert.ok(saved.total>=3);
-    if(engine==='postgres'){await migratePostgres(f.pgClient);const tables=await db.prepare("SELECT tablename,rowsecurity FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'personal_%'").all();assert.equal(tables.length,9);assert.ok(tables.every(table=>table.rowsecurity));}
+    if(engine==='postgres'){await migratePostgres(f.pgClient);const tables=await db.prepare("SELECT tablename,rowsecurity FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'personal_%'").all();assert.equal(tables.length,11);assert.ok(tables.every(table=>table.rowsecurity));assert.ok(tables.some(table=>table.tablename==='personal_item_events'));assert.ok(tables.some(table=>table.tablename==='personal_inventory_operations'));}
   });
+});
+
+for(const engine of ['sqlite','postgres'])test('Referência por exemplar permanece coerente no fichário, checklist e avaliação: '+engine,async t=>{
+  const f=await fixture(t,engine),{alice,call}=f;
+  const set=await call(alice,'POST','/sets',{setId:'test1',language:'pt'});
+  const added=await call(alice,'POST','/inventory/batch',{requestId:'cross-view-reference-001',items:[{kind:'CARD',cardId:'test1-001',setId:'test1',language:'pt',condition:'NM',variant:'HOLO',paidCents:10000,manualValueCents:15000}]});
+  const id=added.items[0].id;
+  let summary=await call(alice,'GET','/summary');
+  assert.equal(summary.totals.estimatedValueCents,15000);
+  assert.equal(summary.sets[0].estimatedValueCents,15000);
+  assert.equal(summary.sets[0].knownValueQuantity,1);
+  assert.equal(summary.topCards[0].valuation.source,'user_manual');
+  let checklist=await call(alice,'GET','/sets/'+set.id);
+  assert.equal(checklist.items.find(card=>card.id==='test1-001').valuation.valueCents,15000);
+  assert.equal(checklist.collection.estimatedValueCents,15000);
+  const exported=await call(alice,'GET','/export');assert.ok(exported.csv.includes('15000'));assert.ok(exported.csv.includes('Informado por você'));
+  f.advance(8*86400000);
+  summary=await call(alice,'GET','/summary');assert.equal(summary.totals.estimatedValueCents,0);assert.equal(summary.sets[0].estimatedValueCents,0);assert.equal(summary.sets[0].staleQuantity,1);
+  checklist=await call(alice,'GET','/sets/'+set.id);assert.equal(checklist.items.find(card=>card.id==='test1-001').valuation.stale,true);
+  await call(alice,'PUT','/inventory/'+id,{requestId:'cross-view-reference-002',manualValueCents:16000});
+  await call(alice,'PUT','/inventory/'+id,{requestId:'cross-view-reference-003',language:'ja'});
+  summary=await call(alice,'GET','/summary');assert.equal(summary.totals.knownValueQuantity,0);assert.equal(summary.topCards.length,0);
 });
 
 test('CSV pessoal RFC4180, datas inválidas, limites e fórmulas não executáveis',()=>{

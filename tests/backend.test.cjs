@@ -12,7 +12,7 @@ const {openDatabase}=require('../server/db.cjs');
 test('migrations são idempotentes, catálogo comercial inicia vazio e persiste em disco',()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'bkm-db-')),filename=path.join(dir,'store.sqlite');
   let db;
-  try{db=openDatabase(filename);assert.equal(db.prepare('SELECT COUNT(*) n FROM products').get().n,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM users').get().n,0);db.close();db=openDatabase(filename);assert.equal(db.prepare('PRAGMA user_version').get().user_version,8);}finally{db?.close();fs.rmSync(dir,{recursive:true,force:true});}
+  try{db=openDatabase(filename);assert.equal(db.prepare('SELECT COUNT(*) n FROM products').get().n,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM users').get().n,0);db.close();db=openDatabase(filename);assert.equal(db.prepare('PRAGMA user_version').get().user_version,9);}finally{db?.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
 
 test('API integrada: sessões, RBAC, inventário, preços, cupons, frete e privacidade',async t=>{

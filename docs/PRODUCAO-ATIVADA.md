@@ -1,5 +1,7 @@
 # Produção e primeiro teste real
 
+Atualização de **27/10/2026 — Minha Coleção**: migration 009 aplicada, 43 tabelas com RLS, dados anteriores preservados por comparação antes/depois e 361 testes aprovados. O novo fluxo, as fontes e os testes estão em [MINHA-COLECAO.md](MINHA-COLECAO.md); o inventário atual de todo o site está em [STATUS-SITE.md](STATUS-SITE.md). As provas anteriores abaixo continuam com suas datas e limites próprios.
+
 A loja principal foi habilitada em **https://lojabkm.com.br/** com `BKM_ENVIRONMENT=production`, Mercado Pago em produção e `canCharge=true`. O sandbox continua separado, em staging e sem cobranças comerciais. O proprietário optou por manter a hospedagem Hobby nesta etapa.
 
 ## Configuração verificada

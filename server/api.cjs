@@ -567,7 +567,8 @@ function createApi(options = {}) {
       if (pathname.startsWith("/api/account")) {
         const user = auth(session);
         if(pathname.startsWith('/api/account/collection/')) {
-          const body=['POST','PUT','PATCH'].includes(method)?await readJson(req,2*1024*1024):{};
+          const collectionDelete = method==='DELETE' && /^\/api\/account\/collection\/inventory\/[^/]+$/.test(pathname);
+          const body=['POST','PUT','PATCH'].includes(method)||collectionDelete?await readJson(req,2*1024*1024):{};
           const preferencesRoute=pathname==='/api/account/collection/preferences';
           const perform=async()=>{
             const result=await personal.handle({method,path:pathname,query,user,body});

@@ -1,0 +1,78 @@
+# BKM TCG — inventário funcional do site
+
+Revisão de **27/10/2026**. Este inventário separa funcionalidades implementadas, configurações efetivas e provas que ainda dependem de operação real. Relatórios datados de fases anteriores são históricos; não descrevem sozinhos o estado atual.
+
+## Loja pública
+
+| Área | O que existe | Limite ou ação operacional |
+|---|---|---|
+| Identidade e início | Logo BKM, tema preto/vermelho/ciano/prata, navegação responsiva, animação 3D de abertura do booster e revelação da carta | Conteúdo e estoque comercial dependem dos cadastros reais do administrador |
+| Catálogo | Cartas avulsas e lacrados, busca, filtros, ordenação, páginas por coleção e aliases | Os 16 anúncios de demonstração foram arquivados; não representam mercadoria disponível |
+| Produto | Fotos próprias e de referência identificadas, ampliação, descrição, variantes de idioma/condição/acabamento, preço e disponibilidade | Administrador deve conferir a unidade física e cadastrar sua quantidade real |
+| Carrinho e favoritos | Adicionar/remover/alterar quantidade, drawer, persistência por conta e reconciliação de favoritos arquivados | Carrinho não reserva o estoque |
+| Cupons e frete | Cupons, mínimo de frete grátis editável e barra de progresso; tabela regional de preço/prazo no painel | Tarifas nacionais ainda desativadas: não houve cotação operacional válida |
+| Uberlândia | Retirada gratuita e entrega local gratuita quando habilitadas; CEP local conferido; contato por WhatsApp depois do pagamento | Ponto e horário são combinados pelo atendimento |
+| Conteúdo institucional | Atendimento, perguntas frequentes, envio, devoluções, privacidade e termos | Razão social/CNPJ e endereço/horários definitivos ainda não foram fornecidos |
+
+## Contas e área do cliente
+
+- Cadastro e login por e-mail/senha, sessão segura, proteção de origem/CSRF, logout e alteração de senha com revogação de outras sessões.
+- Google OIDC habilitado em produção, com state/nonce/PKCE, vínculo explícito de uma conta já existente e proteção contra vinculação indevida pelo mesmo e-mail. Vínculo e novo login da conta vinculada foram comprovados anteriormente; o cadastro externo de uma conta Google inédita faz parte da prova operacional do comprador.
+- Recuperação por e-mail com resposta genérica, token de uso único e expiração. O fluxo de redefinição/revogação foi testado com conta de QA; um e-mail de recuperação ao titular autorizado foi entregue em produção, sem alterar sua senha.
+- Perfil, endereços e endereço padrão, pedidos com acompanhamento e retomada de pagamento, preferências, segurança e notificações.
+- Produtos favoritos e lista de desejos são áreas diferentes. Desejos podem referenciar cartas que nem estão anunciadas na loja, com filtros de versão/idioma/condição/preço e avisos sujeitos a consentimento.
+- Minha Coleção possui inventário próprio, independente dos produtos e do saldo comercial. Consulte o [relatório do módulo](MINHA-COLECAO.md) para funcionalidades, testes, fontes e limites da nova versão.
+
+## Pedidos e pagamentos
+
+| Etapa | Comportamento implementado |
+|---|---|
+| Confirmar pedido | Valida preço/estoque no servidor e reserva por 15 minutos em transação; concorrência pela última unidade e repetição idempotente são tratadas |
+| Aguardando pagamento | Mesmo pedido pode ser retomado dentro do prazo; a escolha de cartão reserva antes da tokenização e não cria outra cobrança ao simplesmente reabrir |
+| Expiração | Libera a disponibilidade e tenta cancelar a cobrança remota; consumidor Supabase Cron executa a cada minuto |
+| Pagamento aprovado | Confere o provedor e a identidade financeira da order; baixa uma única vez e move para Em separação |
+| Aprovação tardia | Exige revisão financeira quando a reserva expirou/estoque foi realocado; não usa a unidade de outro comprador |
+| Operação do administrador | Em separação → Separado para envio → Enviado → Entregue; rastreio e transportadora informados para envio normal |
+| Retirada/local | Pode concluir após separar e entregar, sem inventar código de transportadora |
+
+Mercado Pago está configurado com a conta real em produção; a consulta de meios ativos confirmou **Pix, crédito e débito**. Parcelas e juros são os apresentados pelo SDK/provedor. O webhook real está configurado. Cartões, aprovação/recusa, Pix e reembolso integral foram exercitados no sandbox separado; isso não comprova recebimento comercial de uma compra real.
+
+A primeira compra de **R$ 10,00 com retirada em Uberlândia** continua sendo a prova de recebimento real a executar pelo comprador e pelo administrador: cadastrar estoque verdadeiro, comprar, pagar, conferir os avisos e o lançamento/liquidação no Mercado Pago. O agente não efetuou cobrança comercial. Reembolsos parciais e a matriz completa de disputas/estornos ainda não têm homologação externa; reembolso e reposição de estoque não são a mesma ação.
+
+O Pix do provedor tem prazo remoto mínimo diferente do prazo comercial da loja. A reserva local continua sendo 15 minutos; a execução periódica, rede ou indisponibilidade podem acrescentar atraso ao cancelamento remoto. Não há promessa de agendamento com precisão absoluta nem reembolso automático de pagamento tardio.
+
+## E-mails e notificações
+
+- Resend configurado no domínio `lojabkm.com.br`, remetente transacional e endereço de resposta do atendimento.
+- Fila persistente, deduplicação, repetição controlada, estado de entrega e webhook assinado. Aceitação pelo provedor e entrega são estados separados.
+- Avisos ao cliente: pedido criado, aguardando pagamento com link para retomar, pagamento recebido, em separação, pronto para envio/retirada, enviado/rastreio e conclusão.
+- Cada administrador recebe aviso quando o pagamento é confirmado. O destinatário operacional do administrador atual é o e-mail informado pelo proprietário.
+- Recuperação de senha e um resumo de desejos foram efetivamente entregues ao titular autorizado. Os quatro avisos de um pedido comercial e o aviso administrativo ainda devem ser conferidos na compra real.
+- Alertas de desejos e resumos diário/semanal têm implementação persistente e consentimentos independentes. A prova externa completa do alerta imediato ainda não foi concluída.
+- Marketing e carrinho abandonado não possuem campanhas/automações de envio habilitadas apenas por existir uma preferência no perfil.
+
+## Painel administrativo
+
+Login em `/admin`, com permissão verificada no servidor. Há gestão de produtos/rascunhos/publicação/arquivo, variantes e estoque, fotos, coleções e aliases, cupons, pedidos e etapas logísticas, configurações da loja e frete, referências de preços autorizadas, fila de e-mails e integrações. Alterações relevantes possuem trilha administrativa. Custos e notas particulares dos clientes não são expostos pelo painel global de preços.
+
+A senha administrativa atual foi definida pelo proprietário em entrada privada, sem senha padrão publicada. Dados de pagamentos e segredos de provedores não fazem parte do frontend ou do ZIP público.
+
+## Infraestrutura, dados e continuidade
+
+- Produção em [lojabkm.com.br](https://lojabkm.com.br/), com redirecionamentos canônicos preservando rota e parâmetros. Vercel Hobby mantido conforme decisão do proprietário; nenhum plano pago foi contratado.
+- Supabase/PostgreSQL principal e sandbox separados, TLS verificado. A sessão da aplicação é própria: o navegador não recebe grants nas tabelas da aplicação; RLS e validação de propriedade no servidor protegem as informações particulares.
+- Worker de reservas/e-mails com chamada Supabase Cron autenticada por HMAC temporário. A chave permanece no Vault, sem ser colocada na fila HTTP. Chamada natural HTTP 200 já comprovada.
+- Migrações versionadas, testes SQLite e PostgreSQL/PGlite, build e CI. Chaves reais, `.env`, bancos e backups estão excluídos do Git e do pacote público.
+- Backup criptografado e restauração isolada implementados e testados. Ainda falta instituir rotina automatizada, retenção e cópia independente operacional.
+- Monitoramento operacional existe pelo painel e pelos provedores; atendimento contínuo, alertas de infraestrutura e acompanhamento de incidentes dependem da rotina da loja.
+- A indexação pública continua bloqueada por `robots`/`X-Robots-Tag` da publicação atual. A liberação de SEO público e o sitemap comercial devem ser tratados antes de buscar tráfego orgânico; as páginas privadas devem continuar fora da indexação.
+
+## Pendências reais por prioridade
+
+1. **Primeira compra real:** publicar o produto físico de R$ 10,00, testar com o amigo, conferir pagamento/valor líquido, os e-mails por etapa, aviso administrativo e retirada. Código e credenciais não substituem essa prova.
+2. **Logística nacional:** definir embalagens, peso/medidas, origem, preço e prazo que a loja consegue cumprir; ativar as regiões somente depois dessa conferência. O adaptador Melhor Envio de sandbox não está ligado ao checkout nem compra etiquetas.
+3. **Preço brasileiro automático:** obter uma fonte/API autorizada com cobertura e identidade exatas. Não há integração licenciada configurada com a Liga Pokémon; referências manuais são identificadas e nunca viram cotação oficial.
+4. **Dados comerciais e conteúdo final:** informar razão social/CNPJ e dados definitivos de retirada/atendimento quando existirem; revisar políticas e conteúdo conforme a operação real.
+5. **Aquisição e continuidade:** liberar/configurar SEO público, instituir backups/retencão/cópia separada, monitoramento e testar os caminhos externos restantes de Google/alertas/disputas/reembolso parcial antes de depender deles operacionalmente.
+
+Essas pendências não impedem o uso privado da coleção ou o teste de compra com retirada descrito no [guia operacional](OPERACAO-PRODUCAO.md). Não representam promessa de cotação nacional, liquidação financeira, prazo de transportadora ou SLA que não tenha sido comprovado.

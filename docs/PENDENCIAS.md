@@ -1,5 +1,7 @@
 # Pendências e ativação — Fase 3
 
+**Registro histórico de 21/10/2026.** Para o estado atual, consulte [STATUS-SITE.md](STATUS-SITE.md), [ativação de produção](PRODUCAO-ATIVADA.md) e [novo módulo Minha Coleção](MINHA-COLECAO.md). A produção já foi ativada e a migration 009 aplicada; descrições antigas de mock, 41 tabelas ou bloqueio de plano abaixo não são o estado operacional vigente.
+
 Visão completa das funcionalidades e provas, com as pendências separadas por dependência comercial ou QA: [RELATORIO-FASE3.md](RELATORIO-FASE3.md).
 
 Estado em **21/10/2026**: código publicado no [commit `fdbb91c`](https://github.com/zKaminise/BKM-TCG/commit/fdbb91c6bf24f0306c98e2fb17ed407d87bee1a6), com **265 testes**, sintaxe aprovada e [CI 39642646628 com sucesso](https://github.com/zKaminise/BKM-TCG/actions/runs/39642646628). Deployments Success desse código: principal `GRuxVzXNnseYFDWhBYD1a4TrbCij`; sandbox `AVSCdA9YAMiJ4LPAxdMzApFMLbVM`. Cron Enabled e disparo manual Vercel com **HTTP 200** após chave Production; a chamada local com Bearer permaneceu 401. **Resumo controlado entregue; alerta imediato e disparo agendado natural continuam pendentes.** O domínio canônico é [lojabkm.com.br](https://lojabkm.com.br/), com `www` redirecionando por 308.

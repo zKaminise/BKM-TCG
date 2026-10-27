@@ -3,6 +3,8 @@
 E-commerce de Pokémon TCG e gerenciador privado de coleções. A identidade BKM e a animação 3D do booster com Pikachu são preservadas. Produção e homologação financeira usam projetos e bancos separados.
 
 - Loja: [lojabkm.com.br](https://lojabkm.com.br/).
+- [Inventário atual do site e pendências reais](docs/STATUS-SITE.md).
+- [Minha Coleção: implementação, fontes, segurança e testes](docs/MINHA-COLECAO.md).
 - [Guia de operação e compra com retirada](docs/OPERACAO-PRODUCAO.md).
 - [Worker de reservas e e-mails, incluindo Supabase Cron no Hobby](docs/CRON-COMERCIO.md).
 - [Relatórios históricos da fase 3](docs/RELATORIO-FASE3.md) e [validações anteriores](docs/VALIDACAO.md).
@@ -43,7 +45,7 @@ O seed inicial contém 14 produtos e quatro coleções; o conteúdo atual pode i
 
 `/conta` reúne visão geral, fichários, cartas pessoais, faltantes, desejos, pedidos, endereços, dados, preferências, segurança e notificações. Essas informações são privadas por padrão, protegidas no servidor por sessão e propriedade dos registros.
 
-O cliente pode acompanhar coleções de referência, definir objetivo básico ou personalizado, consultar checklist visual e adicionar cartas individualmente ou em lote. Lotes distintos preservam quantidade, idioma, condição, variante, custo unitário, aquisição e notas. Cartas pessoais não precisam estar anunciadas na loja e não alteram seu estoque. Uma compra não é marcada automaticamente como carta recebida.
+O cliente pode acompanhar coleções de referência, definir objetivos e consultar faltantes. A nova Minha Coleção adiciona busca real por nome/número/set, fila mista de cartas/selados/personalizados, rascunho por usuário, detalhes individuais, revisão e gravação transacional idempotente. Há quatro visualizações, filtros e ordenações no servidor, agrupamentos, custos e referências com cobertura, venda particular, arquivamento, restauração, histórico e desfazer. Cartas pessoais não precisam estar anunciadas na loja e não alteram seu estoque. Uma compra não é marcada automaticamente como carta recebida.
 
 Desejos guardam identidade e preferências, inclusive para cartas sem anúncio. Disponibilidade considera anúncio publicado, estoque e compatibilidade. Há notificações internas e alertas por e-mail com consentimento e deduplicação. Um resumo controlado foi efetivamente enviado ao único titular autorizado e confirmado **DELIVERED** por webhook real, com um evento e um e-mail, sem reenvio. O teste antecipou somente o evento de homologação e usou Run manual da Vercel; não comprova disparo natural do calendário nem alerta imediato. Preferências foram restauradas e o desejo temporário removido. Marketing e carrinho são separados; carrinho abandonado permanece sem automação ativa.
 
