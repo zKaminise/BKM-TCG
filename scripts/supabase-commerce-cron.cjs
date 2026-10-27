@@ -12,7 +12,7 @@ BEGIN
   IF EXISTS(SELECT 1 FROM bkm_ops.commerce_worker_requests WHERE created_at > pg_catalog.now()-interval '50 seconds') THEN RETURN NULL; END IF;
   SELECT decrypted_secret INTO endpoint FROM vault.decrypted_secrets WHERE name='bkm_commerce_worker_url';
   SELECT decrypted_secret INTO signing_key FROM vault.decrypted_secrets WHERE name='bkm_commerce_cron_secret';
-  IF endpoint IS NULL OR endpoint !~ '^https://[a-z0-9.-]+/api/jobs/commerce$' OR signing_key IS NULL OR signing_key !~ '^[A-Za-z0-9_-]{32,256}$' THEN
+  IF endpoint IS NULL OR endpoint !~ '^https://[a-z0-9.-]+/api/jobs/commerce$' OR signing_key IS NULL OR pg_catalog.length(signing_key) NOT BETWEEN 32 AND 256 OR signing_key !~ '^[A-Za-z0-9_-]+$' THEN
     RAISE EXCEPTION 'Commerce worker configuration unavailable';
   END IF;
   timestamp := pg_catalog.floor(extract(epoch FROM pg_catalog.clock_timestamp()))::bigint::text;

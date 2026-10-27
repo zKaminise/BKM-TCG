@@ -1,6 +1,7 @@
 'use strict';
 const test=require('node:test');
 const assert=require('node:assert/strict');
+const {PGlite}=require('@electric-sql/pglite');
 const {validateConfiguration,apply,review,FUNCTION_SQL,COMMAND}=require('../scripts/supabase-commerce-cron.cjs');
 const ref='abcdefghijklmnopqrst';
 const env={DATABASE_URL:'postgresql://postgres.'+ref+':isolated-fixture-password@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',SUPABASE_URL:'https://'+ref+'.supabase.co',BKM_PUBLIC_URL:'https://bkm.example.test',CRON_SECRET:'isolated-private-worker-key-not-real-2026'};
@@ -42,4 +43,33 @@ test('instalador recusa Vault exposto, dono incompatível e job conflitante sem 
     const client=database(patch);await assert.rejects(apply(client,env,{approved:true,signatureDeploymentVerified:true}));assert.equal(client.calls.at(-1).sql,'ROLLBACK');assert.equal(client.calls.some(call=>call.sql.startsWith('SELECT vault.create_secret')||call.sql.startsWith('SELECT vault.update_secret')),false);
   }
   const client=database();await assert.rejects(apply(client,env,{approved:true}));assert.equal(client.calls.length,0);
+});
+
+test('função SQL publicada aceita chaves de 32 e 256 caracteres e recusa limites inválidos no PostgreSQL',async t=>{
+  const db=new PGlite();t.after(()=>db.close());
+  // Execute the exported function itself. Only Vault, crypto and HTTP are
+  // isolated local substitutes; PostgreSQL parses and evaluates its real guard.
+  await db.exec(`CREATE SCHEMA bkm_ops;CREATE SCHEMA vault;CREATE SCHEMA extensions;CREATE SCHEMA net;
+    CREATE TABLE bkm_ops.commerce_worker_requests(request_id bigint PRIMARY KEY,created_at timestamptz NOT NULL DEFAULT now());
+    CREATE TABLE vault.decrypted_secrets(name text PRIMARY KEY,decrypted_secret text);
+    CREATE TABLE net.fixture_requests(id bigserial PRIMARY KEY,url text,headers jsonb,timeout_ms integer);
+    CREATE FUNCTION extensions.hmac(text,text,text) RETURNS bytea LANGUAGE sql AS $$ SELECT decode(repeat('ab',32),'hex') $$;
+    CREATE FUNCTION net.http_get(url text,headers jsonb,timeout_milliseconds integer) RETURNS bigint LANGUAGE plpgsql AS $$
+      DECLARE issued bigint;BEGIN
+        INSERT INTO net.fixture_requests(url,headers,timeout_ms) VALUES(url,headers,timeout_milliseconds) RETURNING id INTO issued;
+        RETURN issued;
+      END $$;`);
+  await db.query('INSERT INTO vault.decrypted_secrets VALUES($1,$2)',['bkm_commerce_worker_url','https://bkm.example.test/api/jobs/commerce']);
+  await db.exec(FUNCTION_SQL);
+  for(const key of ['a'.repeat(32),'a'.repeat(256),'a'.repeat(31),'a'.repeat(257),'a'.repeat(31)+'!','a'.repeat(31)+'\n',null]){
+    await db.exec('DELETE FROM bkm_ops.commerce_worker_requests;DELETE FROM net.fixture_requests;');
+    await db.query('INSERT INTO vault.decrypted_secrets VALUES($1,$2) ON CONFLICT(name) DO UPDATE SET decrypted_secret=excluded.decrypted_secret',['bkm_commerce_cron_secret',key]);
+    if(key!==null&&[32,256].includes(key.length)&&/^a+$/.test(key)){
+      const result=await db.query('SELECT bkm_ops.invoke_commerce_worker() request_id');assert.ok(result.rows[0].request_id);
+      const request=(await db.query('SELECT * FROM net.fixture_requests')).rows;assert.equal(request.length,1);assert.equal(request[0].url,'https://bkm.example.test/api/jobs/commerce');assert.equal(request[0].timeout_ms,45000);assert.match(request[0].headers['x-bkm-job-timestamp'],/^\d{10}$/);assert.match(request[0].headers['x-bkm-job-signature'],/^[a-f0-9]{64}$/);assert.equal(JSON.stringify(request[0]).includes(key),false);
+    }else{
+      await assert.rejects(db.query('SELECT bkm_ops.invoke_commerce_worker()'),/Commerce worker configuration unavailable/);
+      assert.equal((await db.query('SELECT COUNT(*) count FROM net.fixture_requests')).rows[0].count,0);
+    }
+  }
 });
