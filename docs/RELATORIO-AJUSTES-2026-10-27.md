@@ -14,7 +14,7 @@ Revisão de 27/10/2026. O inventário completo e as pendências operacionais est
 
 ## Validação executada
 
-- Suíte completa: **385 testes aprovados, zero falhas**. Inclui SQLite, PostgreSQL/PGlite, HTTP, concorrência/idempotência, isolamento de dados e fluxos existentes.
+- Suíte completa: **389 testes aprovados, zero falhas**. Inclui SQLite, PostgreSQL/PGlite, HTTP, concorrência/idempotência, isolamento de dados e fluxos existentes.
 - Limites de senha: 8/9/14/15, composição, símbolo opcional, Unicode, confirmação, recuperação, alteração e autenticação legada sem mudança do hash.
 - Busca progressiva, cache e falhas do catálogo; mercado sem preço, antigo, moeda/identidade/acabamento incompatíveis, snapshot, dados pessoais e BRL manual preservados.
 - Logística: limites de CEP, regiões, retirada offline, entrega local, descontos, troca de destino, preço/prazo/configuração inválidos, privacidade da API, erro/timeout/indisponibilidade com rede externa simulada.
@@ -23,6 +23,14 @@ Revisão de 27/10/2026. O inventário completo e as pendências operacionais est
 - `check`, `build`, verificação de diff e busca de segredos aprovados. Backup criptografado antes e depois das alterações administrativas/configuração.
 
 A conferência visual encontrou um erro de variável ao retornar à coleção; ele foi corrigido e recebeu teste que executa o carregamento real da tela em um host DOM mínimo. Nenhum teste desta etapa cobrou dinheiro, comprou etiqueta ou enviou correspondência a terceiros.
+
+## Publicação conferida
+
+Os ajustes estão publicados em [lojabkm.com.br](https://lojabkm.com.br/). A primeira versão do código desta entrega é `f6bc10f56220a99c3ba4e8952bfccf892ebf52a3`, com [CI aprovada](https://github.com/zKaminise/BKM-TCG/actions/runs/40585602375) e publicação Vercel principal/sandbox concluída. O complemento de testes do componente de senha foi executado depois, mantendo o código de produção idêntico.
+
+A conferência externa confirmou política 9–14, Google e e-mail habilitados, Mercado Pago em produção apto a cobranças, ambos administradores com acesso HTTP 200 e permissões ADMIN, nacional desligado e retirada/local ativos. Os arquivos públicos correspondem às fontes enviadas, ignorando somente CRLF/LF. Rotas privadas retornam 401 sem sessão. O sandbox permanece `staging`, sem cobranças reais. A pesquisa automática por `166/165` mostrou Bulbasaur e referência Cardmarket EUR na página publicada, sem gravar um novo exemplar na coleção principal.
+
+As 43 tabelas públicas continuam com RLS habilitado e não foram encontrados grants de navegador nas tabelas pessoais; os anúncios e coleções existentes foram preservados. ZIP de fonte gerado diretamente do Git, sem bancos, backups ou `.env` privado.
 
 ## Limites e prova operacional que ainda falta
 
