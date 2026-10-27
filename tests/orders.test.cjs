@@ -28,8 +28,8 @@ for(const engine of ['sqlite','postgres']) test(`checkout demonstrativo persiste
   const adminId=crypto.randomUUID(),stamp=new Date().toISOString();
   await db.prepare("INSERT INTO users(id,email,name,password_hash,role,created_at) VALUES(?,?,?,?,'ADMIN',?)").run(adminId,'admin@example.test','Administrador',await hashPassword('admin-test-password'),stamp);
   assert.equal((await admin.call('/api/auth/login',{method:'POST',body:{email:'admin@example.test',password:'admin-test-password'}})).status,200);
-  assert.equal((await customer.call('/api/auth/register',{method:'POST',body:{name:'Cliente Demo',email:'cliente@example.test',password:'customer-test-password'}})).status,201);
-  assert.equal((await other.call('/api/auth/register',{method:'POST',body:{name:'Outro',email:'outro@example.test',password:'another-test-password'}})).status,201);
+  assert.equal((await customer.call('/api/auth/register',{method:'POST',body:{name:'Cliente Demo',email:'cliente@example.test',password:'Customer1234'}})).status,201);
+  assert.equal((await other.call('/api/auth/register',{method:'POST',body:{name:'Outro',email:'outro@example.test',password:'Another1234'}})).status,201);
   const settings={shipping:{enabled:true,flatRateCents:1500,estimatedDays:5,freeShippingEnabled:true,freeShippingThresholdCents:15000,regions:[{start:'01000000',end:'99999999'}]},categories:['Booster'],banners:[{title:'Demonstração',subtitle:'Sem vendas reais',image:'/assets/pack.webp',url:'/lacrados',active:true}]};
   assert.equal((await admin.call('/api/admin/settings',{method:'PUT',body:settings})).status,200);
   const productInput={kind:'SEALED',name:'Booster de teste',slug:'booster-teste',sku:'DEMO-TESTE',description:'Unidades fictícias.',setId:'demo-set',setName:'Coleção Demo',images:[{url:'/assets/pack.webp',kind:'reference'}],published:true,featured:true,variants:[{language:'pt',condition:'SEALED',finish:'NORMAL',priceCents:10000,stock:1}]};
@@ -90,9 +90,9 @@ for(const engine of ['sqlite','postgres']) test(`checkout demonstrativo persiste
     const emails=await admin.call('/api/admin/emails');assert.equal(emails.status,200,JSON.stringify(emails.data));assert.ok(emails.data.items.length>=3);assert.ok(emails.data.items.some(x=>x.template==='order-confirmation'));assert.ok(!JSON.stringify(emails.data).includes('password-test'));
     const record=await db.prepare("SELECT payload_json FROM email_outbox WHERE payload_json LIKE '%password-reset%' ORDER BY created_at DESC LIMIT 1").get(),message=JSON.parse(record.payload_json),token=new URL(message.data.resetUrl).searchParams.get('token');
     assert.ok(token);assert.ok(!JSON.stringify(emails.data).includes(token));
-    const resetPassword=await other.call('/api/auth/reset-password',{method:'POST',body:{token,password:'new-customer-password'}});assert.equal(resetPassword.status,200,JSON.stringify(resetPassword.data));
+    const resetPassword=await other.call('/api/auth/reset-password',{method:'POST',body:{token,password:'NewBuyer1234'}});assert.equal(resetPassword.status,200,JSON.stringify(resetPassword.data));
     assert.equal((await customer.call('/api/account/orders')).status,401);
-    assert.equal((await other.call('/api/auth/reset-password',{method:'POST',body:{token,password:'another-new-password'}})).status,422);
+    assert.equal((await other.call('/api/auth/reset-password',{method:'POST',body:{token,password:'OtherNew1234'}})).status,422);
   });
   if(engine==='postgres') await t.test('migrations PostgreSQL idempotentes e tabelas protegidas por RLS',async()=>{
     const migrations=await db.prepare('SELECT version FROM bkm_migrations ORDER BY version').all();assert.deepEqual(migrations.map(x=>x.version),[1,2,3,4,5,6,7,8,9]);

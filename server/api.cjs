@@ -4,12 +4,13 @@ const crypto = require("node:crypto");
 const { defaultSettings } = require("./db.cjs");
 const { openStore } = require("./store.cjs");
 const { hashPassword, verifyPassword, hashToken, publicUser } = require("./auth.cjs");
+const {PASSWORD_POLICY,assertPassword,assertPasswordConfirmation}=require('./password-policy.cjs');
 const { accountList } = require("./accounts.cjs");
 const { PaymentError, paymentReadiness } = require("./payments.cjs");
 const { allowedOrigins, safeReturnPath } = require('./domain-policy.cjs');
 const { EMAIL_JOB_PATH, emailJobAuthorized, createEmailJob } = require('./email-job.cjs');
 const { COMMERCE_JOB_PATH, createCommerceJob } = require('./commerce-job.cjs');
-const {shippingSettings,validateShippingSettings,hasConfiguredShipping,createShippingPolicy,REGION_STATES}=require('./shipping-policy.cjs');
+const {shippingSettings,validateShippingSettings,hasConfiguredShipping,createShippingPolicy,publicShippingSettings,REGION_STATES}=require('./shipping-policy.cjs');
 const uid = () => crypto.randomUUID();
 const now = () => (/* @__PURE__ */ new Date()).toISOString();
 const normalized = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\b0+(?=\d)/g, "");
@@ -132,7 +133,7 @@ function createApi(options = {}) {
     s.google=google.readiness();
     const payment = paymentReadiness(effectiveEnv);
     const available=payment.enabled && (demoPayments || !s.demoDataVersion);
-    return { ...s, freeShippingThresholdCents: s.shipping.freeShippingEnabled ? s.shipping.freeShippingThresholdCents : null, environment: effectiveEnv.BKM_ENVIRONMENT || 'unconfigured',demo,paymentConfigured:available, shippingConfigured:hasConfiguredShipping(s.shipping,{production:effectiveEnv.BKM_ENVIRONMENT==='production'}), payments:{available,provider:payment.provider,environment:payment.environment,demo:payment.demo,canCharge:available && payment.canCharge,reason:!demo && s.demoDataVersion?'O banco demonstrativo não aceita cobranças externas.':payment.reason,...(available && payment.provider==='mercadopago'?{publicKey:effectiveEnv.MERCADO_PAGO_PUBLIC_KEY}:{})} };
+    return { ...s, shipping:publicShippingSettings(s.shipping), passwordPolicy:PASSWORD_POLICY, freeShippingThresholdCents: s.shipping.freeShippingEnabled ? s.shipping.freeShippingThresholdCents : null, environment: effectiveEnv.BKM_ENVIRONMENT || 'unconfigured',demo,paymentConfigured:available, shippingConfigured:hasConfiguredShipping(s.shipping,{production:effectiveEnv.BKM_ENVIRONMENT==='production'}), payments:{available,provider:payment.provider,environment:payment.environment,demo:payment.demo,canCharge:available && payment.canCharge,reason:!demo && s.demoDataVersion?'O banco demonstrativo não aceita cobranças externas.':payment.reason,...(available && payment.provider==='mercadopago'?{publicKey:effectiveEnv.MERCADO_PAGO_PUBLIC_KEY}:{})} };
   }
   function limit(req, scope, max, windowMs = 15 * 60 * 1e3) {
     const key = `${req.socket?.remoteAddress || "serverless"}:${scope}`;
@@ -507,7 +508,7 @@ function createApi(options = {}) {
         const email = text(data.email, "email", 254, true).toLowerCase(), password = typeof data.password === "string" ? data.password : "";
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail("VALIDATION", "Informe um e-mail válido.");
         const registering = pathname.endsWith('/register');
-        if (registering && (password.length < 12 || password.length > 128)) fail("VALIDATION", "A senha deve ter entre 12 e 128 caracteres.");
+        if (registering) {assertPassword(password,message=>fail('VALIDATION',message));assertPasswordConfirmation(password,data.confirmPassword,message=>fail('VALIDATION',message));}
         if (!registering && (!password.length || password.length > 128)) throw new ApiError(401, "INVALID_CREDENTIALS", "E-mail ou senha incorretos.");
         let user = (await db.prepare("SELECT * FROM users WHERE email=?").get(email));
         if (registering) {
@@ -520,8 +521,7 @@ function createApi(options = {}) {
           return respond(201, await newSession(res, id, session));
         }
         const valid = await verifyPassword(password, user?.password_hash || dummyPassword);
-        const minimum = demo && user?.role === 'ADMIN' ? 8 : 12;
-        if (!user || !valid || password.length < minimum) throw new ApiError(401, "INVALID_CREDENTIALS", "E-mail ou senha incorretos.");
+        if (!user || !valid) throw new ApiError(401, "INVALID_CREDENTIALS", "E-mail ou senha incorretos.");
         return respond(200, await newSession(res, user.id, session));
       }
       if (method === "POST" && pathname === "/api/auth/logout") {
@@ -547,7 +547,8 @@ function createApi(options = {}) {
       if(method==='POST' && pathname==='/api/auth/reset-password') {
         limit(req,'reset',10);
         const data=await readJson(req),token=text(data.token,'token',100,true),password=typeof data.password==='string'?data.password:'';
-        if(password.length<12 || password.length>128) fail('VALIDATION','A senha deve ter entre 12 e 128 caracteres.');
+        assertPassword(password,message=>fail('VALIDATION',message));
+        assertPasswordConfirmation(password,data.confirmPassword,message=>fail('VALIDATION',message));
         const passwordHash=await hashPassword(password);
         await db.transaction(async()=>{
           const row=await db.prepare('SELECT * FROM password_resets WHERE token_hash=?'+db.lockSuffix).get(hashToken(token));
@@ -648,7 +649,7 @@ function createApi(options = {}) {
         if(pathname==='/api/admin/integrations' && method==='GET') {
           const counts=await db.prepare("SELECT COUNT(*) count FROM personal_wishlist WHERE enabled=1").get();
           const storeSettings=await settings(),configured=hasConfiguredShipping(storeSettings.shipping,{production:effectiveEnv.BKM_ENVIRONMENT==='production'});
-          return respond(200,{google:google.readiness(),email:require('./email.cjs').emailReadiness(effectiveEnv),payments:paymentReadiness(effectiveEnv),publicUrl,prices:{provider:'admin_manual',automatic:false,reason:'Referências manuais autorizadas em BRL; integração automática Liga pendente de autorização.'},wishlist:{subscriptions:counts.count},abandonedCart:{enabled:false},shipping:{provider:'store_regional',environment:effectiveEnv.BKM_ENVIRONMENT,configured,enabled:configured,mode:'regional_rates_manual_fulfillment',reason:configured?'Tarifas e modalidades definidas pela loja; postagem e rastreio registrados pela administração.':'Configure tarifas regionais, retirada ou entrega local antes de aceitar pedidos.',carrierIntegration:require('./shipping-provider.cjs').shippingReadiness(effectiveEnv)}});
+          return respond(200,{google:google.readiness(),email:require('./email.cjs').emailReadiness(effectiveEnv),payments:paymentReadiness(effectiveEnv),publicUrl,prices:{provider:'admin_manual',automatic:false,automaticBrazilian:false,automaticInternational:true,international:{provider:'tcgdex',currencies:['EUR','USD'],conditionAdjusted:false},reason:'TCGdex automático em EUR/USD, sem ajuste por conservação ou idioma de mercado. Referências em BRL continuam manuais; integração brasileira automática pendente de fonte autorizada.'},wishlist:{subscriptions:counts.count},abandonedCart:{enabled:false},shipping:{provider:'store_regional',environment:effectiveEnv.BKM_ENVIRONMENT,configured,enabled:configured,mode:'regional_rates_manual_fulfillment',reason:configured?'Tarifas e modalidades definidas pela loja; postagem e rastreio registrados pela administração.':'Configure tarifas regionais, retirada ou entrega local antes de aceitar pedidos.',carrierIntegration:require('./shipping-provider.cjs').shippingReadiness(effectiveEnv)}});
         }
         if(pathname==='/api/admin/collections' && method==='GET') return respond(200,await collections.list(query));
         if(pathname==='/api/admin/collections' && method==='POST') return respond(201,await collections.save(await readJson(req),user));

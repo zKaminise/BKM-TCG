@@ -5,6 +5,7 @@ const fs = require('node:fs');
 require('../server/env.cjs').loadProjectEnvFile(path.resolve(__dirname,'../.env'));
 const { openStore } = require("../server/store.cjs");
 const { hashPassword } = require("../server/auth.cjs");
+const {PASSWORD_POLICY,assertPassword}=require('../server/password-policy.cjs');
 async function readVisible(prompt) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -57,9 +58,8 @@ async function readSecret(prompt) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 || !name || name.length > 120) throw new Error('Uso: npm run admin:create -- --email seu@email.com --name "Seu nome". A senha será solicitada sem exibição.');
   const demo = args.includes('--demo');
   if (demo && process.env.BKM_ENVIRONMENT !== 'demo') throw new Error('--demo exige BKM_ENVIRONMENT=demo em um banco dedicado de demonstração.');
-  const minimum = demo ? 8 : 12;
-  const password = await readSecret(`Senha do administrador (mínimo ${minimum} caracteres): `);
-  if (password.length < minimum || password.length > 128) throw new Error(`A senha deve ter entre ${minimum} e 128 caracteres.`);
+  const password = await readSecret(`Senha do administrador. ${PASSWORD_POLICY.instruction}\nSenha: `);
+  assertPassword(password,message=>{throw new Error(message);});
   if (process.stdin.isTTY) {
     const confirmation = await readSecret("Confirme a senha: ");
     if (confirmation !== password) throw new Error("As senhas não coincidem.");

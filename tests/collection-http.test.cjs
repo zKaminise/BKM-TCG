@@ -21,7 +21,7 @@ async function fixture(t){
       return {status:response.status,headers:response.headers,body};
     }
     async init(){assert.equal((await this.call('/api/session')).status,200);return this;}
-    async register(email){await this.init();assert.equal((await this.call('/api/auth/register','POST',{name:'Colecionador HTTP',email,password:'collection-http-test-password'})).status,201);return this;}
+    async register(email){await this.init();assert.equal((await this.call('/api/auth/register','POST',{name:'Colecionador HTTP',email,password:'Collect12345'})).status,201);return this;}
   }
   return {server,base,Client};
 }
@@ -48,7 +48,7 @@ test('Minha Coleção HTTP: sessão, CSRF, transação, replay, isolamento, excl
   assert.equal((await a.call(baseRoute+'/'+id,'DELETE',{confirmation:'EXCLUIR'})).status,200);
   assert.equal((await a.call(baseRoute)).body.total,2);
   assert.equal((await a.call('/api/auth/logout','POST',{})).status,200);await a.init();
-  assert.equal((await a.call('/api/auth/login','POST',{email:'collection-http-a@example.invalid',password:'collection-http-test-password'})).status,200);
+  assert.equal((await a.call('/api/auth/login','POST',{email:'collection-http-a@example.invalid',password:'Collect12345'})).status,200);
   assert.equal((await a.call(baseRoute)).body.total,2);
   assert.equal((await b.call(baseRoute)).body.total,0);
 });

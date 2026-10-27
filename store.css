@@ -1,4 +1,6 @@
 @import url("/collection.css");
+@import url("/password-ui.css");
+@import url("/shipping-admin.css");
 /* BKM storefront. The animation keeps its own layout and controls. */
 /* Apply the URL's layout before module downloads and API initialization finish. */
 .shop-bootstrap-page .experience,.shop-bootstrap-page .header-link,.shop-bootstrap-page #footer-replay{display:none!important}.shop-bootstrap-page main{min-height:65vh}.shop-bootstrap-page #storefront:empty::before{content:"Abrindo a loja…";display:flex;align-items:center;justify-content:center;min-height:45vh;color:var(--muted);font-size:12px;padding:30px}

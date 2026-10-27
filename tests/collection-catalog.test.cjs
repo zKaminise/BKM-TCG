@@ -50,6 +50,18 @@ test('busca extrai número, nome e denominador sem tratar número como identidad
   assert.equal(asset('https://assets.tcgdex.net/en/abc/1?token=x'),'');
 });
 
+test('live catalogue resolves progressive number/denominator input and snapshots native market data in the daily cache',async t=>{
+  const f=await fixture(t);f.cards[0].pricing={cardmarket:{unit:'EUR',updated:'2026-10-26T22:54:32Z',trend:64.95},tcgplayer:{unit:'USD',updated:'2026-10-14T22:55:09Z',holofoil:{marketPrice:61.17}}};
+  for(const q of['1','16','166','166/','166/1','166/16','166/165'])assert.ok((await f.service.search(new URLSearchParams({q,live:'1'}))).items.some(row=>row.id==='spring1-166'),q);
+  assert.equal((await f.q('q=16')).total,0);assert.equal((await f.q('q=166%2F16')).total,0);
+  const first=await f.service.card('spring1-166','spring1','pt');assert.equal(first.marketData.references[0].valueCents,6495);assert.equal(first.marketData.references[1].stale,true);
+  const before=f.calls.filter(url=>url.endsWith('/cards/spring1-166')).length;
+  await f.service.marketForItems([{kind:'CARD',cardId:first.id,setId:first.setId,referenceLanguage:'pt',card:first}]);assert.equal(f.calls.filter(url=>url.endsWith('/cards/spring1-166')).length,before);
+  f.advance(86400001);f.cards[0].pricing.cardmarket.trend=70;f.cards[0].pricing.cardmarket.updated='2026-10-28T11:00:00Z';
+  const refreshed=await f.service.marketForItems([{kind:'CARD',cardId:first.id,setId:first.setId,referenceLanguage:'pt',card:first}]);assert.equal(refreshed.get('pt|spring1-166').references[0].valueCents,7000);assert.equal(f.calls.filter(url=>url.endsWith('/cards/spring1-166')).length,before+1);
+  const saved=await f.db.prepare('SELECT payload_json,expires_at,fetched_at FROM personal_reference_cache WHERE cache_key=?').get('card:pt:spring1-166');assert.equal(JSON.parse(saved.payload_json).pricing.cardmarket.trend,70);assert.equal(saved.expires_at-saved.fetched_at,86400000);
+});
+
 test('catálogo resolve colisões, aliases, ID, número local e Unicode com dados do transporte',async t=>{
   const f=await fixture(t);
   const matches=await f.q('q=166%2F165&language=pt');

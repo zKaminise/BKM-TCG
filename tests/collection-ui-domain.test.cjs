@@ -34,3 +34,12 @@ test('bulk cost form changes only explicit fields: date-only preserves known cos
   assert.deepEqual(build({ids:['alice-1'],costTouched:true,paidCents:0}),{action:'cost',ids:['alice-1'],paidCents:0,mode:'unit'});
   assert.deepEqual(build({ids:['alice-1'],costTouched:true,paidCents:10000,mode:'total',changeDate:true,acquiredAt:'2026-10-20'}),{action:'cost',ids:['alice-1'],paidCents:10000,mode:'total',acquiredAt:'2026-10-20'});
 });
+
+test('live catalogue search runs on the latest keystroke without submit and cancels timers on route changes',async()=>{
+  const {createCollectionSearchScheduler}=await domain();let id=0,query='',calls=[];const timers=new Map();
+  const scheduler=createCollectionSearchScheduler(()=>calls.push(query),{setTimer:fn=>{timers.set(++id,fn);return id;},clearTimer:key=>timers.delete(key)});
+  for(const value of['1','16','166','166/','166/1','166/165']){query=value;scheduler.schedule();assert.equal(timers.size,1);}
+  assert.equal(calls.length,0);for(const fn of timers.values())fn();timers.clear();assert.deepEqual(calls,['166/165']);
+  query='Bulbasaur';scheduler.schedule();scheduler.flush();assert.deepEqual(calls,['166/165','Bulbasaur']);assert.equal(timers.size,0);
+  scheduler.schedule();scheduler.dispose();assert.equal(timers.size,0);scheduler.schedule();assert.equal(timers.size,0);
+});

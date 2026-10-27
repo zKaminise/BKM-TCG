@@ -11,10 +11,10 @@ const { openDatabase } = require('../server/db.cjs');
 const { hashPassword, verifyPassword } = require('../server/auth.cjs');
 const { testEnvironment } = require('../scripts/test-env.cjs');
 
-test('bootstrap de senha curta exige --demo explícito e ambiente demo, sem divulgar o segredo', async () => {
+test('bootstrap aplica 9 a 14 caracteres e composição também em demo, sem divulgar o segredo', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bkm-demo-admin-'));
-  const filename = path.join(dir, 'demo.sqlite'), password = crypto.randomBytes(6).toString('base64url');
-  const run = (environment, args = []) => new Promise((resolve, reject) => {
+  const filename = path.join(dir, 'demo.sqlite'), password = 'Admin1234';
+  const run = (environment, args = [], suppliedPassword=password) => new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.resolve(__dirname, '../scripts/create-admin.cjs'), '--email', 'demo-admin@example.test', '--name', 'Admin de teste', ...args], {
       env: testEnvironment(process.env, { BKM_DB_PATH: filename, BKM_ENVIRONMENT: environment }), stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -23,10 +23,14 @@ test('bootstrap de senha curta exige --demo explícito e ambiente demo, sem divu
     child.stderr.on('data', chunk => output += chunk);
     child.on('error', reject);
     child.on('close', code => resolve({ code, output }));
-    child.stdin.end(password + '\n');
+    child.stdin.end(suppliedPassword + '\n');
   });
   try {
-    for (const [environment, args] of [['demo', []], ['production', ['--demo']], ['staging', ['--demo']]]) {
+    for (const environment of ['demo','staging','production']) {
+      const rejected=await run(environment,[],'Admin123');
+      assert.notEqual(rejected.code,0);assert.ok(!rejected.output.includes('Admin123'));
+    }
+    for (const [environment, args] of [['production', ['--demo']], ['staging', ['--demo']]]) {
       const result = await run(environment, args);
       assert.notEqual(result.code, 0);
       assert.ok(!result.output.includes(password));
@@ -45,7 +49,7 @@ test('bootstrap de senha curta exige --demo explícito e ambiente demo, sem divu
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('login de admin demo aceita senha de oito caracteres sem reduzir cadastro, cliente ou produção', async t => {
+test('senhas legadas de oito caracteres autenticam admin e cliente em todos os ambientes; novo cadastro continua protegido', async t => {
   const password = crypto.randomBytes(6).toString('base64url');
   for (const environment of ['demo', 'staging', 'production']) await t.test(environment, async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bkm-demo-login-'));
@@ -60,12 +64,11 @@ test('login de admin demo aceita senha de oito caracteres sem reduzir cadastro, 
     const post = (route, body) => fetch(base + route, { method: 'POST', headers: { cookie, 'content-type': 'application/json', 'x-csrf-token': csrfToken }, body: JSON.stringify(body) });
     try {
       const login = await post('/api/auth/login', { email: 'admin@example.test', password });
-      assert.equal(login.status, environment === 'demo' ? 200 : 401);
+      assert.equal(login.status, 200);
       if (login.status === 200) assert.equal((await login.json()).user.role, 'ADMIN');
       // The successful login rotated the anonymous cookie; use a fresh anonymous session.
-      const next = await fetch(base + '/api/session'), fresh = await next.json();
-      const freshPost = (route, body) => fetch(base + route, { method: 'POST', headers: { cookie: next.headers.get('set-cookie').split(';')[0], 'content-type': 'application/json', 'x-csrf-token': fresh.csrfToken }, body: JSON.stringify(body) });
-      assert.equal((await freshPost('/api/auth/login', { email: 'customer@example.test', password })).status, 401);
+      const freshPost = async(route, body) => {const next=await fetch(base+'/api/session'),fresh=await next.json();return fetch(base + route, { method: 'POST', headers: { cookie: next.headers.get('set-cookie').split(';')[0], 'content-type': 'application/json', 'x-csrf-token': fresh.csrfToken }, body: JSON.stringify(body) });};
+      assert.equal((await freshPost('/api/auth/login', { email: 'customer@example.test', password })).status, 200);
       assert.equal((await freshPost('/api/auth/register', { email: 'new@example.test', name: 'Nova conta', password, role: 'ADMIN' })).status, 422);
     } finally {
       server.closeAllConnections(); await new Promise(resolve => server.close(resolve));

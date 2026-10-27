@@ -22,7 +22,7 @@ test('cadastro oficial mantém CSRF; endereços e senha pertencem somente ao usu
       const data=await res.json();if(data.csrfToken)this.csrf=data.csrfToken;
       return {status:res.status,data};
     }
-    async register(email){await this.call('/session');return this.call('/auth/register','POST',{email,name:'Teste privado',password:'test-long-password'},'https://www.lojabkm.com.br');}
+    async register(email){await this.call('/session');return this.call('/auth/register','POST',{email,name:'Teste privado',password:'Profile12345'},'https://www.lojabkm.com.br');}
   }
   const a=new Client(),b=new Client();
   assert.equal((await a.register('a@profile.test')).status,201);assert.equal((await b.register('b@profile.test')).status,201);
@@ -35,9 +35,9 @@ test('cadastro oficial mantém CSRF; endereços e senha pertencem somente ao usu
   assert.equal((await b.call('/account/addresses/'+id,'DELETE')).status,404);
   assert.equal((await a.call('/account/profile','PUT',{name:'Novo nome',phone:'11999999999'})).status,200);
   assert.equal((await a.call('/account/addresses')).data.items[0].id,id);
-  assert.equal((await a.call('/account/security/password','POST',{currentPassword:'wrong',password:'new-long-password'})).status,401);
-  const second=new Client();await second.call('/session');assert.equal((await second.call('/auth/login','POST',{email:'a@profile.test',password:'test-long-password'})).status,200);
-  assert.equal((await a.call('/account/security/password','POST',{currentPassword:'test-long-password',password:'new-long-password'})).status,200);
+  assert.equal((await a.call('/account/security/password','POST',{currentPassword:'wrong',password:'NewProfile123'})).status,401);
+  const second=new Client();await second.call('/session');assert.equal((await second.call('/auth/login','POST',{email:'a@profile.test',password:'Profile12345'})).status,200);
+  assert.equal((await a.call('/account/security/password','POST',{currentPassword:'Profile12345',password:'NewProfile123'})).status,200);
   assert.equal((await second.call('/account/addresses')).status,401);
   assert.equal((await a.call('/account/addresses')).status,200);
 });

@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const {passwordValidation}=require('../server/password-policy.cjs');
 const { parseEnv } = require('node:util');
 const ROOT = path.resolve(__dirname, '..');
 const MAIN_PROJECTS = new Set(['nxrvmanifngjmdtgnzoq', 'cxoeompxmgdzufgzxerw']);
@@ -115,15 +116,18 @@ function writePrivate(filename, value) {
   finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
 }
 
+const newLocalPassword=()=> 'A1'+crypto.randomBytes(9).toString('base64url');
 function createState(config, buyerEmail) {
   return { version: 1, project: config.project, seller: config.seller, baseUrl: config.baseUrl,
-    admin: { id: uuid(), email: 'homologacao-admin@bkm.invalid', password: crypto.randomBytes(32).toString('base64url') },
-    buyer: { email: buyerEmail.toLowerCase(), password: crypto.randomBytes(32).toString('base64url') },
+    admin: { id: uuid(), email: 'homologacao-admin@bkm.invalid', password: newLocalPassword() },
+    buyer: { email: buyerEmail.toLowerCase(), password: newLocalPassword() },
     cases: { pixApro: { idempotencyKey: uuid() }, pixPending: { idempotencyKey: uuid() } } };
 }
 function validateState(state, config, buyerEmail) {
   assert(state?.version === 1 && state.project === config.project && state.seller === config.seller && state.baseUrl === config.baseUrl && state.buyer?.email === buyerEmail.toLowerCase(), 'PRIVATE_CHECKPOINT_MISMATCH');
-  assert(/^[a-f0-9-]{36}$/.test(state.admin?.id || '') && state.admin.email === 'homologacao-admin@bkm.invalid' && [state.admin.password, state.buyer.password].every(value => /^[\w-]{43}$/.test(value || '')), 'PRIVATE_CHECKPOINT_INVALID');
+  // Existing checkpoints can authenticate their legacy accounts without forcing
+  // a password change. Only newly created local accounts use today's policy.
+  assert(/^[a-f0-9-]{36}$/.test(state.admin?.id || '') && state.admin.email === 'homologacao-admin@bkm.invalid' && [state.admin.password, state.buyer.password].every(value => passwordValidation(value).valid || /^[\w-]{43}$/.test(value || '')), 'PRIVATE_CHECKPOINT_INVALID');
   assert(Object.keys(state.cases || {}).sort().join() === 'pixApro,pixPending' && Object.values(state.cases).every(value => /^[a-f0-9-]{36}$/.test(value.idempotencyKey || '')) && state.cases.pixApro.idempotencyKey !== state.cases.pixPending.idempotencyKey, 'PRIVATE_CHECKPOINT_INVALID');
   return state;
 }
@@ -132,7 +136,11 @@ function fixtureProduct() {
   return { kind: 'SINGLE', name: 'HOMOLOGAÇÃO · Butterfree', slug: 'homologacao-mp-butterfree', sku: SKU, tcg: 'pokemon', setId: 'sv09', setName: 'Jornada Juntos', description: 'Produto fictício exclusivo para homologação financeira sandbox. Referência de carta Butterfree 003/159; sem venda ou envio real.', images: [], card: { name: 'Butterfree', number: '003', total: '159', provider: 'TCGdex', providerId: 'sv09-003', language: 'pt', hp: '130', type: 'Grass' }, variants: [{ language: 'pt', condition: 'NM', finish: 'NORMAL', priceCents: PRICE, stock: 2 }], published: true, featured: false };
 }
 function checkoutPayload(state, caseName) {
-  return { idempotencyKey: state.cases[caseName].idempotencyKey, items: [{ variantId: state.variantId, quantity: 1 }], contact: { name: 'Comprador de homologação', email: state.buyer.email, phone: '' }, address: { name: 'Comprador de homologação', street: 'Rua de Teste', number: '1', district: 'Teste', city: 'São Paulo', state: 'SP', zip: '01001000' }, payment: { provider: 'mercadopago', method: 'pix', payer: { email: state.buyer.email, ...(caseName === 'pixApro' ? { firstName: 'APRO' } : {}) } } };
+  return { idempotencyKey: state.cases[caseName].idempotencyKey, items: [{ variantId: state.variantId, quantity: 1 }], deliveryMode:'pickup', contact: { name: 'Comprador de homologação', email: state.buyer.email, phone: '' }, address: { name: 'Comprador de homologação', street: 'Rua de Teste', number: '1', district: 'Teste', city: 'Uberlândia', state: 'MG', zip: '38400100' }, payment: { provider: 'mercadopago', method: 'pix', payer: { email: state.buyer.email, ...(caseName === 'pixApro' ? { firstName: 'APRO' } : {}) } } };
+}
+function fixtureShippingSettings(){
+  // Dedicated sandbox only. No carrier rate, transit promise or real dispatch.
+  return {city:'Uberlândia',state:'MG',address:'',whatsapp:'5534999999999',shipping:{enabled:false,rateMode:'regional',freeShippingEnabled:false,freeShippingThresholdCents:null,regions:[],regionRates:Object.fromEntries(['N','NE','CO','SE','S'].map(id=>[id,{enabled:false}])),pickup:{enabled:true},localDelivery:{enabled:false,estimatedDays:null}}};
 }
 const orderKey = (userId, clientKey) => crypto.createHash('sha256').update(JSON.stringify([userId, clientKey])).digest('hex');
 
@@ -185,6 +193,7 @@ async function runHomologation(env, config, { stateFile = path.join(ROOT, '.env.
     const { hashPassword } = require('../server/auth.cjs');
     db = openStore({ env: { ...env, BKM_DB_POOL_SIZE: '1' } }); await db.ready;
     let data = await assertDedicatedData(db, state);
+    if(!data.users.some(user=>user.role==='ADMIN')&&!passwordValidation(state.admin.password).valid){state.admin.password=newLocalPassword();persist();}
     if (!data.users.some(user => user.role === 'ADMIN')) await db.transaction(async () => {
       await db.prepare('SELECT pg_advisory_xact_lock(164732092)').get();
       assert(Number((await db.prepare('SELECT COUNT(*) count FROM users').get()).count) === 0, 'FRESH_DATABASE_REQUIRED');
@@ -201,10 +210,11 @@ async function runHomologation(env, config, { stateFile = path.join(ROOT, '.env.
     assert(variant.language === 'pt' && variant.condition === 'NM' && variant.finish === 'NORMAL' && variant.priceCents === PRICE && Number.isInteger(variant.stock) && variant.stock >= 0 && variant.stock <= 2, 'FIXTURE_PRODUCT_CHANGED');
     if (state.variantId) assert(state.variantId === variant.id && state.productId === product.id, 'PRIVATE_CHECKPOINT_MISMATCH');
     state.variantId = variant.id; state.productId = product.id; persist();
-    await admin.checked('/api/admin/settings', 'PUT', { shipping: { enabled: true, flatRateCents: 0, estimatedDays: 0, freeShippingEnabled: false, freeShippingThresholdCents: null, regions: [{ start: '01000000', end: '99999999' }] } });
+    await admin.checked('/api/admin/settings', 'PUT', fixtureShippingSettings());
     const customer = new SiteClient(); await customer.init();
     data = await assertDedicatedData(db, state);
     const registered = data.users.find(user => user.role === 'CUSTOMER');
+    if(!registered&&!passwordValidation(state.buyer.password).valid){state.buyer.password=newLocalPassword();persist();}
     const account = await customer.checked(registered ? '/api/auth/login' : '/api/auth/register', 'POST', { email: state.buyer.email, password: state.buyer.password, name: 'Comprador de homologação' });
     state.buyer.id = account.user?.id; assert(state.buyer.id, 'CUSTOMER_SESSION_INVALID'); persist();
     for (const caseName of ['pixApro', 'pixPending']) {
@@ -284,4 +294,4 @@ async function main(args = process.argv.slice(2)) {
 }
 
 if (require.main === module) main().catch(error => { console.error(JSON.stringify({ result: 'REFUSED_OR_INCOMPLETE', code: /^[A-Z0-9_]{1,100}$/.test(error.code || '') ? error.code : 'HOMOLOGATION_FAILED' })); process.exitCode = 1; });
-module.exports = { parseArguments, validateSandboxEnv, assertTestSeller, assertRemoteConfig, verifyEnvironment, waitForApprovalAndWebhook, createState, validateState, fixtureProduct, checkoutPayload, assertDedicatedData, publicOrder };
+module.exports = { parseArguments, validateSandboxEnv, assertTestSeller, assertRemoteConfig, verifyEnvironment, waitForApprovalAndWebhook, createState, validateState, fixtureProduct, checkoutPayload, fixtureShippingSettings, assertDedicatedData, publicOrder };

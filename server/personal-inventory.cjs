@@ -1,8 +1,10 @@
 'use strict';
 
 // The enhanced collection uses personal_lots, the original private inventory.
-// Money is always integer BRL cents. Store products only supply identity snapshots.
+// Financial valuations use integer BRL cents; international references remain
+// separate native-currency metadata. Store products supply identity snapshots.
 const crypto = require('node:crypto');
+const {selectInternationalMarket,internationalTotals}=require('./tcgdex-market.cjs');
 const LANGUAGES = ['pt','en','ja','zh-tw','zh-cn','ko','es','fr','de','it','th','id'];
 const CONDITIONS = ['M','NM','SP','MP','HP','D','LP','DMG','SEALED','OPENED','CUSTOM'];
 const VARIANTS = ['NORMAL','HOLO','REVERSE','PROMO','FIRST_EDITION','POKE_BALL','MASTER_BALL','OTHER'];
@@ -79,11 +81,20 @@ function createPersonalInventory({db,ApiError,catalog,legacyPrices,preferences,n
       if(rowQuote&&rowQuote.set_id===item.setId&&Number.isSafeInteger(rowQuote.value_cents)&&rowQuote.value_cents>=0)quote={id:rowQuote.id,valueCents:rowQuote.value_cents,currency:'BRL',source:rowQuote.source,sourceLabel:rowQuote.source_label,sourceUrl:rowQuote.source_url,methodology:rowQuote.methodology,quotedAt:rowQuote.quoted_at,recordedAt:rowQuote.recorded_at,coverage:rowQuote.coverage,manual:rowQuote.methodology==='manual',market:rowQuote.methodology==='manual'?'manual_reference':'BR',language:item.language,condition:item.condition,variant:item.variant,attributes:[],match:'EXACT',stale:rowQuote.provider_stale===true||now()-Date.parse(rowQuote.quoted_at)>prefs.priceTtlDays*86400000};
     }
     item.valuation=quote;item.estimatedValueCents=quote&&!quote.stale?quote.valueCents:null;
+    item.marketData=item.card?.marketData||null;
+    item.internationalMarket=selectInternationalMarket(item.marketData,item,now());
     item.sale={...item.sale,realizedGainCents:item.sale.amountCents!=null&&item.sale.costCents!=null?item.sale.amountCents-item.sale.costCents:null};
     item.warnings=[];
     if(item.kind==='CARD'&&item.referenceLanguage!==item.language)item.warnings.push('Idioma físico informado por você. A imagem é uma referência em outro idioma; impressão e cotação não verificadas para este idioma.');
     if(item.card.variantInformed)item.warnings.push('Variante informada pelo usuário; não verificada no catálogo.');
     return item;
+  }
+  async function enrichMarket(items,{maxRefresh=8}={}) {
+    if(catalog.marketForItems){
+      const latest=await catalog.marketForItems(items,{maxRefresh});
+      for(const item of items){const data=latest.get(item.referenceLanguage+'|'+item.cardId)||item.marketData;if(data){item.marketData=data;item.internationalMarket=selectInternationalMarket(data,item,now());}}
+    }
+    return items;
   }
   async function validate(data,previous=null){
     if(!data||typeof data!=='object'||Array.isArray(data))fail('Item inválido.');
@@ -283,7 +294,7 @@ function createPersonalInventory({db,ApiError,catalog,legacyPrices,preferences,n
     const sortField=({default:'created_at',recent:'created_at',dex:dexExpr('filtered'),number:numberExpr('filtered'),set:labelExpr('filtered','set_name','setName'),rarity:labelExpr('filtered','rarity','rarity'),name:labelExpr('filtered','title','name'),acquired:'acquired_at',cost:'paid_cents',value:'quote_value'})[sort];
     const page=Math.max(1,Math.min(10000,Number.parseInt(query.get('page')||'1',10)||1)),pageSize=Math.max(1,Math.min(60,Number.parseInt(query.get('pageSize')||'24',10)||24));
     const counts=await db.prepare(filtered+' SELECT COUNT(*) count FROM filtered').get(...args),rows=await db.prepare(filtered+` SELECT * FROM filtered ORDER BY CASE WHEN ${sortField} IS NULL OR CAST(${sortField} AS TEXT)='' THEN 1 ELSE 0 END ASC,${sortField} ${dir},id ASC LIMIT ? OFFSET ?`).all(...args,pageSize,(page-1)*pageSize);
-    const context=await prices(userId),items=rows.map(row=>dto(row,context)),totals=await aggregateStats(userId,prefs);
+    const context=await prices(userId),items=await enrichMarket(rows.map(row=>dto(row,context))),totals=await aggregateStats(userId,prefs);
     const setLabel=labelExpr('personal_lots','set_name','setName');
     const facetRows=await db.prepare(`SELECT 'sets' facet,set_id value,MAX(${setLabel}) label FROM personal_lots WHERE user_id=? AND set_id<>'' GROUP BY set_id UNION ALL SELECT 'languages',language,language FROM personal_lots WHERE user_id=? GROUP BY language UNION ALL SELECT 'conditions',condition,condition FROM personal_lots WHERE user_id=? GROUP BY condition UNION ALL SELECT 'variants',variant,variant FROM personal_lots WHERE user_id=? GROUP BY variant UNION ALL SELECT 'rarities',${labelExpr('personal_lots','rarity','rarity')},${labelExpr('personal_lots','rarity','rarity')} FROM personal_lots WHERE user_id=? GROUP BY ${labelExpr('personal_lots','rarity','rarity')} UNION ALL SELECT 'kinds',kind,kind FROM personal_lots WHERE user_id=? GROUP BY kind`).all(userId,userId,userId,userId,userId,userId);
     const facets={sets:[],languages:[],conditions:[],variants:[],rarities:[],kinds:[]};for(const row of facetRows)if(row.value)facets[row.facet].push(row.facet==='sets'?{id:row.value,name:row.label||row.value}:row.value);
@@ -293,16 +304,21 @@ function createPersonalInventory({db,ApiError,catalog,legacyPrices,preferences,n
       const groupLabel=group==='set'?labelExpr('filtered','set_name','setName'):groupExpr;
       groups=(await db.prepare(filtered+` SELECT ${groupExpr} group_key,MAX(${groupLabel}) group_label,SUM(quantity) quantity,COALESCE(SUM(quote_value*quantity),0) estimated,SUM(CASE WHEN quote_value IS NOT NULL THEN quantity ELSE 0 END) valued FROM filtered GROUP BY ${groupExpr} ORDER BY ${groupExpr}`).all(...args)).map(row=>({key:group==='pokemon'&&/^\d+$/.test(row.group_key)?'dex-'+row.group_key:row.group_key||'unknown',label:group==='pokemon'&&/^\d+$/.test(row.group_key)?'Pokédex #'+row.group_key:group==='pokemon'&&row.group_key==='non-pokemon'?'Treinadores, energias e cartas sem Pokédex':row.group_label||'Sem informação',quantity:Number(row.quantity),estimatedValueCents:Number(row.estimated),knownValueQuantity:Number(row.valued)}));
     }
-    return {items,total:Number(counts.count),page,pageSize,totals,facets,groups,currency:'BRL',priceProviders:{automaticBrazilian:false,manual:true,message:'Sem integração automática com preços brasileiros. Referências manuais são identificadas e só valem para a identidade registrada.'}};
+    return {items,total:Number(counts.count),page,pageSize,totals,facets,groups,currency:'BRL',internationalTotals:internationalTotals(items),internationalScope:'page',priceProviders:{automaticBrazilian:false,automaticInternational:true,manual:true,message:'Referências internacionais automáticas da TCGdex em EUR/USD, sem ajuste por conservação ou idioma. Valores em BRL continuam separados e identificados; não há cotação automática brasileira.'}};
   }
   async function stats(userId){return aggregateStats(userId,await preferences(userId));}
   async function handle(userId,method,route,data,query){
     if(route==='/inventory'&&method==='GET')return {status:200,data:await list(userId,query)};
+    if(route==='/inventory/market-refresh'&&method==='POST'){
+      if(!Array.isArray(data.ids)||!data.ids.length||data.ids.length>24)fail('Escolha de 1 a 24 itens para consultar as referências.');
+      const rows=await selected(userId,data.ids),context=await prices(userId),items=await enrichMarket(rows.map(row=>dto(row,context)),{maxRefresh:24});
+      return {status:200,data:{items,internationalTotals:internationalTotals(items),cachePolicy:'daily',message:'Referências consultadas com cache diário. A conservação e o idioma de mercado não são informados pelo provedor.'}};
+    }
     if(route==='/inventory/batch'&&method==='POST')return {status:201,data:await createBatch(userId,data)};
     if(route==='/inventory/bulk'&&method==='POST')return {status:200,data:await bulk(userId,data)};
     if(route==='/inventory/events'&&method==='GET')return {status:200,data:await events(userId,query)};
     const match=route.match(/^\/inventory\/([-\w]+)$/);if(!match)return null;
-    if(method==='GET'){const row=await owned(userId,match[1]);return {status:200,data:{item:dto(row,await prices(userId)),events:(await events(userId,new URLSearchParams({itemId:row.id,pageSize:'60'}))).items}};}
+    if(method==='GET'){const row=await owned(userId,match[1]),[item]=await enrichMarket([dto(row,await prices(userId))],{maxRefresh:1});return {status:200,data:{item,events:(await events(userId,new URLSearchParams({itemId:row.id,pageSize:'60'}))).items}};}
     if(method==='PUT')return {status:200,data:await edit(userId,match[1],data)};
     if(method==='DELETE')return {status:200,data:await remove(userId,match[1],data)};
     return null;

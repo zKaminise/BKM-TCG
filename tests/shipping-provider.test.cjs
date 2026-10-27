@@ -20,6 +20,16 @@ test('money conversion rejects imprecise or non-BRL-looking numeric input',()=>{
   assert.equal(brlToCents('0.01'),1);assert.equal(brlToCents('10.1'),1010);assert.equal(brlToCents(2.3),230);
   for(const value of ['1,23','1e2','-1','1.005',NaN,Infinity,'001.00',{},1000001])assert.throws(()=>brlToCents(value),{code:'SHIPPING_INVALID_RESPONSE'});
 });
+test('packed volumes quote real package totals, not per-card quantities, without purchasing labels',async()=>{
+  let payload;const p=createShippingProvider({env,fetchImpl:async(url,options)=>{payload=JSON.parse(options.body);return json([valid]);}});
+  const result=await p.quote({zip:'20040002',volumes:[{weightGrams:250,widthCm:12,heightCm:3,lengthCm:17,insuranceValueCents:4500}]});
+  assert.deepEqual(payload.volumes,[{weight:.25,width:12,height:3,length:17,insurance_value:45}]);assert.equal(payload.products,undefined);assert.equal(result.purchasesEnabled,false);assert.equal(p.readiness().productionSupported,false);assert.equal(p.readiness().checkoutIntegrated,false);
+});
+test('packed volume validation rejects mixing products, missing values and unavailable sandbox responses',async()=>{
+  let calls=0;const p=createShippingProvider({env,fetchImpl:async()=>{calls++;return json([]);}}),volume={weightGrams:250,widthCm:12,heightCm:3,lengthCm:17,insuranceValueCents:4500};
+  for(const request of[{items:[item],volumes:[volume]},{volumes:[]},{volumes:[{...volume,weightGrams:null}]},{volumes:[{...volume,quantity:1}]},{volumes:[{...volume,insuranceValueCents:-1}]}])await assert.rejects(p.quote({zip:'20040002',...request}),{code:'SHIPPING_INVALID_INPUT'});
+  assert.equal(calls,0);const result=await p.quote({zip:'20040002',volumes:[volume]});assert.deepEqual(result.quotes,[]);assert.equal(result.environment,'sandbox');assert.equal(result.purchasesEnabled,false);
+});
 test('invalid CEP, dimensions, quantity, weight, prices or service cannot trigger network',async()=>{
   let calls=0;const p=createShippingProvider({env,fetchImpl:async()=>{calls++;return json([valid]);}});
   for(const request of [{zip:'http://127.0.0.1',items:[item]},{zip:'00000000',items:[item]},{zip:'20040002',items:[{...item,heightCm:0}]},{zip:'20040002',items:[{...item,weightGrams:0}]},{zip:'20040002',items:[{...item,quantity:1.5}]},{zip:'20040002',items:[{...item,priceCents:1.1}]},{zip:'20040002',items:[item,item]},{zip:'20040002',items:[item],services:['1']}])await assert.rejects(p.quote(request),{code:'SHIPPING_INVALID_INPUT'});assert.equal(calls,0);

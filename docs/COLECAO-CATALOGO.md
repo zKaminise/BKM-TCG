@@ -15,7 +15,7 @@ O provedor organiza Pokémon TCG Pocket na série `tcgp`. O adaptador usa essa r
 ## Cache e limites
 
 - Cache persistente de listas de cartas, expansões, séries e buscas auxiliares: **24 horas**.
-- Detalhes de carta: **7 dias**. Metadados essenciais também ficam no registro privado do exemplar; indisponibilidade externa não apaga o acervo.
+- Detalhes de carta e preços internacionais associados: **24 horas**. Metadados essenciais e a referência de preço coletada também ficam no registro privado do exemplar; indisponibilidade externa não apaga o acervo.
 - Cache de memória curto, limitado a 64 entradas; chamadas iguais em andamento são agrupadas.
 - Índice resumido fica no servidor. Na verificação, o índice português tinha 13.907 registros e cerca de 1,4 MB. O navegador recebe somente a página solicitada.
 - Máximo de 24 cartas por página, hidratação de detalhes com concorrência limitada a quatro chamadas e timeout por consulta externa de até 6,5 segundos, dentro de orçamento cooperativo de 40 segundos por operação. Nenhum polling ou cron de catálogo foi criado.
@@ -23,7 +23,7 @@ O provedor organiza Pokémon TCG Pocket na série `tcgp`. O adaptador usa essa r
 - Em consulta fria, falha transitória de rede/429/5xx recebe uma única repetição com espera de 200 ms, dentro do mesmo orçamento. Ausência de impressão (404) não é tratada como falha transitória. Havendo cache anterior, ele é devolvido sem prolongar a espera com repetições.
 - Na indisponibilidade da fonte, o cache anterior é devolvido com `stale` e data da coleta. Sem cache utilizável, há erro recuperável; os itens pessoais existentes permanecem salvos.
 
-`GET /api/account/collection/catalog/search` recebe `q`, `language`, `setId` (ou `set`), `page` e `pageSize`. Também aceita série, raridade e tipo. A resposta traz `items`, `total`, paginação, `sets`, `series`, fonte, data e avisos. `GET .../catalog/sealed` consulta somente metadados de produtos selados publicados e não arquivados, sem converter preço de venda da loja em cotação de mercado. Na ausência de produto catalogado, o cadastro manual continua disponível.
+`GET /api/account/collection/catalog/search` recebe `q`, `language`, `setId` (ou `set`), `page` e `pageSize`. Também aceita série, raridade e tipo. Com `live=1`, números e denominadores incompletos são pesquisados por prefixo: `16`, `166/` e `166/1` mantêm resultados pertinentes enquanto o usuário digita. Sem esse parâmetro, a pesquisa de número completo conserva a comparação exata. A interface pesquisa automaticamente após 250 ms, cancela respostas antigas, respeita composição de texto e mantém cache de um minuto para até 30 consultas desta tela. A resposta traz `items`, `total`, paginação, `sets`, `series`, fonte, data e avisos. `GET .../catalog/sealed` consulta somente metadados de produtos selados publicados e não arquivados, sem converter preço de venda da loja em cotação de mercado. Na ausência de produto catalogado, o cadastro manual continua disponível.
 
 ## Verificação real executada em 27/10/2026
 
@@ -47,7 +47,7 @@ As URLs das imagens de Bulbasaur e Squirtle responderam HTTP 200, `image/webp`. 
 
 **Não há integração automática com preços brasileiros da Liga Pokémon neste módulo.** Não foi fornecida ao projeto uma API/credencial/contrato autorizado dessa fonte. A pesquisa pública não localizou documentação oficial de API de preços; o acesso automatizado à página oficial consultada respondeu 403. Isso não demonstra que uma parceria seja impossível: significa que não existe integração autorizada comprovada disponível para implementar agora. Não foram contornados bloqueios, autenticação, captcha ou limites.
 
-O TCGdex documenta preços internacionais de **Cardmarket (EUR, Europa)** e **TCGplayer (USD, América do Norte)**. A documentação descreve atualização diária para Cardmarket e horária/diária para TCGplayer. Isso não comprova preço brasileiro nem equivalência de idioma/condição de cada exemplar. O adaptador de catálogo não transforma esses números em BRL e não os usa nos indicadores da coleção. A resposta normalizada não anuncia uma cotação automática (`valuation: null`).
+O TCGdex documenta preços internacionais de **Cardmarket (EUR, Europa)** e **TCGplayer (USD, América do Norte)**. A documentação descreve atualização diária para Cardmarket e horária/diária para TCGplayer. O adaptador agora consulta e exibe essas referências automaticamente na busca, detalhes, revisão e inventário, com fonte, moeda, data e acabamento quando identificável. Os totais internacionais da página são apresentados por fonte e moeda, separados dos indicadores em BRL. Isso não comprova preço brasileiro nem equivalência de idioma/condição de cada exemplar. `valuation` continua reservado à política BRL existente; `marketData` e `internationalMarket` contêm os dados estrangeiros. Ver [regras e validação da integração automática](TCGDEX-PRECOS-AUTOMATICOS.md).
 
 Valores privados informados pelo usuário permanecem identificados como manuais. A infraestrutura de preços autorizados existente na BKM mantém sua própria fonte, moeda, data e identidade; preços estrangeiros e valores desconhecidos não são misturados nos totais BRL.
 

@@ -5,6 +5,7 @@
 const crypto = require('node:crypto');
 const {AsyncLocalStorage}=require('node:async_hooks');
 const {setTimeout:pause}=require('node:timers/promises');
+const {normalizeTcgdexMarket}=require('./tcgdex-market.cjs');
 const ROOT = 'https://api.tcgdex.net/v2';
 const DAY = 86400000;
 const MAX_BYTES = 8 * 1024 * 1024;
@@ -34,6 +35,8 @@ function asset(value, size='high') {
 
 function parseSearch(value) {
   const original=text(value,160).normalize('NFKC').replace(/\s+/g,' ').trim();
+  const unfinished=original.match(/(?:^|\s)([a-zA-Z]{0,8}\d{1,8}[a-zA-Z]{0,4})\s*\/$/);
+  if(unfinished)return {original,name:normalize(original.replace(unfinished[0],' ')),number:normalizedNumber(unfinished[1]),printedTotal:null,fullNumber:true,partialNumber:true};
   const code=original.match(/(?:^|\s)([a-zA-Z]{0,8}\d{1,8}[a-zA-Z]{0,4})\s*\/\s*([a-zA-Z]{0,8}\d{1,8}[a-zA-Z]{0,4})(?=$|\s)/);
   if(code)return {original,name:normalize(original.replace(code[0],' ')),number:normalizedNumber(code[1]),printedTotal:normalizedNumber(code[2]),fullNumber:true};
   const number=original.match(/(?:^|\s)([a-zA-Z]{0,5}\d{1,7}[a-zA-Z]{0,3})$/);
@@ -42,7 +45,7 @@ function parseSearch(value) {
 }
 
 function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Date.now,timeoutMs=6500}={}) {
-  const flights=new Map(),hot=new Map(),budget=new AsyncLocalStorage();
+  const flights=new Map(),hot=new Map(),budget=new AsyncLocalStorage(),marketFailures=new Map();
   const bounded=fn=>budget.getStore()?fn():budget.run({deadline:Date.now()+40000},fn);
   const fail=(message,code='CATALOG_UNAVAILABLE',status=503)=>{throw new ApiError(status,code,message);};
   function language(value='pt') {
@@ -71,7 +74,7 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     if(flights.size>=32)fail('Há muitas consultas ao catálogo. Aguarde um instante.','CATALOG_BUSY',429);
     const flight=(async()=>{
       const row=await db.prepare('SELECT * FROM personal_reference_cache WHERE cache_key=?').get(key);
-      const saved=row?{data:JSON.parse(row.payload_json),stale:Number(row.expires_at)<=now(),fetchedAt:new Date(Number(row.fetched_at)).toISOString()}:null;
+      const saved=row?{data:JSON.parse(row.payload_json),stale:Number(row.expires_at)<=now()||now()-Number(row.fetched_at)>ttl,fetchedAt:new Date(Number(row.fetched_at)).toISOString()}:null;
       if(saved&&!saved.stale)return saved;
       try {
         let response;
@@ -130,7 +133,7 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     if(!image)warnings.push('O catálogo não dispõe de imagem nesta referência.');
     if(saved.stale)warnings.push('Metadados em cache: a fonte está temporariamente indisponível ou aguarda atualização.');
     const number=text(raw.localId||raw.number,40),total=integer(raw.set?.cardCount?.official)??set.officialCount;
-    return {id:raw.id,provider:'tcgdex',providerId:raw.id,canonicalId:`tcgdex:${lang}:${raw.id}`,tcg:'pokemon',kind:'CARD',name:text(raw.name)||raw.id,number,localNumber:number,total,printedTotal:total,displayNumber:total===null?number:`${number}/${total}`,setId:set.id,setName:set.name,setCode:set.setCode||set.id,series:set.series||'',seriesId:set.seriesId||'',rarity:text(raw.rarity,120),illustrator:text(raw.illustrator,160),dexNumbers:Array.isArray(raw.dexId)?[...new Set(raw.dexId.filter(value=>Number.isSafeInteger(value)&&value>0))].slice(0,20):[],category:text(raw.category,80),types:Array.isArray(raw.types)?raw.types.filter(value=>typeof value==='string').slice(0,8):[],image,imageSmall:small,imageLarge:image,imageKind:'reference',language:lang,referenceLanguage:lang,availableLanguages:[lang],languageCoverage:'Only the requested provider record is verified; other physical printings are not inferred.',variants,availableVariants,updatedAt:validDate(raw.updated)||saved.fetchedAt,fetchedAt:saved.fetchedAt,metadataStale:saved.stale,warnings,valuation:null};
+    return {id:raw.id,provider:'tcgdex',providerId:raw.id,canonicalId:`tcgdex:${lang}:${raw.id}`,tcg:'pokemon',kind:'CARD',name:text(raw.name)||raw.id,number,localNumber:number,total,printedTotal:total,displayNumber:total===null?number:`${number}/${total}`,setId:set.id,setName:set.name,setCode:set.setCode||set.id,series:set.series||'',seriesId:set.seriesId||'',rarity:text(raw.rarity,120),illustrator:text(raw.illustrator,160),dexNumbers:Array.isArray(raw.dexId)?[...new Set(raw.dexId.filter(value=>Number.isSafeInteger(value)&&value>0))].slice(0,20):[],category:text(raw.category,80),types:Array.isArray(raw.types)?raw.types.filter(value=>typeof value==='string').slice(0,8):[],image,imageSmall:small,imageLarge:image,imageKind:'reference',language:lang,referenceLanguage:lang,availableLanguages:[lang],languageCoverage:'Only the requested provider record is verified; other physical printings are not inferred.',variants,availableVariants,updatedAt:validDate(raw.updated)||saved.fetchedAt,fetchedAt:saved.fetchedAt,metadataStale:saved.stale,warnings,valuation:null,marketData:normalizeTcgdexMarket(raw,{language:lang,fetchedAt:saved.fetchedAt,now:now()})};
   }
   async function card(cardId,setId,lang='pt') {
     lang=language(lang);
@@ -138,7 +141,7 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     identity(cardId);identity(setId,'coleção');
     const set=await setDetail(setId,lang);
     if(!set.data.cards.some(row=>row.id===cardId))fail('A carta não pertence a esta coleção e idioma de referência.','CARD_NOT_FOUND',404);
-    const saved=await cached('card',lang,cardId,`cards/${encodeURIComponent(cardId)}`,{ttl:7*DAY});
+    const saved=await cached('card',lang,cardId,`cards/${encodeURIComponent(cardId)}`,{ttl:DAY});
     if(saved.data?.id!==cardId||saved.data.set?.id!==setId||!text(saved.data.name)||!text(saved.data.localId||saved.data.number))fail('Os dados de referência da carta não correspondem à coleção solicitada.','CARD_NOT_FOUND',404);
     return cardDto(saved.data,set.set,lang,{...saved,stale:saved.stale||set.stale});
   }
@@ -196,8 +199,9 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
       if(!brief||!ID.test(brief.id||'')||!text(brief.name)||!text(brief.localId||brief.number))continue;
       const setId=selectedSet||deriveSetId(brief,setMap),set=setMap.get(setId);if(!set)continue;
       const fullIdentity=brief.id===parsed.original;
-      const exactSet=matchingSets.has(setId),numberMatch=parsed.number&&normalizedNumber(brief.localId||brief.number)===parsed.number;
-      const totalMatch=!parsed.printedTotal||(set.officialCount!==null&&normalizedNumber(set.officialCount)===parsed.printedTotal);
+      const exactSet=matchingSets.has(setId),localNumber=normalizedNumber(brief.localId||brief.number),live=query.get('live')==='1';
+      const numberMatch=parsed.number&&(localNumber===parsed.number||live&&!parsed.fullNumber&&localNumber.startsWith(parsed.number));
+      const totalMatch=!parsed.printedTotal||(set.officialCount!==null&&(normalizedNumber(set.officialCount)===parsed.printedTotal||live&&normalizedNumber(set.officialCount).startsWith(parsed.printedTotal)));
       const nameMatch=nameTokens.length&&nameTokens.every(token=>normalize(brief.name).includes(token));
       let match=!parsed.original||fullIdentity;
       if(expansionSearch)match=exactSet;
@@ -245,7 +249,32 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     const items=rows.map(row=>{let images=[],attributes={};try{images=JSON.parse(row.images_json);attributes=JSON.parse(row.attributes_json);}catch{}const first=images?.[0],image=safeProductImage(typeof first==='string'?first:first?.url),rawCategory=text(attributes.itemType||attributes.category||attributes.productType,60),itemType=['BOOSTER','BLISTER','DECK','ETB','BOX','TIN','ACCESSORY'].includes(rawCategory.toUpperCase())?rawCategory.toUpperCase():null;return {id:row.id,sealedId:row.id,catalogSealedId:row.id,provider:'bkm',providerId:row.id,kind:'SEALED',name:row.name,title:row.name,setId:row.set_id,setName:row.set_name,category:rawCategory||'OTHER_SEALED',itemType,sku:row.sku,image,imageLarge:image,language:null,referenceLanguage:null,valuation:null};}).filter(row=>!q||normalize(row.name+' '+row.setName+' '+row.setId+' '+row.sku).includes(q));
     return {items:items.slice((page-1)*pageSize,page*pageSize),total:items.length,page,pageSize,hasMore:page*pageSize<items.length,source:'Catálogo BKM TCG',warnings:items.length?[]:['Nenhum selado catalogado corresponde à busca. Você pode cadastrar um selado manualmente, sem cotação automática.']};
   }
-  return {search:(...args)=>bounded(()=>search(...args)),card:(...args)=>bounded(()=>card(...args)),sealed,sets:(...args)=>bounded(()=>setsIndex(...args)),withBudget:bounded,clearMemoryCache(){hot.clear();}};
+  async function marketForItems(items,{maxRefresh=8}={}) {
+    const references=new Map();
+    for(const item of items){
+      if(item.kind!=='CARD')continue;
+      const lang=item.referenceLanguage||item.card?.referenceLanguage||item.language,cardId=item.cardId||item.card?.providerId,setId=item.setId||item.card?.setId;
+      if(!LANGUAGES.has(lang)||!ID.test(cardId||'')||!ID.test(setId||'')||!cardId.startsWith(setId+'-'))continue;
+      const key=lang+'|'+cardId;if(!references.has(key))references.set(key,{lang,cardId,setId,snapshot:item.card?.marketData||null});
+    }
+    const keys=[...references.values()].map(value=>'card:'+value.lang+':'+value.cardId),cachedRows=[];
+    for(let offset=0;offset<keys.length;offset+=100){const chunk=keys.slice(offset,offset+100);cachedRows.push(...await db.prepare('SELECT * FROM personal_reference_cache WHERE cache_key IN('+chunk.map(()=>'?').join(',')+')').all(...chunk));}
+    const existing=new Map(cachedRows.map(row=>[row.language+'|'+row.reference_id,row])),result=new Map(),due=[];
+    for(const[key,item]of references){
+      const row=existing.get(key);let raw;
+      try{raw=row?JSON.parse(row.payload_json):null;}catch{}
+      if(raw?.id===item.cardId&&raw.set?.id===item.setId)result.set(key,normalizeTcgdexMarket(raw,{language:item.lang,fetchedAt:new Date(Number(row.fetched_at)).toISOString(),now:now()}));
+      else if(item.snapshot)result.set(key,item.snapshot);
+      if((!row||now()-Number(row.fetched_at)>=DAY)&&(!marketFailures.has(key)||marketFailures.get(key)<now())&&due.length<Math.min(24,maxRefresh))due.push([key,item]);
+    }
+    await limitedMap(due,async([key,item])=>{
+      try{const saved=await cached('card',item.lang,item.cardId,'cards/'+encodeURIComponent(item.cardId),{ttl:DAY});if(saved.data?.id!==item.cardId||saved.data.set?.id!==item.setId)throw new Error('identity');result.set(key,normalizeTcgdexMarket(saved.data,{language:item.lang,fetchedAt:saved.fetchedAt,now:now()}));}
+      catch{marketFailures.set(key,now()+60000);}
+    });
+    while(marketFailures.size>200)marketFailures.delete(marketFailures.keys().next().value);
+    return result;
+  }
+  return {search:(...args)=>bounded(()=>search(...args)),card:(...args)=>bounded(()=>card(...args)),sealed,sets:(...args)=>bounded(()=>setsIndex(...args)),marketForItems:(...args)=>bounded(()=>marketForItems(...args)),withBudget:bounded,clearMemoryCache(){hot.clear();}};
 }
 
 module.exports={createCollectionCatalog,parseSearch,normalize,normalizedNumber,asset};

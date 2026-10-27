@@ -154,8 +154,8 @@ for(const engine of ['sqlite','postgres']) test(`Mercado Pago ligado à API, com
   const adminId=crypto.randomUUID(),stamp=new Date().toISOString();
   await db.prepare("INSERT INTO users(id,email,name,password_hash,role,created_at) VALUES(?,?,?,?,'ADMIN',?)").run(adminId,'admin@example.test','Administrador',await hashPassword('admin-test-password'),stamp);
   assert.equal((await admin.call('/api/auth/login',{method:'POST',body:{email:'admin@example.test',password:'admin-test-password'}})).status,200);
-  assert.equal((await customer.call('/api/auth/register',{method:'POST',body:{name:'Cliente',email:'buyer@testuser.com',password:'customer-test-password'}})).status,201);
-  assert.equal((await other.call('/api/auth/register',{method:'POST',body:{name:'Outro',email:'another@testuser.com',password:'another-test-password'}})).status,201);
+  assert.equal((await customer.call('/api/auth/register',{method:'POST',body:{name:'Cliente',email:'buyer@testuser.com',password:'Customer1234'}})).status,201);
+  assert.equal((await other.call('/api/auth/register',{method:'POST',body:{name:'Outro',email:'another@testuser.com',password:'Another1234'}})).status,201);
   assert.equal((await admin.call('/api/admin/settings',{method:'PUT',body:{shipping:{enabled:true,flatRateCents:1500,estimatedDays:5,freeShippingEnabled:false,freeShippingThresholdCents:null,regions:[]}}})).status,200);
   let product=(await admin.call('/api/admin/products',{method:'POST',body:{kind:'SEALED',name:'Booster de teste isolado',slug:'isolated-booster',sku:'MP-TEST-ISOLATED',description:'Somente fixture.',setId:'test-set',setName:'Teste',published:true,images:[{url:'/assets/pack.webp',kind:'reference'}],variants:[{language:'pt',condition:'SEALED',finish:'NORMAL',priceCents:10000,stock:1}]}})).data;
   assert.ok(product.id);

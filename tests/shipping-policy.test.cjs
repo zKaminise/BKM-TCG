@@ -5,7 +5,7 @@ const os=require('node:os');
 const path=require('node:path');
 const crypto=require('node:crypto');
 const {once}=require('node:events');
-const {shippingSettings,validateShippingSettings,createShippingPolicy,hasConfiguredShipping,REGION_STATES}=require('../server/shipping-policy.cjs');
+const {shippingSettings,validateShippingSettings,createShippingPolicy,hasConfiguredShipping,REGION_STATES,operationalShippingReadiness,publicShippingSettings}=require('../server/shipping-policy.cjs');
 class ApiError extends Error{constructor(status,code,message){super(message);Object.assign(this,{status,code});}}
 const destinations={
   '38400100':{cep:'38400-100',localidade:'Uberlândia',uf:'MG',ibge:'3170206',logradouro:'Avenida de teste',bairro:'Centro'},
@@ -16,8 +16,10 @@ const destinations={
   '90010000':{cep:'90010-000',localidade:'Porto Alegre',uf:'RS',ibge:'4314902'}
 };
 const transport=async url=>({ok:true,json:async()=>destinations[url.match(/ws\/(\d{8})/)[1]]||{erro:true}});
-const rates=Object.fromEntries(Object.keys(REGION_STATES).map((id,index)=>[id,{enabled:true,priceCents:1000+index*100,estimatedDays:10-index}]));
-const policySettings=()=>shippingSettings({enabled:true,rateMode:'regional',regionRates:rates,freeShippingEnabled:true,freeShippingThresholdCents:15000,pickup:{enabled:true},localDelivery:{enabled:true,estimatedDays:1}});
+// Entirely synthetic operational data, never published or sent to a carrier.
+const rates=Object.fromEntries(Object.keys(REGION_STATES).map((id,index)=>[id,{enabled:true,priceCents:1000+index*100,estimatedDays:10-index,carrier:'Transportadora de teste',serviceName:'Serviço de teste',validated:true,validatedAt:'2026-01-01',cepRanges:[]}]));
+const operation={origin:{zip:'38400100',street:'Rua de teste',number:'1',complement:'',district:'Centro',city:'Uberlândia',state:'MG'},packages:[{id:'fixture',name:'Embalagem de teste',active:true,weightGrams:200,widthCm:12,heightCm:3,lengthCm:17}],defaultPackageId:'fixture'};
+const policySettings=()=>shippingSettings({...structuredClone(operation),enabled:true,rateMode:'regional',regionRates:structuredClone(rates),freeShippingEnabled:true,freeShippingThresholdCents:15000,pickup:{enabled:true},localDelivery:{enabled:true,estimatedDays:1}});
 
 test('frete regional usa UF verificada, identifica as cinco regiões e calcula mínimo depois do desconto',async()=>{
   const policy=createShippingPolicy({ApiError,fetchImpl:transport,production:true});
@@ -57,7 +59,7 @@ test('CEP inexistente, lookup falho e região desabilitada falham sem preço inv
 test('destino tem cache limitado por tempo; alterações de preço/configuração são aplicadas em cada cotação',async()=>{
   let calls=0,clock=1000;const policy=createShippingPolicy({ApiError,production:true,now:()=>clock,fetchImpl:async url=>{calls++;return transport(url);}}),s=policySettings();
   assert.equal((await policy.quote({settings:s,netCents:1000,cep:'01001000'})).shippingCents,1300);
-  s.regionRates.SE={enabled:true,priceCents:2500,estimatedDays:2};assert.equal((await policy.quote({settings:s,netCents:1000,cep:'01001000'})).shippingCents,2500);assert.equal(calls,1);
+  s.regionRates.SE={...s.regionRates.SE,priceCents:2500,estimatedDays:2};assert.equal((await policy.quote({settings:s,netCents:1000,cep:'01001000'})).shippingCents,2500);assert.equal(calls,1);
   clock+=3600001;await policy.quote({settings:s,netCents:1000,cep:'01001000'});assert.equal(calls,2);
 });
 test('admin precisa informar preço/prazo de região ativa e contato real para retirada/local',()=>{
@@ -71,9 +73,67 @@ test('admin precisa informar preço/prazo de região ativa e contato real para r
   assert.equal(validate({localDelivery:{enabled:true,estimatedDays:null}}).localDelivery.estimatedDays,null);
   for(const estimatedDays of [-1,0.5,'1'])assert.throws(()=>validate({localDelivery:{enabled:true,estimatedDays}}),error=>error.code==='VALIDATION');
   assert.throws(()=>validate({freeShippingEnabled:true,freeShippingThresholdCents:0}),error=>error.code==='VALIDATION');
-  const saved=validate({enabled:true,rateMode:'regional',regionRates:{SE:{enabled:true,priceCents:1800,estimatedDays:5}},pickup:{enabled:true},localDelivery:{enabled:true,estimatedDays:1}});
+  const saved=validate({...operation,enabled:true,rateMode:'regional',regionRates:{SE:{...rates.SE,priceCents:1800,estimatedDays:5}},pickup:{enabled:true},localDelivery:{enabled:true,estimatedDays:1}});
   assert.equal(saved.regionRates.SE.priceCents,1800);assert.equal(saved.regionRates.N.enabled,false);assert.equal(saved.freeShippingThresholdCents,15000);assert.equal(hasConfiguredShipping(saved,{production:true}),true);
-  const patched=validateShippingSettings({regionRates:{SE:{priceCents:2200}}},saved,{fail,store});assert.equal(patched.regionRates.SE.enabled,true);assert.equal(patched.regionRates.SE.estimatedDays,5);assert.equal(patched.regionRates.SE.priceCents,2200);
+  assert.throws(()=>validateShippingSettings({regionRates:{SE:{priceCents:2200}}},saved,{fail,store}),/Confirme novamente/);
+  const patched=validateShippingSettings({regionRates:{SE:{priceCents:2200,validated:true,validatedAt:'2026-01-01'}}},saved,{fail,store});assert.equal(patched.regionRates.SE.enabled,true);assert.equal(patched.regionRates.SE.estimatedDays,5);assert.equal(patched.regionRates.SE.priceCents,2200);
+});
+
+test('tarifas legadas não comprovadas permanecem indisponíveis, inclusive acima do mínimo grátis',async()=>{
+  const s=policySettings(),policy=createShippingPolicy({ApiError,fetchImpl:transport,production:true});delete s.origin;
+  const blocked=await policy.quote({settings:s,cep:'01001000',netCents:90000});assert.equal(blocked.available,false);assert.equal(blocked.shippingCents,null);assert.equal(operationalShippingReadiness(s).nationalReady,false);
+  assert.equal((await policy.quote({settings:s,cep:'38400100',netCents:1000})).shippingCents,0,'origem postal incompleta não bloqueia entrega local');
+  assert.equal((await policy.quote({settings:s,deliveryMode:'pickup',netCents:1000})).shippingCents,0,'retirada permanece independente');
+  const badRegion=policySettings();badRegion.regionRates.N.validated=false;assert.equal(operationalShippingReadiness(badRegion).nationalReady,false);assert.equal((await policy.quote({settings:badRegion,cep:'69005000',netCents:99999})).available,false);
+});
+test('faixas globais e regionais possuem limites inclusivos e jamais ampliam cobertura pelo frete grátis',async()=>{
+  const fetchImpl=async url=>({ok:true,json:async()=>({...destinations['01001000'],cep:url.match(/ws\/(\d{8})/)[1]})});
+  const policy=createShippingPolicy({ApiError,fetchImpl,production:true}),s=policySettings();s.localDelivery.enabled=false;
+  s.regions=[{start:'01001000',end:'01001999'}];s.regionRates.SE.cepRanges=[{start:'01001200',end:'01001800'}];
+  for(const cep of['01001200','01001800'])assert.equal((await policy.quote({settings:s,cep,netCents:1000})).available,true,cep);
+  for(const cep of['01000999','01001199','01001801','01002000']){const q=await policy.quote({settings:s,cep,netCents:90000});assert.equal(q.available,false,cep);assert.equal(q.shippingCents,null);}
+  s.regionRates.SE.cepRanges=[];for(const cep of['01001000','01001999'])assert.equal((await policy.quote({settings:s,cep,netCents:1000})).available,true,cep);
+});
+test('alterar endereço recalcula modalidade, cobertura e valor; total inválido falha antes da rede',async()=>{
+  let calls=0;const policy=createShippingPolicy({ApiError,fetchImpl:async url=>{calls++;return transport(url);},production:true}),s=policySettings();
+  assert.equal((await policy.quote({settings:s,cep:'38400100',netCents:1000})).deliveryMode,'local');
+  const changed=await policy.quote({settings:s,cep:'01001000',netCents:1000,address:{city:'São Paulo',state:'SP'}});assert.equal(changed.deliveryMode,'delivery');assert.equal(changed.shippingCents,1300);
+  for(const amount of[-1,1.1,NaN,'1000'])await assert.rejects(policy.quote({settings:s,cep:'01001000',netCents:amount}),{code:'SHIPPING_AMOUNT'});
+  assert.equal(calls,2);
+});
+test('admin valida origem, embalagens, datas, faixas e confirmação operacional sem inventar dados',()=>{
+  const fail=(code,message)=>{throw new ApiError(422,code,message);},store={city:'Uberlândia',state:'MG',whatsapp:'5534999999999'},current=shippingSettings();
+  const valid=input=>validateShippingSettings(input,current,{fail,store});
+  assert.equal(valid({pickup:{enabled:true},localDelivery:{enabled:true,estimatedDays:null}}).origin.zip,'');
+  for(const mutate of[
+    s=>s.origin.zip='3840010a',s=>s.origin.state='XX',s=>s.origin.extra=true,s=>s.packages[0].weightGrams=0,
+    s=>s.packages[0].widthCm=.01,s=>s.packages[0].lengthCm=10.01,s=>s.packages[0].heightCm=Infinity,
+    s=>s.packages.push({...s.packages[0]}),s=>s.packages[0].active=false,s=>s.defaultPackageId='not-found',
+    s=>s.regionRates.SE.validatedAt='9999-01-01',s=>s.regionRates.SE.validatedAt='2026-02-30',s=>s.regionRates.SE.validated=false,
+    s=>s.regionRates.SE.cepRanges=[{start:'01001000',end:'01001999'},{start:'01001999',end:'01002999'}],
+    s=>s.regions=[{start:'01001999',end:'01001000'}],s=>s.regionRates.SE.serviceName=''
+  ]){const input=policySettings();mutate(input);assert.throws(()=>valid(input),error=>error.code==='VALIDATION');}
+  const zero=policySettings();zero.regionRates.SE.priceCents=0;assert.equal(valid(zero).regionRates.SE.priceCents,0,'frete zero explicitamente validado é permitido');
+  assert.equal(valid(policySettings()).packages[0].weightGrams,200);
+});
+test('mudança de origem ou embalagem exige nova confirmação das tarifas ativas e origem fica privada',()=>{
+  const fail=(code,message)=>{throw new ApiError(422,code,message);},store={city:'Uberlândia',state:'MG',whatsapp:'5534999999999'},saved=policySettings();
+  assert.throws(()=>validateShippingSettings({origin:{number:'2'}},saved,{fail,store}),/Confirme novamente/);
+  const rechecked=Object.fromEntries(Object.keys(REGION_STATES).map(id=>[id,{validated:true,validatedAt:'2026-01-01'}]));
+  assert.equal(validateShippingSettings({origin:{number:'2'},regionRates:rechecked},saved,{fail,store}).origin.number,'2');
+  saved.regions=[{start:'01001200',end:'01001800'}];
+  const expanded=[{start:'01001000',end:'01001999'}];
+  assert.throws(()=>validateShippingSettings({regions:expanded},saved,{fail,store}),/Confirme novamente/,'ampliar cobertura geral exige nova confirmação para as tarifas ativas');
+  assert.deepEqual(validateShippingSettings({regions:expanded,regionRates:rechecked},saved,{fail,store}).regions,expanded);
+  const publicSettings=publicShippingSettings(saved);assert.equal(publicSettings.origin,undefined);assert.equal(publicSettings.packages,undefined);assert.equal(publicSettings.defaultPackageId,undefined);assert.equal(publicSettings.regionRates.SE.validatedAt,undefined);assert.equal(publicSettings.regionRates.SE.serviceName,'Serviço de teste');assert.equal(publicSettings.freeShippingThresholdCents,15000);
+});
+test('fixture de homologação financeira usa retirada e não exige tarifa nacional fictícia ou API externa',async()=>{
+  const {fixtureShippingSettings,checkoutPayload}=require('../scripts/homologate-mp.cjs'),config=fixtureShippingSettings();
+  const fail=(code,message)=>{throw new ApiError(422,code,message);},saved=validateShippingSettings(config.shipping,shippingSettings(),{fail,store:config});
+  assert.equal(saved.enabled,false);assert.equal(saved.pickup.enabled,true);assert(Object.values(saved.regionRates).every(rate=>!rate.enabled));
+  const payload=checkoutPayload({variantId:'fixture',buyer:{email:'fixture@testuser.com'},cases:{pixApro:{idempotencyKey:'fixture'}}},'pixApro');
+  const policy=createShippingPolicy({ApiError,production:true,fetchImpl:async()=>{throw new Error('Não deve consultar serviço externo.');}});
+  const quote=await policy.quote({settings:saved,netCents:5000,deliveryMode:payload.deliveryMode,address:payload.address});assert.equal(quote.available,true);assert.equal(quote.shippingCents,0);assert.equal(quote.deliveryMode,'pickup');
 });
 
 test('API comercial persiste política admin e usa desconto e CEP autoritativos na cotação',async t=>{
@@ -87,8 +147,11 @@ test('API comercial persiste política admin e usa desconto e CEP autoritativos 
   const base='http://127.0.0.1:'+server.address().port;let cookie='',csrf='';
   async function call(route,{method='GET',body}={}){const r=await fetch(base+route,{method,headers:{cookie,'x-csrf-token':csrf,...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});if(r.headers.get('set-cookie'))cookie=r.headers.get('set-cookie').split(';')[0];const data=await r.json();if(data.csrfToken)csrf=data.csrfToken;return {status:r.status,data};}
   await call('/api/session');assert.equal((await call('/api/auth/login',{method:'POST',body:{email:'frete@example.test',password:'test-admin-long-password'}})).status,200);
-  const s=policySettings();assert.equal((await call('/api/admin/settings',{method:'PUT',body:{shipping:s,address:'',city:'Uberlândia',state:'MG',whatsapp:'5534999999999'}})).status,200);
+  const s=policySettings();s.regions=[{start:'01001000',end:'01001000'}];assert.equal((await call('/api/admin/settings',{method:'PUT',body:{shipping:s,address:'',city:'Uberlândia',state:'MG',whatsapp:'5534999999999'}})).status,200);
+  assert.equal((await call('/api/admin/settings',{method:'PUT',body:{shipping:{regions:[{start:'01001000',end:'01001999'}]}}})).status,422,'ampliar cobertura global pela API não reutiliza confirmação antiga');
   const publicSettings=(await call('/api/config')).data;assert.equal(publicSettings.city,'Uberlândia');assert.equal(publicSettings.state,'MG');assert.equal(publicSettings.address,'');
+  assert.equal(publicSettings.shipping.origin,undefined);assert.equal(publicSettings.shipping.packages,undefined);assert.equal(publicSettings.shipping.defaultPackageId,undefined);assert.equal(publicSettings.shipping.regionRates.SE.validatedAt,undefined);
+  const privateSettings=(await call('/api/admin/settings')).data;assert.equal((privateSettings.settings||privateSettings).shipping.origin.street,'Rua de teste');assert.equal((privateSettings.settings||privateSettings).shipping.packages[0].weightGrams,200);
   assert.equal((await call('/api/admin/settings',{method:'PUT',body:{whatsapp:''}})).status,422,'contato não pode ser removido enquanto retirada/local estão ativos');
   assert.equal((await call('/api/admin/settings',{method:'PUT',body:{state:'XX'}})).status,422);
   assert.equal((await call('/api/admin/integrations')).data.shipping.configured,true);

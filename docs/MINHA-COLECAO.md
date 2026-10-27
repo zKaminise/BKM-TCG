@@ -9,7 +9,7 @@ Revisão de **27/10/2026**. O módulo foi integrado ao projeto existente, sem tr
 Em `/conta/colecao`, **Adicionar cartas** abre `/conta/colecao/adicionar`:
 
 1. Escolher **Carta**, **Selado** ou **Personalizado**.
-2. Pesquisar cartas reais por nome, número, nome+número, expansão, código ou ID; ver foto, nome, expansão, número impresso, raridade e idioma de referência. Resultados ambíguos são apresentados separadamente; o usuário pode restringir a coleção.
+2. Pesquisar automaticamente enquanto digita, sem clicar em pesquisar, incluindo números parciais como `166/1`. Pesquisar cartas reais por nome, número, nome+número, expansão, código ou ID; ver foto, nome, expansão, número impresso, raridade e idioma de referência. Resultados ambíguos são apresentados separadamente; o usuário pode restringir a coleção.
 3. Adicionar várias cartas à mesma fila, inclusive cópias iguais. Selados e personalizados podem entrar na mesma fila. Cada exemplar tem identidade e dados próprios.
 4. Preencher detalhes individualmente: tipo, idioma físico, conservação, acabamento, atributos separados, custo opcional, data, observações e foto por URL HTTPS. Nenhuma condição de carta é selecionada silenciosamente no novo wizard.
 5. Aplicar aquisição aos restantes com confirmação, preservando campos já preenchidos salvo autorização explícita de sobrescrita; revisar ou desfazer a cópia. Identidade, foto e raridade não são copiadas de uma carta para outra.
@@ -38,7 +38,7 @@ Fichários, objetivos, faltantes, desejos e CSV existentes foram preservados. As
 
 ## Valores e fonte dos preços
 
-Dinheiro é armazenado como **centavos inteiros em BRL**; datas de aquisição são `YYYY-MM-DD`, sem conversão para meia-noite UTC. A interface aceita `150`, `150,50` e `1.234,56` e rejeita negativos e formatos inválidos.
+Custos e avaliações brasileiras são armazenados como **centavos inteiros em BRL**; referências internacionais possuem moeda própria e não entram nessa soma. As datas de aquisição são `YYYY-MM-DD`, sem conversão para meia-noite UTC. A interface aceita `150`, `150,50` e `1.234,56` e rejeita negativos e formatos inválidos.
 
 | Indicador | Regra |
 |---|---|
@@ -54,6 +54,8 @@ Dinheiro é armazenado como **centavos inteiros em BRL**; datas de aquisição s
 **Não há cotação automática brasileira integrada.** Não foi fornecida/configurada uma API licenciada da Liga Pokémon ou outro provedor BRL com correspondência suficiente. A página oficial da Liga retornou 403 na consulta; o bloqueio não foi contornado. Isso não impede cadastrar, organizar ou registrar custos e saídas.
 
 As referências disponíveis são:
+
+- **TCGdex automático internacional:** Cardmarket em EUR e TCGplayer em USD, fonte/data e atualização com cache diário, sem câmbio ou ajuste fictício por condição/idioma. A correspondência do marketplace não é certificada. Referências vencidas, indisponíveis ou incompatíveis com acabamento/atributos são identificadas; somas por fonte/moeda dizem respeito apenas à página exibida. Detalhes e limites: [TCGDEX-PRECOS-AUTOMATICOS.md](TCGDEX-PRECOS-AUTOMATICOS.md).
 
 - **Informado por você:** valor particular em BRL por exemplar, com identidade, idioma, condição, acabamento, atributos e data. É uma estimativa pessoal, não preço oficial da Liga. A alteração de características invalida a referência anterior; uma atualização automática não a substitui silenciosamente.
 - **Referências manuais autorizadas do painel:** fonte, URL, BRL, data e declaração de autorização, para combinação exata de carta/set/idioma/condição/acabamento. O conjunto global não foi preenchido com dados inventados.

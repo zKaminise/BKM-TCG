@@ -27,10 +27,10 @@ test('API integrada: sessões, RBAC, inventário, preços, cupons, frete e priva
   const anon=new Client(),admin=new Client(),customer=new Client(),outsider=new Client();
   await t.test('sessão HttpOnly, CSRF e origem; cliente nunca se promove admin',async()=>{
     const s=await anon.session();assert.equal(s.data.user,null);assert.match(s.res.headers.get('set-cookie'),/HttpOnly; SameSite=Lax/);assert.equal(s.data.csrfToken.length,43);
-    const bad=await anon.call('/api/auth/register',{method:'POST',body:{email:'a@example.test',name:'Ana',password:'long-test-password'},headers:{'x-csrf-token':'bad'}});assert.equal(bad.status,403);assert.equal(bad.data.error.code,'CSRF');
+    const bad=await anon.call('/api/auth/register',{method:'POST',body:{email:'a@example.test',name:'Ana',password:'Customer1234'},headers:{'x-csrf-token':'bad'}});assert.equal(bad.status,403);assert.equal(bad.data.error.code,'CSRF');
     assert.equal((await anon.call('/api/auth/register',{method:'POST',headers:{origin:'https://evil.example'},body:{}})).status,403);
-    await customer.session();const registration=await customer.call('/api/auth/register',{method:'POST',body:{email:'customer@example.test',name:'Cliente',password:'long-test-password',role:'ADMIN'}});assert.equal(registration.status,201);assert.equal(registration.data.user.role,'CUSTOMER');assert.equal((await customer.call('/api/admin/products')).status,403);assert.equal((await anon.call('/api/admin/products')).status,401);
-    await outsider.session();assert.equal((await outsider.call('/api/auth/register',{method:'POST',body:{email:'other@example.test',name:'Outro',password:'other-long-password'}})).status,201);
+    await customer.session();const registration=await customer.call('/api/auth/register',{method:'POST',body:{email:'customer@example.test',name:'Cliente',password:'Customer1234',role:'ADMIN'}});assert.equal(registration.status,201);assert.equal(registration.data.user.role,'CUSTOMER');assert.equal((await customer.call('/api/admin/products')).status,403);assert.equal((await anon.call('/api/admin/products')).status,401);
+    await outsider.session();assert.equal((await outsider.call('/api/auth/register',{method:'POST',body:{email:'other@example.test',name:'Outro',password:'OtherTest123'}})).status,201);
   });
   const adminId=crypto.randomUUID();server.api.db.prepare("INSERT INTO users(id,email,name,password_hash,role,created_at) VALUES(?,?,?,?,?,?)").run(adminId,'admin@example.test','Administrador de teste',await hashPassword('admin-long-password'),'ADMIN',new Date().toISOString());
   await t.test('login rotaciona sessão, valida senha e logout revoga token',async()=>{

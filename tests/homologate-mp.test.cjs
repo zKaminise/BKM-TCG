@@ -1,6 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const {passwordValidation}=require('../server/password-policy.cjs');
 const { parseArguments, validateSandboxEnv, assertTestSeller, assertRemoteConfig, verifyEnvironment, waitForApprovalAndWebhook, createState, validateState, fixtureProduct, checkoutPayload, assertDedicatedData, publicOrder } = require('../scripts/homologate-mp.cjs');
 const project = 'abcdefghijklmnopqrst', seller = '123456789';
 function envFixture() { return { SUPABASE_URL: `https://${project}.supabase.co`, DATABASE_URL: `postgresql://postgres.${project}:fictitious-password@aws-1-sa-east-1.pooler.supabase.com:6543/postgres`, BKM_ENVIRONMENT: 'staging', HOSTING_DEMO_ONLY: 'false', BKM_PUBLIC_URL: 'https://bkm-tcg-sandbox.vercel.app', PAYMENT_PROVIDER: 'mercadopago', MERCADO_PAGO_ENABLED: 'true', MERCADO_PAGO_ENVIRONMENT: 'sandbox', MERCADO_PAGO_PRODUCTION_APPROVED: 'false', MERCADO_PAGO_ACCESS_TOKEN: 'APP_USR-fictitious-not-usable', MERCADO_PAGO_PUBLIC_KEY: 'APP_USR-public-fictitious', MERCADO_PAGO_WEBHOOK_SECRET: 'fictitious-signing-key', MERCADO_PAGO_SELLER_ID: seller, EMAIL_PROVIDER: 'development', BKM_SANDBOX_BUYER_EMAIL: 'buyer-fixture@testuser.com', BKM_SANDBOX_CONFIRMATION: `SANDBOX_ONLY:${project}:${seller}` }; }
@@ -62,6 +63,10 @@ test('Homologação MP CLI checkpoint fixa identidade e duas chaves idempotentes
   const env = envFixture(), state = createState(config, env.BKM_SANDBOX_BUYER_EMAIL); state.variantId = 'fixture-variant';
   assert.equal(validateState(state, config, env.BKM_SANDBOX_BUYER_EMAIL), state);
   assert.notEqual(state.admin.password, state.buyer.password); assert.notEqual(state.cases.pixApro.idempotencyKey, state.cases.pixPending.idempotencyKey);
+  for(const account of [state.admin,state.buyer]){assert.equal(passwordValidation(account.password).valid,true);assert.equal(account.password.length,14);}
+  const legacy={...state,admin:{...state.admin,password:'a'.repeat(43)},buyer:{...state.buyer,password:'b'.repeat(43)}};
+  assert.equal(validateState(legacy,config,env.BKM_SANDBOX_BUYER_EMAIL),legacy,'checkpoints legados preservam acesso às contas existentes');
+  refuses(()=>validateState({...state,buyer:{...state.buyer,password:'bad'}},config,env.BKM_SANDBOX_BUYER_EMAIL),'PRIVATE_CHECKPOINT_INVALID');
   refuses(() => validateState(state, { ...config, project: 'zyxwvutsrqponmlkjihg' }, env.BKM_SANDBOX_BUYER_EMAIL), 'PRIVATE_CHECKPOINT_MISMATCH');
   refuses(() => validateState({ ...state, cases: { pixApro: state.cases.pixApro } }, config, env.BKM_SANDBOX_BUYER_EMAIL), 'PRIVATE_CHECKPOINT_INVALID');
   const first = checkoutPayload(state, 'pixApro'), retry = checkoutPayload(state, 'pixApro'); assert.deepEqual(first, retry); assert.equal(first.payment.payer.firstName, 'APRO');

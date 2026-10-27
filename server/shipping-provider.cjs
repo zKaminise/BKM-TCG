@@ -31,7 +31,7 @@ function shippingReadiness(env = process.env) {
   const userAgent = String(env.MELHOR_ENVIO_USER_AGENT || '');
   if (userAgent.length < 8 || userAgent.length > 250 || /[\r\n\x00-\x1f]/.test(userAgent) || !/[^\s<>@()]+@[^\s<>@()]+\.[a-z]{2,}/i.test(userAgent)) missing.push('MELHOR_ENVIO_USER_AGENT');
   try { postalCode(env.MELHOR_ENVIO_ORIGIN_ZIP); } catch { missing.push('MELHOR_ENVIO_ORIGIN_ZIP'); }
-  return { provider:'melhorenvio', environment:'sandbox', enabled:missing.length === 0, purchasesEnabled:false, mode:'quote_and_tracking_only', missing, reason:missing.length ? 'Cotação sandbox desativada: faltam configuração explícita, credencial de teste ou origem.' : 'Somente cotação e consulta de etiquetas já existentes no sandbox; sem compra de frete.' };
+  return { provider:'melhorenvio', environment:'sandbox', enabled:missing.length === 0, productionSupported:false, checkoutIntegrated:false, purchasesEnabled:false, mode:'quote_and_tracking_only', missing, reason:missing.length ? 'Cotação sandbox desativada: faltam configuração explícita, credencial de teste ou origem.' : 'Somente cotação e consulta de etiquetas já existentes no sandbox; sem compra de frete.' };
 }
 function createShippingProvider({env = process.env, fetchImpl = globalThis.fetch, now = Date.now, timeoutMs = 8000} = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl deve ser uma função.');
@@ -68,18 +68,23 @@ function createShippingProvider({env = process.env, fetchImpl = globalThis.fetch
       throw new ShippingError('SHIPPING_NETWORK_ERROR', 'Não foi possível consultar o provedor de logística.', 503);
     } finally { clearTimeout(timeout); }
   }
-  async function quote({zip, items, services = []} = {}) {
+  async function quote({zip, items, volumes, services = []} = {}) {
     ready();
     const destination = postalCode(zip), origin = postalCode(config.MELHOR_ENVIO_ORIGIN_ZIP);
-    if (!Array.isArray(items) || items.length < 1 || items.length > 100) invalid('Envie entre 1 e 100 itens para cotação.');
+    if (items!==undefined && volumes!==undefined) invalid('Escolha cotação por produtos ou por volumes reais, sem misturar os dois formatos.');
+    if (volumes!==undefined ? !Array.isArray(volumes)||volumes.length<1||volumes.length>20 : !Array.isArray(items)||items.length<1||items.length>100) invalid('Envie entre 1 e 100 itens ou entre 1 e 20 volumes reais para cotação.');
     if (!Array.isArray(services) || services.length > 30) invalid('Seleção de serviços inválida.');
     const serviceIds = [...new Set(services.map(id => integer(id, 1, 9999, 'ID do serviço')))];
     const ids = new Set();
-    const products = items.map(item => {
+    const products = items?.map(item => {
       if (!item || typeof item.id !== 'string' || !/^[a-zA-Z0-9._:-]{1,128}$/.test(item.id) || ids.has(item.id)) invalid('Cada item precisa de um identificador único e válido.'); ids.add(item.id);
       return {id:item.id, width:decimal(item.widthCm, .1, 300, 'largura em centímetros'), height:decimal(item.heightCm, .1, 300, 'altura em centímetros'), length:decimal(item.lengthCm, .1, 300, 'comprimento em centímetros'), weight:integer(item.weightGrams, 1, 30000, 'peso em gramas') / 1000, insurance_value:integer(item.priceCents, 0, 100000000, 'preço unitário em centavos') / 100, quantity:integer(item.quantity, 1, 9999, 'quantidade')};
     });
-    const payload = {from:{postal_code:origin}, to:{postal_code:destination}, products, options:{receipt:false, own_hand:false}};
+    const packedVolumes=volumes?.map(volume=>{
+      if(!volume||typeof volume!=='object'||Array.isArray(volume)||Object.keys(volume).some(key=>!['widthCm','heightCm','lengthCm','weightGrams','insuranceValueCents'].includes(key)))invalid('Volume de postagem inválido.');
+      return {width:decimal(volume.widthCm,.1,300,'largura em centímetros'),height:decimal(volume.heightCm,.1,300,'altura em centímetros'),length:decimal(volume.lengthCm,.1,300,'comprimento em centímetros'),weight:integer(volume.weightGrams,1,30000,'peso embalado em gramas')/1000,insurance_value:integer(volume.insuranceValueCents,0,100000000,'valor segurado do volume em centavos')/100};
+    });
+    const payload = {from:{postal_code:origin}, to:{postal_code:destination}, ...(products?{products}:{volumes:packedVolumes}), options:{receipt:false, own_hand:false}};
     if (serviceIds.length) payload.services = serviceIds.join(',');
     const data = await request('/api/v2/me/shipment/calculate', payload);
     if (!Array.isArray(data) || data.length > 100) responseInvalid();

@@ -10,18 +10,20 @@ Revisão de **27/10/2026**. Este inventário separa funcionalidades implementada
 | Catálogo | Cartas avulsas e lacrados, busca, filtros, ordenação, páginas por coleção e aliases | Os 16 anúncios de demonstração foram arquivados; não representam mercadoria disponível |
 | Produto | Fotos próprias e de referência identificadas, ampliação, descrição, variantes de idioma/condição/acabamento, preço e disponibilidade | Administrador deve conferir a unidade física e cadastrar sua quantidade real |
 | Carrinho e favoritos | Adicionar/remover/alterar quantidade, drawer, persistência por conta e reconciliação de favoritos arquivados | Carrinho não reserva o estoque |
-| Cupons e frete | Cupons, mínimo de frete grátis editável e barra de progresso; tabela regional de preço/prazo no painel | Tarifas nacionais ainda desativadas: não houve cotação operacional válida |
+| Cupons e frete | Cupons, mínimo de frete grátis editável e barra de progresso; painel com origem privada, embalagens reais, faixas de CEP, transportadora/serviço, preço, prazo e confirmação por região | Envio nacional com `shipping.enabled=false`: não houve cotação operacional válida. Retirada e entrega local têm ativação independente e foram preservadas |
 | Uberlândia | Retirada gratuita e entrega local gratuita quando habilitadas; CEP local conferido; contato por WhatsApp depois do pagamento | Ponto e horário são combinados pelo atendimento |
 | Conteúdo institucional | Atendimento, perguntas frequentes, envio, devoluções, privacidade e termos | Razão social/CNPJ e endereço/horários definitivos ainda não foram fornecidos |
 
 ## Contas e área do cliente
 
-- Cadastro e login por e-mail/senha, sessão segura, proteção de origem/CSRF, logout e alteração de senha com revogação de outras sessões.
+- Cadastro e login por e-mail/senha, sessão segura, proteção de origem/CSRF, logout e alteração de senha com revogação de outras sessões. Novas senhas locais e alterações exigem **9 a 14 caracteres inclusive**, ao menos uma maiúscula ASCII A–Z e um dígito 0–9; símbolos são opcionais e não há requisito de minúscula. A mesma política e mensagens atendem frontend e backend, incluindo cadastro, redefinição, alteração e criação administrativa. As telas exibem instruções antes da digitação, checklist, confirmação e mostrar/ocultar. Senhas antigas continuam autenticando sem alteração do hash ou redefinição obrigatória; Google não exige senha local.
 - Google OIDC habilitado em produção, com state/nonce/PKCE, vínculo explícito de uma conta já existente e proteção contra vinculação indevida pelo mesmo e-mail. Vínculo e novo login da conta vinculada foram comprovados anteriormente; o cadastro externo de uma conta Google inédita faz parte da prova operacional do comprador.
 - Recuperação por e-mail com resposta genérica, token de uso único e expiração. O fluxo de redefinição/revogação foi testado com conta de QA; um e-mail de recuperação ao titular autorizado foi entregue em produção, sem alterar sua senha.
 - Perfil, endereços e endereço padrão, pedidos com acompanhamento e retomada de pagamento, preferências, segurança e notificações.
 - Produtos favoritos e lista de desejos são áreas diferentes. Desejos podem referenciar cartas que nem estão anunciadas na loja, com filtros de versão/idioma/condição/preço e avisos sujeitos a consentimento.
 - Minha Coleção possui inventário próprio, independente dos produtos e do saldo comercial. Consulte o [relatório do módulo](MINHA-COLECAO.md) para funcionalidades, testes, fontes e limites da nova versão.
+- Em `/conta/colecao/adicionar`, a busca reage à digitação de nome/número e à troca de coleção/idioma, com intervalo curto, controle de respostas antigas e pesquisa manual ainda disponível. Não é necessário clicar em Pesquisar para cada consulta.
+- As cartas podem trazer referências reais de **Cardmarket em EUR e TCGplayer em USD via TCGdex**, com fonte/data e correspondência de acabamento explicitadas. Esses dados acompanham a carta no inventário; ausência, referência antiga ou versão incompatível ficam sinalizadas. **Não há conversão automática para BRL nem ajuste de preço por conservação ou idioma físico**, pois a fonte não fornece essa correspondência. Valores manuais/autorizados em BRL e seus totais/lucros permanecem separados; o valor internacional não é apresentado como cotação brasileira da condição cadastrada.
 
 ## Pedidos e pagamentos
 
@@ -46,7 +48,7 @@ O Pix do provedor tem prazo remoto mínimo diferente do prazo comercial da loja.
 - Resend configurado no domínio `lojabkm.com.br`, remetente transacional e endereço de resposta do atendimento.
 - Fila persistente, deduplicação, repetição controlada, estado de entrega e webhook assinado. Aceitação pelo provedor e entrega são estados separados.
 - Avisos ao cliente: pedido criado, aguardando pagamento com link para retomar, pagamento recebido, em separação, pronto para envio/retirada, enviado/rastreio e conclusão.
-- Cada administrador recebe aviso quando o pagamento é confirmado. O destinatário operacional do administrador atual é o e-mail informado pelo proprietário.
+- Cada administrador tem um aviso próprio quando o pagamento é confirmado. O destinatário operacional configurado para as contas administrativas é **gabriel.misao08@gmail.com**, informado pelo proprietário; como ambas apontam ao mesmo destino, esse endereço pode receber dois avisos do mesmo pedido. Endereço de login administrativo e caixa postal são configurações diferentes.
 - Recuperação de senha e um resumo de desejos foram efetivamente entregues ao titular autorizado. Os quatro avisos de um pedido comercial e o aviso administrativo ainda devem ser conferidos na compra real.
 - Alertas de desejos e resumos diário/semanal têm implementação persistente e consentimentos independentes. A prova externa completa do alerta imediato ainda não foi concluída.
 - Marketing e carrinho abandonado não possuem campanhas/automações de envio habilitadas apenas por existir uma preferência no perfil.
@@ -55,7 +57,9 @@ O Pix do provedor tem prazo remoto mínimo diferente do prazo comercial da loja.
 
 Login em `/admin`, com permissão verificada no servidor. Há gestão de produtos/rascunhos/publicação/arquivo, variantes e estoque, fotos, coleções e aliases, cupons, pedidos e etapas logísticas, configurações da loja e frete, referências de preços autorizadas, fila de e-mails e integrações. Alterações relevantes possuem trilha administrativa. Custos e notas particulares dos clientes não são expostos pelo painel global de preços.
 
-A senha administrativa atual foi definida pelo proprietário em entrada privada, sem senha padrão publicada. Dados de pagamentos e segredos de provedores não fazem parte do frontend ou do ZIP público.
+As contas administrativas são **admin@bkmtcg.com.br** e **gerente@lojabkm.com.br**, com a mesma senha válida confirmada pelo proprietário, sem publicá-la neste relatório. Criar `gerente@lojabkm.com.br` como login do sistema não cria uma caixa de e-mail nesse domínio: os avisos operacionais continuam indo ao endereço real do proprietário. Dados de pagamentos e segredos de provedores não fazem parte do frontend ou do ZIP público.
+
+O painel de logística informa o que falta antes de habilitar cada região. Alterar origem, embalagem, tarifa, prazo ou cobertura regional exige nova conferência operacional. O endpoint público de configuração omite endereço de postagem, perfis de embalagem e dados internos de validação; os dados completos ficam na administração autenticada. O checkout recalcula no servidor após descontos e mudança de destino, confere CEP/cidade/UF e recusa serviço indisponível; retirada dispensa endereço de entrega.
 
 ## Infraestrutura, dados e continuidade
 
@@ -70,8 +74,8 @@ A senha administrativa atual foi definida pelo proprietário em entrada privada,
 ## Pendências reais por prioridade
 
 1. **Primeira compra real:** publicar o produto físico de R$ 10,00, testar com o amigo, conferir pagamento/valor líquido, os e-mails por etapa, aviso administrativo e retirada. Código e credenciais não substituem essa prova.
-2. **Logística nacional:** definir embalagens, peso/medidas, origem, preço e prazo que a loja consegue cumprir; ativar as regiões somente depois dessa conferência. O adaptador Melhor Envio de sandbox não está ligado ao checkout nem compra etiquetas.
-3. **Preço brasileiro automático:** obter uma fonte/API autorizada com cobertura e identidade exatas. Não há integração licenciada configurada com a Liga Pokémon; referências manuais são identificadas e nunca viram cotação oficial.
+2. **Logística nacional:** fornecer endereço completo da origem (CEP, rua, número, bairro, cidade/UF), nomes e peso total embalado/medidas externas das embalagens, embalagem padrão, transportadora/serviço operacional, regiões/faixas de CEP atendidas e preços/prazos conferidos; definir a promoção de frete grátis e ativar as regiões somente depois dessa conferência. O adaptador Melhor Envio consulta sandbox por API autorizada, não está ligado ao checkout, não cota produção nem compra etiquetas. Conta, credenciais e serviços reais ainda precisam ser configurados e validados para uma integração de produção.
+3. **Preço brasileiro automático e por condição:** obter uma fonte/API autorizada com cobertura e identidade exatas. Não há integração licenciada configurada com a Liga Pokémon; referências manuais são identificadas e nunca viram cotação oficial. A integração TCGdex implementada fornece referências internacionais separadas em EUR/USD e não supre a ausência de preços brasileiros ou ajuste por conservação.
 4. **Dados comerciais e conteúdo final:** informar razão social/CNPJ e dados definitivos de retirada/atendimento quando existirem; revisar políticas e conteúdo conforme a operação real.
 5. **Aquisição e continuidade:** liberar/configurar SEO público, instituir backups/retencão/cópia separada, monitoramento e testar os caminhos externos restantes de Google/alertas/disputas/reembolso parcial antes de depender deles operacionalmente.
 

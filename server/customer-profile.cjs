@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const {assertPassword,assertPasswordConfirmation}=require('./password-policy.cjs');
 const STATES = new Set('AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' '));
 function createCustomerProfile({db,ApiError,hashPassword,verifyPassword}) {
   const invalid = message => { throw new ApiError(422,'VALIDATION',message); };
@@ -38,7 +39,8 @@ function createCustomerProfile({db,ApiError,hashPassword,verifyPassword}) {
       });
     }
     if(path==='/api/account/security/password' && method==='POST') {
-      if(typeof body.password!=='string' || body.password.length<12 || body.password.length>128) invalid('A nova senha deve ter entre 12 e 128 caracteres.');
+      assertPassword(body.password,invalid);
+      assertPasswordConfirmation(body.password,body.confirmPassword,invalid);
       if(typeof body.currentPassword!=='string' || body.currentPassword.length>128) invalid('Informe sua senha atual.');
       const passwordHash=await hashPassword(body.password);
       await db.transaction(async()=>{

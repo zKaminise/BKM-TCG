@@ -1,14 +1,14 @@
-# Preços de referência — revisão em 19/10/2026
+# Preços de referência — revisão em 27/10/2026
 
-O catálogo TCGdex identifica cartas. Um anúncio da BKM é uma oferta da loja, não uma cotação independente de mercado. A avaliação pessoal aceita somente referências compatíveis em BRL, com idioma, condição, acabamento, fonte e data. Quantidades multiplicam o valor unitário; unidades sem cotação ficam fora da soma e aparecem na cobertura. O custo pago é separado do valor estimado. A diferença não representa lucro realizado.
+O catálogo TCGdex identifica cartas e agora fornece referências internacionais automáticas, com cache diário, por meio de Cardmarket (EUR) e TCGplayer (USD). Elas aparecem na busca, no cadastro e no inventário, com fonte e data; são mantidas separadas das avaliações brasileiras. Consulte [TCGdex: preços automáticos](TCGDEX-PRECOS-AUTOMATICOS.md). Um anúncio da BKM é uma oferta da loja, não uma cotação independente de mercado. A avaliação pessoal aceita somente referências compatíveis em BRL, com idioma, condição, acabamento, fonte e data. Quantidades multiplicam o valor unitário; unidades sem cotação ficam fora da soma e aparecem na cobertura. O custo pago é separado do valor estimado. A diferença não representa lucro realizado.
 
 ## Fontes avaliadas
 
 | Fonte | Cobertura e moeda | Disponibilidade constatada | Decisão atual |
 |---|---|---|---|
 | Liga Pokémon | Mercado brasileiro; preço depende da edição, idioma, condição e acabamento | Não foi localizada documentação pública oficial de API/licença de redistribuição nesta revisão. A página bloqueou acesso automatizado com HTTP 403. Não houve tentativa de contornar o bloqueio. | Integração automática desativada até autorização formal e contrato técnico do fornecedor. Pesquisa assistida por link e referência inserida pelo próprio usuário continuam possíveis. |
-| TCGdex / Cardmarket | Mercado europeu, EUR | A documentação publica campos de preço e atualização diária; cobertura e associação de variantes são incompletas. | Não convertido nem apresentado como preço brasileiro. |
-| TCGdex / TCGplayer | Mercado norte-americano, USD | Dados horários/diários conforme fornecedor, com preços por variante quando disponíveis. A FAQ reconhece associações incorretas entre raridades em certos casos. | Não usado no patrimônio em BRL. Câmbio, isoladamente, não transforma uma oferta estrangeira em preço de mercado brasileiro. |
+| TCGdex / Cardmarket | Mercado europeu, EUR | A documentação publica campos de preço e atualização diária; cobertura e associação de variantes são incompletas. | Consulta automática implementada; mantém EUR e não apresenta o valor como preço brasileiro ou ajustado à conservação. |
+| TCGdex / TCGplayer | Mercado norte-americano, USD | Dados horários/diários conforme fornecedor, com preços por variante quando disponíveis. A FAQ reconhece associações incorretas entre raridades em certos casos. | Consulta automática implementada; mantém USD, marca referências antigas e não entra no patrimônio em BRL. Câmbio, isoladamente, não transforma uma oferta estrangeira em preço de mercado brasileiro. |
 | Referência manual pessoal | Cartas de qualquer idioma suportado; valor informado em BRL | Disponível agora. Informação privada do usuário, com fonte/data e identificação de registro manual. Não certificada pela Liga. | Utilizada nos totais compatíveis. A fonte pode ser um comprovante ou uma pesquisa permitida que o próprio usuário realizou. |
 | Provedor BRL contratado | Depende da licença e das condições do fornecedor | Nenhum fornecedor/credencial autorizado foi disponibilizado nesta etapa. | Contrato `getQuote({card,language,condition,variant,currency})` preparado no módulo pessoal; integração deve validar identidade e BRL antes de persistir uma cotação. |
 
@@ -23,6 +23,6 @@ Fontes primárias: [TCGdex — dados de mercado](https://tcgdex.dev/markets-pric
 - Mínimo, mediana e média de ofertas exigem amostras compatíveis e uma fonte autorizada. Ofertas ativas não comprovam vendas concluídas. O fallback atual registra o valor manual informado, sem alegar mediana calculada.
 - Não há scraping da Liga, reuso de cookies, proxies, contorno de CAPTCHA ou importação automática de páginas protegidas.
 
-## Para ativar uma fonte automática
+## Para ativar uma fonte automática brasileira
 
 Obter por escrito as condições de uso comercial, cache, atribuição, armazenamento de histórico, redistribuição, limite de consultas, custo e suporte. Confirmar cobertura PT-BR, variantes, condição, moeda e identidade estável. Implementar o contrato do provedor com chamadas em lote/cache, registrar falhas e testar cotações ambíguas antes da ativação. Nenhuma chave pertence ao navegador.
