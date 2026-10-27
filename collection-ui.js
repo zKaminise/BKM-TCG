@@ -68,7 +68,7 @@ export function createCollectionUI(ctx) {
         ["Coleção / expansão","setId",[["","Todas"],...arr(facets.sets).map(set=>[set.id,set.name||set.id])]],
         ["Tipo de item","kind",[["","Todos"],["CARD","Carta"],["SEALED","Selado"],["CUSTOM","Personalizado"]]],
         ["Idioma","language",[["","Todos"],...languages]],
-        ["Conservação","condition",[["","Todas"],...conditions,["SEALED","Lacrado"],["OPENED","Aberto"]]],
+        ["Conservação","condition",[["","Todas"],...conditions,...[['LP','Levemente jogada (LP, cadastro anterior)'],['DMG','Danificada (DMG, cadastro anterior)']].filter(([code])=>arr(facets.conditions).includes(code)),["SEALED","Lacrado"],["OPENED","Aberto"]]],
         ["Raridade","rarity",[["","Todas"],...arr(facets.rarities).map(value=>[value,value])]],
         ["Acabamento","variant",[["","Todos"],...finishes]],
         ["Referência de preço","price",[["","Todas"],["known","Com cotação válida"],["missing","Sem cotação"],["stale","Desatualizada"]]],
