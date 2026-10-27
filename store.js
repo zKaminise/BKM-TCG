@@ -39,27 +39,51 @@ function readLocal(key, fallback) {
     return fallback;
   }
 }
-function persist() {
+function persist({ sync = true } = {}) {
   try {
     localStorage.setItem("bkm-cart-v1", JSON.stringify(state.cart));
     localStorage.setItem("bkm-favorites-v1", JSON.stringify(state.favorites));
   } catch {
     toast("O navegador n\xE3o permitiu salvar suas prefer\xEAncias.");
   }
-  if (state.user && state.apiReady && !state.syncing) scheduleAccountSave();
+  if (sync && state.user && state.apiReady && !state.syncing) scheduleAccountSave();
 }
 let accountSaveTimer;
 function scheduleAccountSave() {
   clearTimeout(accountSaveTimer);
   accountSaveTimer = setTimeout(async () => {
-    if (!state.user) return;
+    const customerId=state.user?.id;
+    if (!customerId) return;
     try {
+      await reconcileFavorites();
+      if(state.user?.id!==customerId)return;
       await Promise.all([
         api("/account/cart", {method:"PUT", body:{items:state.cart.map(item => ({variantId:item.variantId,quantity:item.quantity}))}}),
         api("/account/favorites", {method:"PUT", body:{items:state.favorites.map(item => item.id)}})
       ]);
     } catch (error) { toast(`Não foi possível sincronizar a conta: ${displayError(error)}`); }
   }, 450);
+}
+async function reconcileFavorites(knownProducts) {
+  if(!state.user||!state.apiReady||!state.favorites.length)return;
+  const customerId=state.user.id,requested=state.favorites.map(item=>({...item}));
+  const known=new Map(asArray(knownProducts??(await api("/account/favorites")).products).map(product=>[product.id,product]));
+  const checked=await Promise.all(requested.map(async item=>{
+    if(known.has(item.id))return[item.id,known.get(item.id)];
+    try{const result=await api(`/products/${encodeURIComponent(item.slug)}`),product=result.product||result;return[item.id,product.id===item.id?product:null];}
+    catch(error){if(error.status===404)return[item.id,null];throw error;}
+  }));
+  if(state.user?.id!==customerId)return;
+  const resolved=new Map(checked);
+  let changed=false;
+  state.favorites=state.favorites.filter(item=>{
+    if(!resolved.has(item.id))return true;
+    const product=resolved.get(item.id);
+    if(!product){changed=true;return false;}
+    if(item.slug!==product.slug||item.name!==product.name){Object.assign(item,{slug:product.slug,name:product.name});changed=true;}
+    return true;
+  });
+  if(changed)persist({sync:false});
 }
 async function syncAccount() {
   if (!state.user) return;
@@ -79,7 +103,7 @@ async function syncAccount() {
       const product=products.get(typeof id === "string" ? id : id.productId);
       if(product && !state.favorites.some(item => item.id === product.id)) state.favorites.push({id:product.id,slug:product.slug,name:product.name});
     }
-    await reconcileCart();
+    await Promise.all([reconcileCart(),reconcileFavorites(favorites.products)]);
     persist();
   } catch (error) { toast(`Não foi possível carregar as escolhas da conta: ${displayError(error)}`); }
   finally { state.syncing=false; scheduleAccountSave(); }
