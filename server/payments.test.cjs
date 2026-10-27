@@ -223,3 +223,25 @@ test('auditoria Orders distingue expiração de cancelamento e permite nome Pix 
   for(const identification of [{type:'CPF',number:'12345678901234'},{type:'CNPJ',number:'12345678901'},{type:'CPF',number:'123456789012'}])await assert.rejects(provider.createPayment({...input,payer:{email:'buyer@testuser.com',identification}}),error=>error.code==='PAYMENT_PAYER_INVALID');
   await assert.rejects(provider.createPayment({...input,payer:{email:'buyer@testuser.com',firstName:'APRO\r\nInjected'}}),error=>error.code==='PAYMENT_PAYER_INVALID');
 });
+test('cancelamento usa guardas de vendedor e referência, só cancela pendente e envia chave estável sem corpo',async()=>{
+  let posts=0,gets=0,body,headers;
+  const pending=()=>remote({status:'action_required',status_detail:'waiting_transfer',total_paid_amount:'0.00'});
+  let state=pending();
+  const provider=new MercadoPagoPaymentProvider({env:staging,fetchImpl:async(_,options)=>{
+    if(options.method==='POST'){posts++;body=options.body;headers=options.headers;state=remote({status:'canceled',status_detail:'canceled',total_paid_amount:'0.00'});return json(state);}
+    gets++;return json(state);
+  }});
+  const result=await provider.cancelOrder(remoteId,input);assert.equal(result.status,'CANCELLED');assert.equal(posts,1);assert.equal(gets,2);assert.equal(body,undefined);assert.equal(headers['X-Idempotency-Key'],idempotencyKeyForOrder(input.orderId,'expiry-cancel'));
+  await provider.cancelOrder(remoteId,input);assert.equal(posts,1,'um pagamento já encerrado é só consultado');
+  state=remote();await provider.cancelOrder(remoteId,input);assert.equal(posts,1,'pagamento aprovado não pode ser cancelado como pendente');
+  state=pending();state.user_id='different-seller';await assert.rejects(provider.cancelOrder(remoteId,input),e=>e.code==='PAYMENT_RECONCILIATION_MISMATCH');assert.equal(posts,1);
+  state=pending();state.external_reference='different-order';await assert.rejects(provider.cancelOrder(remoteId,input),e=>e.code==='PAYMENT_RECONCILIATION_MISMATCH');assert.equal(posts,1);
+});
+test('Pix mantém mínimo remoto de 30 minutos; débito é 1x e parcelamento não inventa juros nem parâmetros Point',async()=>{
+  let posted,calls=0;
+  const provider=new MercadoPagoPaymentProvider({env:staging,fetchImpl:async(_,options)=>{calls++;if(options.method==='POST')posted=JSON.parse(options.body);return json(remote({status:'action_required',status_detail:'waiting_payment',total_paid_amount:'0.00'}));}});
+  await provider.createPayment(input);assert.equal(posted.transactions.payments[0].expiration_time,'PT30M');
+  const card={token:'isolated-sdk-token-no-real-card',paymentMethodId:'master',type:'debit_card',installments:2},before=calls;
+  await assert.rejects(provider.createPayment({...input,method:'card',card}),e=>e.code==='PAYMENT_DEBIT_INSTALLMENTS');assert.equal(calls,before);
+  await provider.createPayment({...input,method:'card',card:{...card,type:'credit_card',installments:3}});assert.equal(posted.transactions.payments[0].payment_method.installments,3);assert.equal(posted.total_amount,'123.45');assert.equal(JSON.stringify(posted).includes('installments_cost'),false);
+});

@@ -61,7 +61,8 @@ for(const engine of ['sqlite','postgres']) test(`checkout demonstrativo persiste
     assert.equal((await customer.call('/api/checkout',{method:'POST',body:data})).data.order.id,order.id);
     const update=await admin.call('/api/admin/products/'+product.id,{method:'PUT',body:{...product,name:'Nome alterado',variants:product.variants.map(v=>({...v,priceCents:12000,stock:0}))}});assert.equal(update.status,200);product=update.data;
     const details=await customer.call('/api/account/orders/'+order.id);assert.equal(details.data.items[0].name,'Booster de teste');assert.equal(details.data.items[0].unitPriceCents,10000);
-    const shipping=await admin.call('/api/admin/orders/'+order.id+'/shipping',{method:'PATCH',body:{status:'SHIPPED',trackingCode:'DEMO123',trackingUrl:'https://example.test/rastreio'}});assert.equal(shipping.status,200);assert.equal(shipping.data.order.shippingStatus,'SHIPPED');assert.equal(shipping.data.order.history.length,3);
+    const ready=await admin.call('/api/admin/orders/'+order.id+'/shipping',{method:'PATCH',body:{status:'READY_TO_SHIP'}});assert.equal(ready.status,200);assert.equal(ready.data.order.shippingStatus,'READY_TO_SHIP');
+    const shipping=await admin.call('/api/admin/orders/'+order.id+'/shipping',{method:'PATCH',body:{status:'SHIPPED',trackingCode:'DEMO123',trackingUrl:'https://example.test/rastreio'}});assert.equal(shipping.status,200);assert.equal(shipping.data.order.shippingStatus,'SHIPPED');assert.equal(shipping.data.order.history.length,4);
     assert.equal((await customer.call('/api/admin/orders/'+order.id+'/shipping',{method:'PATCH',body:{status:'DELIVERED'}})).status,403);
     assert.equal((await customer.call('/api/account/orders/'+order.id+'/simulate',{method:'POST',body:{outcome:'cancelled',idempotencyKey:crypto.randomUUID()}})).status,409);
   });

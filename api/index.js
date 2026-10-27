@@ -1,16 +1,23 @@
 import apiModule from '../server/api.cjs';
-import emailJobModule from '../server/email-job.cjs';
+import workerAuthModule from '../server/worker-auth.cjs';
+import commerceJobModule from '../server/commerce-job.cjs';
 const { createApi } = apiModule;
-const { EMAIL_JOB_PATH, emailJobAuthorized } = emailJobModule;
+const { EMAIL_JOB_PATH, workerAuthorized } = workerAuthModule;
+const { COMMERCE_JOB_PATH } = commerceJobModule;
 let api;
 // Resend signs the original payload bytes; keep Vercel from parsing JSON first.
 export const config = { api: { bodyParser: false } };
 export default async function handler(req, res) {
   const pathname = new URL(req.url, 'https://localhost').pathname;
   // Reject unauthenticated scheduler probes before opening any database pool.
-  if (pathname === EMAIL_JOB_PATH && !emailJobAuthorized(req.headers, process.env)) {
+  const jobPath=pathname===EMAIL_JOB_PATH||pathname===COMMERCE_JOB_PATH;
+  if (jobPath && !workerAuthorized(req.headers, process.env,{path:pathname,method:req.method})) {
     res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end(JSON.stringify({error:{code:'JOB_UNAUTHORIZED',message:'Acesso não autorizado.'}}));
+  }
+  if(jobPath && req.method!=='GET'){
+    res.writeHead(405,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Allow':'GET'});
+    return res.end(JSON.stringify({error:{code:'METHOD_NOT_ALLOWED',message:'Método não permitido.'}}));
   }
   // Stop all application reads and writes before opening the database during a
   // planned migration. Some GET endpoints also create sessions or flush mail.

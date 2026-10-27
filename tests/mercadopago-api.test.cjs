@@ -200,6 +200,7 @@ for(const engine of ['sqlite','postgres']) test(`Mercado Pago ligado à API, com
     assert.equal((await db.prepare('SELECT stock FROM variants WHERE id=?').get(product.variants[0].id)).stock,0);
     assert.equal((await db.prepare("SELECT COUNT(*) n FROM stock_movements WHERE variant_id=? AND delta=-1").get(product.variants[0].id)).n,1);
     assert.equal((await db.prepare("SELECT COUNT(*) n FROM order_history WHERE order_id=? AND type='PAYMENT' AND status='APPROVED'").get(order.id)).n,1);
+    assert.equal((await admin.call('/api/admin/orders/'+order.id+'/shipping',{method:'PATCH',body:{status:'READY_TO_SHIP'}})).status,200);
     assert.equal((await admin.call('/api/admin/orders/'+order.id+'/shipping',{method:'PATCH',body:{status:'SHIPPED',trackingCode:'TEST123',trackingUrl:'https://example.test/tracking'}})).status,200);
     const events=(await db.prepare('SELECT COUNT(*) n FROM order_history WHERE order_id=?').get(order.id)).n;
     assert.equal((await admin.call('/api/admin/orders/'+order.id+'/shipping',{method:'PATCH',body:{status:'SHIPPED',trackingCode:'TEST123',trackingUrl:'https://example.test/tracking'}})).status,200);

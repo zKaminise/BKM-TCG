@@ -8,6 +8,8 @@ const { accountList } = require("./accounts.cjs");
 const { PaymentError, paymentReadiness } = require("./payments.cjs");
 const { allowedOrigins, safeReturnPath } = require('./domain-policy.cjs');
 const { EMAIL_JOB_PATH, emailJobAuthorized, createEmailJob } = require('./email-job.cjs');
+const { COMMERCE_JOB_PATH, createCommerceJob } = require('./commerce-job.cjs');
+const {shippingSettings,validateShippingSettings,hasConfiguredShipping,createShippingPolicy,REGION_STATES}=require('./shipping-policy.cjs');
 const uid = () => crypto.randomUUID();
 const now = () => (/* @__PURE__ */ new Date()).toISOString();
 const normalized = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\b0+(?=\d)/g, "");
@@ -87,6 +89,7 @@ function createApi(options = {}) {
   const effectiveEnv = { ...env, BKM_ENVIRONMENT: env.BKM_ENVIRONMENT || (env.VERCEL ? '' : 'demo'), PAYMENT_PROVIDER: env.PAYMENT_PROVIDER || 'mock' };
   const demo = effectiveEnv.BKM_ENVIRONMENT === 'demo';
   const demoPayments = demo && effectiveEnv.PAYMENT_PROVIDER === 'mock';
+  const shippingPolicy=createShippingPolicy({ApiError,fetchImpl:options.shippingFetch,production:effectiveEnv.BKM_ENVIRONMENT==='production'});
   const db = openStore({ ...options, env });
   const customerProfile = require('./customer-profile.cjs').createCustomerProfile({db,ApiError,hashPassword,verifyPassword});
   const google = require('./google-auth.cjs').createGoogleAuth({db,env:{...effectiveEnv,BKM_PUBLIC_URL:publicUrl},fetchImpl:options.googleFetch});
@@ -99,8 +102,13 @@ function createApi(options = {}) {
   const personal=require('./personal-collection.cjs').createPersonalCollection({db,ApiError,fetchImpl:options.catalogFetch,priceProvider:market.provider});
   let emailDispatcher;
   async function enqueueEmail(message) { return emailStore.enqueue(message); }
-  async function flushEmails({limit=10}={}) {
+  async function flushEmails({limit=10,deadlineAt}={}) {
     const { createEmailDispatcher, createEmailProvider } = require('./email.cjs');
+    if(deadlineAt!==undefined){
+      if(!Number.isFinite(deadlineAt)||Date.now()>=deadlineAt-1500)return {processed:0,sent:0,previewed:0,retried:0,failed:0};
+      const provider=createEmailProvider({env:effectiveEnv,deadlineAt});
+      return createEmailDispatcher({store:emailStore,provider,env:effectiveEnv}).flush({limit});
+    }
     emailDispatcher ||= createEmailDispatcher({store:emailStore,provider:createEmailProvider({env:effectiveEnv}),env:effectiveEnv});
     return emailDispatcher.flush({limit});
   }
@@ -117,14 +125,14 @@ function createApi(options = {}) {
   }
   async function settings() {
     const saved = JSON.parse((await db.prepare("SELECT value_json FROM settings WHERE id=1").get()).value_json);
-    return { ...defaultSettings, ...saved, shipping: { ...defaultSettings.shipping, ...saved.shipping } };
+    return { city:'',state:'',...defaultSettings, ...saved, shipping: shippingSettings({ ...defaultSettings.shipping, ...saved.shipping }) };
   }
   async function config() {
     const s = await settings();
     s.google=google.readiness();
     const payment = paymentReadiness(effectiveEnv);
     const available=payment.enabled && (demoPayments || !s.demoDataVersion);
-    return { ...s, freeShippingThresholdCents: s.shipping.freeShippingEnabled ? s.shipping.freeShippingThresholdCents : null, environment: effectiveEnv.BKM_ENVIRONMENT || 'unconfigured',demo,paymentConfigured:available, shippingConfigured:s.shipping.enabled, payments:{available,provider:payment.provider,environment:payment.environment,demo:payment.demo,canCharge:available && payment.canCharge,reason:!demo && s.demoDataVersion?'O banco demonstrativo não aceita cobranças externas.':payment.reason,...(available && payment.provider==='mercadopago'?{publicKey:effectiveEnv.MERCADO_PAGO_PUBLIC_KEY}:{})} };
+    return { ...s, freeShippingThresholdCents: s.shipping.freeShippingEnabled ? s.shipping.freeShippingThresholdCents : null, environment: effectiveEnv.BKM_ENVIRONMENT || 'unconfigured',demo,paymentConfigured:available, shippingConfigured:hasConfiguredShipping(s.shipping,{production:effectiveEnv.BKM_ENVIRONMENT==='production'}), payments:{available,provider:payment.provider,environment:payment.environment,demo:payment.demo,canCharge:available && payment.canCharge,reason:!demo && s.demoDataVersion?'O banco demonstrativo não aceita cobranças externas.':payment.reason,...(available && payment.provider==='mercadopago'?{publicKey:effectiveEnv.MERCADO_PAGO_PUBLIC_KEY}:{})} };
   }
   function limit(req, scope, max, windowMs = 15 * 60 * 1e3) {
     const key = `${req.socket?.remoteAddress || "serverless"}:${scope}`;
@@ -188,7 +196,11 @@ function createApi(options = {}) {
     return { sets: [...uniqueSets.values()].sort((a,b)=>a.name.localeCompare(b.name,'pt-BR')), languages: [...new Set(vs.map((x) => x.language))], conditions: [...new Set(vs.map((x) => x.condition))], finishes: [...new Set(vs.map((x) => x.finish))] };
   }
   async function listProducts(query, admin = false) {
-    const clauses = [admin ? "1=1" : "p.published=1 AND p.archived=0"], params = [];
+    const archived=query.get('archived');
+    if(query.has('archived')&&(query.getAll('archived').length!==1||!['all','only'].includes(archived)))fail('VALIDATION','Escolha todos os produtos ou somente os arquivados.');
+    // Archive inspection is an explicit admin capability. Public queries always
+    // retain publication/archive visibility even when that parameter is supplied.
+    const clauses = [admin ? archived==='all'?'1=1':archived==='only'?'p.archived=1':'p.archived=0' : "p.published=1 AND p.archived=0"], params = [];
     if (query.get("kind")) {
       const v = query.get("kind");
       if (!["SEALED", "SINGLE"].includes(v)) fail("VALIDATION", "Tipo de produto inválido.");
@@ -271,6 +283,9 @@ function createApi(options = {}) {
     if (data.attributes && typeof data.attributes === "object" && !Array.isArray(data.attributes)) {
       for (const k of ["category", "manufacturer", "contents", "specifications", "series", "sellerNotes", "weightGrams", "widthCm", "heightCm", "lengthCm"]) if (data.attributes[k] != null) attributes[k] = text(String(data.attributes[k]), k, 3e3);
     }
+    const demoRecord=data.attributes?.demo===true||existing&&JSON.parse(existing.attributes_json).demo===true||/^DEMO(?:[-_]|$)/i.test(sku)||existing&&/^DEMO(?:[-_]|$)/i.test(existing.sku);
+    if(demoRecord)attributes.demo=true;
+    if(demoRecord&&data.published===true&&['production','staging'].includes(effectiveEnv.BKM_ENVIRONMENT))fail('DEMO_PRODUCT_PUBLISH_BLOCKED','Produtos de demonstração não podem ser publicados neste ambiente. Cadastre um produto com estoque real.',undefined,409);
     return { id: existing?.id || uid(), kind, name, slug, sku, setId, setName, tcg, description, images, variants, card, attributes, featured: data.featured === true, published: data.published === true };
   }
   async function saveProduct(data, actor, existing) {
@@ -341,21 +356,18 @@ function createApi(options = {}) {
       coupon2 = code;
     }
     const saved=await settings(),s=saved.shipping;
-    const cep = String(data.cep || "").replace(/\D/g, "");
-    if (cep && cep.length !== 8) fail("INVALID_CEP", "Informe um CEP com oito números.");
     const net = subtotalCents - discountCents;
-    const regional = cep && (!s.regions.length || s.regions.some((r) => cep >= r.start && cep <= r.end));
-    const eligible = !!(s.enabled && regional);
-    const free = !!(eligible && s.freeShippingEnabled && s.freeShippingThresholdCents != null && net >= s.freeShippingThresholdCents);
-    const shippingCents = eligible ? free ? 0 : s.flatRateCents : null;
-    const reason = !s.enabled ? "Frete ainda não configurado pela loja." : !cep ? "Informe o CEP para calcular a entrega." : !regional ? "Entrega indisponível para este CEP." : null;
+    const shipping=await shippingPolicy.quote({settings:s,netCents:net,cep:data.cep || data.address?.zip || data.address?.postalCode,deliveryMode:data.deliveryMode || data.shippingMethod || data.shipping?.deliveryMode || data.shipping?.method || 'delivery',address:data.address});
+    const {shippingCents,reason}=shipping;
     const payment=paymentReadiness(effectiveEnv),paymentAvailable=payment.enabled && (demoPayments || !saved.demoDataVersion);
-    return { items, subtotalCents, discountCents, shippingCents, totalCents: shippingCents == null ? null : net + shippingCents, coupon: coupon2, errors: [], shipping: { available: eligible, reason, cep, free, estimatedDays: eligible ? s.estimatedDays : null, freeShippingThresholdCents: s.freeShippingEnabled ? s.freeShippingThresholdCents : null, remainingForFreeShippingCents: s.enabled && s.freeShippingEnabled ? Math.max(0, s.freeShippingThresholdCents - net) : null, demo:demo || !!saved.demoDataVersion }, paymentAvailable, demo, environment:effectiveEnv.BKM_ENVIRONMENT || 'unconfigured', reason:reason || (paymentAvailable ? payment.reason : 'Pagamentos indisponíveis neste ambiente.') };
+    return { items, subtotalCents, discountCents, shippingCents, totalCents: shippingCents == null ? null : net + shippingCents, coupon: coupon2, errors: [], shipping: {...shipping,demo:demo || !!saved.demoDataVersion}, paymentAvailable, demo, environment:effectiveEnv.BKM_ENVIRONMENT || 'unconfigured', reason:reason || (paymentAvailable ? payment.reason : 'Pagamentos indisponíveis neste ambiente.') };
   }
   async function saveSettings(data, user) {
     const current = await settings(), result = { ...current };
-    for (const key of ["storeName", "contactEmail", "whatsapp", "instagram", "companyName", "cnpj", "address", "heroTitle", "heroSubtitle", "about", "shippingPolicy", "returnsPolicy", "privacyPolicy", "terms"]) if (key in data) result[key] = text(data[key], key, ["about", "shippingPolicy", "returnsPolicy", "privacyPolicy", "terms"].includes(key) ? 2e4 : 400, key === "storeName");
+    for (const key of ["storeName", "contactEmail", "whatsapp", "instagram", "companyName", "cnpj", "address", "city", "state", "heroTitle", "heroSubtitle", "about", "shippingPolicy", "returnsPolicy", "privacyPolicy", "terms"]) if (key in data) result[key] = text(data[key], key, ["about", "shippingPolicy", "returnsPolicy", "privacyPolicy", "terms"].includes(key) ? 2e4 : 400, key === "storeName");
     if (result.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.contactEmail)) fail("VALIDATION", "E-mail de contato inválido.");
+    if(result.state){result.state=result.state.toUpperCase();if(!Object.values(REGION_STATES).some(states=>states.includes(result.state)))fail('VALIDATION','Informe uma UF brasileira válida.');}
+    if(result.city.length>120)fail('VALIDATION','Informe uma cidade de até 120 caracteres.');
     if ('categories' in data) {
       if(!Array.isArray(data.categories) || data.categories.length>30) fail('VALIDATION','Informe até 30 categorias.');
       result.categories=[...new Set(data.categories.map(value=>text(value,'categoria',100,true)))];
@@ -369,21 +381,9 @@ function createApi(options = {}) {
       });
     }
     if (data.shipping) {
-      const s = { ...current.shipping, ...data.shipping };
-      s.enabled = bool(s.enabled, "shipping.enabled");
-      s.flatRateCents = integer(s.flatRateCents, "shipping.flatRateCents");
-      s.estimatedDays = integer(s.estimatedDays, "shipping.estimatedDays", 0, 365);
-      s.freeShippingEnabled = bool(s.freeShippingEnabled, "shipping.freeShippingEnabled");
-      s.freeShippingThresholdCents = s.freeShippingThresholdCents == null ? null : integer(s.freeShippingThresholdCents, "shipping.freeShippingThresholdCents", 1);
-      if (s.freeShippingEnabled && s.freeShippingThresholdCents == null) fail("VALIDATION", "Informe o valor mínimo de frete grátis.");
-      if (!Array.isArray(s.regions) || s.regions.length > 100) fail("VALIDATION", "Regiões de entrega inválidas.");
-      s.regions = s.regions.map((r) => {
-        const start = text(r.start, "CEP inicial", 8, true).replace(/\D/g, ""), end = text(r.end, "CEP final", 8, true).replace(/\D/g, "");
-        if (start.length !== 8 || end.length !== 8 || start > end) fail("VALIDATION", "Faixa de CEP inválida.");
-        return { start, end };
-      });
-      result.shipping = s;
+      result.shipping = validateShippingSettings(data.shipping,current.shipping,{fail,store:result});
     }
+    else if(['address','city','state','whatsapp'].some(key=>key in data))result.shipping=validateShippingSettings({},current.shipping,{fail,store:result});
     await transaction(db, async () => {
       (await db.prepare("UPDATE settings SET value_json=?,updated_at=? WHERE id=1").run(JSON.stringify(result), now()));
       await audit(user.id, "SETTINGS_UPDATED", "store", { fields: Object.keys(data) });
@@ -419,6 +419,7 @@ function createApi(options = {}) {
   }
   const { createOrders } = require('./orders.cjs');
   const orders = createOrders({db,quote,env:effectiveEnv,audit,ApiError,enqueueEmail,paymentProvider:options.paymentProvider});
+  const runCommerceJob=createCommerceJob({expireOrders:options=>orders.expireDue(options),flushEmails});
   const order = orders.serialize;
   async function dispatch(req, res, pathname) {
     const respond = (status, data) => {
@@ -426,11 +427,11 @@ function createApi(options = {}) {
       res.end(JSON.stringify(data));
     };
     try {
-      if(pathname===EMAIL_JOB_PATH) {
-        if(!emailJobAuthorized(req.headers,effectiveEnv))return respond(401,{error:{code:'JOB_UNAUTHORIZED',message:'Acesso não autorizado.'}});
+      if(pathname===EMAIL_JOB_PATH || pathname===COMMERCE_JOB_PATH) {
+        if(!emailJobAuthorized(req.headers,effectiveEnv,{path:pathname,method:req.method}))return respond(401,{error:{code:'JOB_UNAUTHORIZED',message:'Acesso não autorizado.'}});
         if(req.method!=='GET') {res.setHeader('Allow','GET');return respond(405,{error:{code:'METHOD_NOT_ALLOWED',message:'Método não permitido.'}});}
         await db.ready;
-        return respond(200,await runEmailJob());
+        return respond(200,await (pathname===COMMERCE_JOB_PATH?runCommerceJob():runEmailJob()));
       }
       await db.ready;
       if(req.method==='POST' && pathname==='/api/email/webhook/resend') {
@@ -557,7 +558,7 @@ function createApi(options = {}) {
         });
         return respond(200,{message:'Senha atualizada. Entre novamente com sua nova senha.'});
       }
-      if (method === "POST" && pathname === "/api/checkout/quote") return respond(200, await quote(await readJson(req)));
+      if (method === "POST" && pathname === "/api/checkout/quote") { if(orders.expireDue)await orders.expireDue();return respond(200, await quote(await readJson(req))); }
       if (method === "POST" && pathname === "/api/checkout") {
         const user=auth(session),created=await orders.create(await readJson(req),user);
         await notifications.markCartConverted(user.id);await flushSafely();
@@ -618,7 +619,7 @@ function createApi(options = {}) {
         if (/^\/api\/account\/orders\/[^/]+\/simulate$/.test(pathname) && method === 'POST') return respond(200,{order:await orders.simulate(pathname.split('/')[4],await readJson(req),user)});
         if (/^\/api\/account\/orders\/[^/]+\/payment$/.test(pathname) && method === 'POST') return respond(200,{order:await orders.payment(pathname.split('/')[4],await readJson(req),user)});
         if (/^\/api\/account\/orders\/[^/]+\/reconcile$/.test(pathname) && method === 'POST') return respond(200,{order:await orders.reconcile(pathname.split('/')[4],user)});
-        if (pathname === "/api/account/orders" && method === "GET") return respond(200, { items: await Promise.all((await db.prepare("SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").all(user.id)).map(order)) });
+        if (pathname === "/api/account/orders" && method === "GET") return respond(200, { items: await orders.serializeMany(await db.prepare("SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").all(user.id)) });
         if (/^\/api\/account\/orders\/[^/]+$/.test(pathname) && method === "GET") {
           const row = (await db.prepare("SELECT * FROM orders WHERE id=? AND user_id=?").get(pathname.split("/").at(-1), user.id));
           if (!row) throw new ApiError(404, "ORDER_NOT_FOUND", "Pedido não encontrado.");
@@ -645,7 +646,8 @@ function createApi(options = {}) {
         }
         if(pathname==='/api/admin/integrations' && method==='GET') {
           const counts=await db.prepare("SELECT COUNT(*) count FROM personal_wishlist WHERE enabled=1").get();
-          return respond(200,{google:google.readiness(),email:require('./email.cjs').emailReadiness(effectiveEnv),payments:paymentReadiness(effectiveEnv),publicUrl,prices:{provider:'admin_manual',automatic:false,reason:'Referências manuais autorizadas em BRL; integração automática Liga pendente de autorização.'},wishlist:{subscriptions:counts.count},abandonedCart:{enabled:false},shipping:require('./shipping-provider.cjs').shippingReadiness(effectiveEnv)});
+          const storeSettings=await settings(),configured=hasConfiguredShipping(storeSettings.shipping,{production:effectiveEnv.BKM_ENVIRONMENT==='production'});
+          return respond(200,{google:google.readiness(),email:require('./email.cjs').emailReadiness(effectiveEnv),payments:paymentReadiness(effectiveEnv),publicUrl,prices:{provider:'admin_manual',automatic:false,reason:'Referências manuais autorizadas em BRL; integração automática Liga pendente de autorização.'},wishlist:{subscriptions:counts.count},abandonedCart:{enabled:false},shipping:{provider:'store_regional',environment:effectiveEnv.BKM_ENVIRONMENT,configured,enabled:configured,mode:'regional_rates_manual_fulfillment',reason:configured?'Tarifas e modalidades definidas pela loja; postagem e rastreio registrados pela administração.':'Configure tarifas regionais, retirada ou entrega local antes de aceitar pedidos.',carrierIntegration:require('./shipping-provider.cjs').shippingReadiness(effectiveEnv)}});
         }
         if(pathname==='/api/admin/collections' && method==='GET') return respond(200,await collections.list(query));
         if(pathname==='/api/admin/collections' && method==='POST') return respond(201,await collections.save(await readJson(req),user));
@@ -699,7 +701,7 @@ function createApi(options = {}) {
           if(!row) throw new ApiError(404,'ORDER_NOT_FOUND','Pedido não encontrado.');
           return respond(200,await order(row));
         }
-        if (pathname === "/api/admin/orders" && method === "GET") return respond(200, { items: await Promise.all((await db.prepare("SELECT * FROM orders ORDER BY created_at DESC LIMIT 200").all()).map(order)) });
+        if (pathname === "/api/admin/orders" && method === "GET") return respond(200, { items: await orders.serializeMany(await db.prepare("SELECT * FROM orders ORDER BY created_at DESC LIMIT 200").all()) });
         if (pathname === "/api/admin/summary" && method === "GET") {
           const count = async (sql) => (await db.prepare(sql).get()).value;
           return respond(200, { products: await count("SELECT COUNT(*) value FROM products WHERE archived=0"), published: await count("SELECT COUNT(*) value FROM products WHERE archived=0 AND published=1"), stockUnits: await count("SELECT COALESCE(SUM(v.stock),0) value FROM variants v JOIN products p ON p.id=v.product_id WHERE v.active=1 AND p.archived=0"), singles: await count("SELECT COUNT(*) value FROM products WHERE archived=0 AND kind='SINGLE'"), sealed: await count("SELECT COUNT(*) value FROM products WHERE archived=0 AND kind='SEALED'"), lowStock: await count("SELECT COUNT(*) value FROM variants WHERE active=1 AND stock BETWEEN 1 AND 2"), outOfStock: await count("SELECT COUNT(*) value FROM variants WHERE active=1 AND stock=0"), orders: await count("SELECT COUNT(*) value FROM orders"), pendingOrders: await count("SELECT COUNT(*) value FROM orders WHERE payment_status='PENDING'"), paidOrders: await count("SELECT COUNT(*) value FROM orders WHERE payment_status IN('PAID','APPROVED')"), confirmedRevenueCents: await count("SELECT COALESCE(SUM(total_cents),0) value FROM orders WHERE payment_status IN('PAID','APPROVED')") });

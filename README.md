@@ -1,21 +1,15 @@
-# BKM TCG — Fase 3
+# BKM TCG
 
-E-commerce demonstrativo de Pokémon TCG e gerenciador privado de coleções pessoais. A identidade BKM — preto, vermelho, ciano e prata — e a animação 3D do booster com Pikachu foram preservadas.
+E-commerce de Pokémon TCG e gerenciador privado de coleções. A identidade BKM e a animação 3D do booster com Pikachu são preservadas. Produção e homologação financeira usam projetos e bancos separados.
 
-- Site oficial: [lojabkm.com.br](https://lojabkm.com.br/).
-- Repositório: [zKaminise/BKM-TCG](https://github.com/zKaminise/BKM-TCG), branch `main`.
-- Diretório de trabalho: `D:\Importante\Codex\LP Vendas TCG Site`.
-- Endereço anterior de demonstração: [bkm-tcg-demo.vercel.app](https://bkm-tcg-demo.vercel.app/).
+- Loja: [lojabkm.com.br](https://lojabkm.com.br/).
+- [Guia de operação e compra com retirada](docs/OPERACAO-PRODUCAO.md).
+- [Worker de reservas e e-mails, incluindo Supabase Cron no Hobby](docs/CRON-COMERCIO.md).
+- [Relatórios históricos da fase 3](docs/RELATORIO-FASE3.md) e [validações anteriores](docs/VALIDACAO.md).
 
-**Estado em 21/10/2026:** o código está publicado no [commit `fdbb91c`](https://github.com/zKaminise/BKM-TCG/commit/fdbb91c6bf24f0306c98e2fb17ed407d87bee1a6), com **265 testes**, sintaxe aprovada e [CI 39642646628 com sucesso](https://github.com/zKaminise/BKM-TCG/actions/runs/39642646628). Deployments Success desse código: principal `GRuxVzXNnseYFDWhBYD1a4TrbCij` e sandbox `AVSCdA9YAMiJ4LPAxdMzApFMLbVM`. Pix, cartões `OTHE`/`APRO` e reembolso integral do cartão APRO têm provas autoritativas e recibos autenticados no sandbox. O disparo manual do cron pelo painel Vercel respondeu **200**, após configurar a chave Production; a tentativa local com Bearer continuou 401. **Resumo controlado entregue; alerta imediato e disparo agendado natural ainda não comprovados**. Provas e limites em [docs/VALIDACAO.md](docs/VALIDACAO.md).
+Esta versão acrescenta reserva de estoque de 15 minutos antes do pagamento, retomada do pedido, frete grátis configurável, tarifas regionais, retirada/entrega local e comunicação por etapa. O catálogo demonstrativo do banco principal foi arquivado com backup: a oferta comercial depende de cadastrar e publicar estoque real pelo painel. Contas, pedidos e coleções pessoais foram preservados.
 
-O principal usa agora o Supabase **BKM ecommerce** (`cxoeompxmgdzufgzxerw`). A migração PostgreSQL para PostgreSQL preservou **40 tabelas, 230 registros e 2 objetos Storage**, com conferência de SHA-256, integridade, RLS e origem inalterada. Após a migration **008**, a leitura PostgreSQL de ambos os ambientes confirmou **41 tabelas, 41 com RLS e zero grants públicos**, com zero eventos de resumo pendentes naquele momento. A auditoria do cutover havia encontrado 3 usuários, 4 pedidos e as 2 referências de imagens apontando ao novo projeto, sem referência persistida ao Storage anterior.
-
-As variáveis privadas de banco e Storage da Vercel Production e o `.env` local apontam ao novo principal. O banco anterior (`nxrvmanifngjmdtgnzoq`) e o `.env.old-main` foram preservados para continuidade. A manutenção foi encerrada; `/api/config` confirmou demonstração, pagamento mock, `canCharge=false` e Google habilitado, com 15 produtos observados no catálogo. Esse principal permanece separado da homologação financeira.
-
-A instalação principal permanece em **demonstração, sem vendas ou cobranças reais**. Preços, estoque, frete e pedidos comerciais usados no QA são ilustrativos. A homologação Mercado Pago deve ocorrer em projeto e banco separados.
-
-Relatório completo da execução, funcionalidades, bugs corrigidos, provas e limites: [docs/RELATORIO-FASE3.md](docs/RELATORIO-FASE3.md).
+Credenciais, ativação de pagamentos e execução do scheduler são configurações privadas do ambiente; a presença do código não comprova uma compra real. A validação final de recebimento e liquidação ocorre na compra realizada pelo cliente e na conta Mercado Pago do vendedor.
 
 ## Abrir localmente
 
@@ -38,7 +32,7 @@ Para um banco novo, `CONFIGURAR ADMIN.cmd` ou `npm run admin:create` cria o prim
 ## Loja e administração
 
 - Catálogo persistente de lacrados e cartas avulsas, organizado por coleção, com busca, filtros, ordenação, imagens, zoom e relacionados.
-- Carrinho com drawer, favoritos de produtos, cupons e checkout demonstrativo. Pedidos mantêm snapshots, histórico, reserva e baixa transacional de estoque; repetições idempotentes não criam nova baixa.
+- Carrinho com drawer, favoritos de produtos, cupons e checkout Pix/cartão quando configurado; simulação apenas em demonstração. Pedidos mantêm snapshots, histórico, reserva e baixa transacional de estoque; repetições idempotentes não criam nova baixa.
 - Painel para produtos, variantes, estoque, imagens, coleções e aliases, pedidos, rastreamento informado, cupons, banners, configurações, e-mails e status das integrações.
 - Importação de identidade e metadados pela TCGdex, separada do preço, condição e estoque comercial.
 - Header com SVGs locais reconhecíveis e navegação de perfil em desktop e celular.
@@ -93,7 +87,7 @@ A revisão `4ca7a0c` aprovou **265 testes locais, sintaxe e CI**, com deployment
 
 A última cópia manual AES-256-GCM comprovada do principal, após a migration 008, registrou **41 tabelas, 199 registros e 2 objetos**, com restauração em SQLite novo e isolado, `integrity=ok` e `remoteTarget=false`. Os snapshots anteriores de 233 e 244 registros e a migração de 230 permanecem preservados; contagens variam com o uso e a expiração de sessões. Chave e conteúdo ficam privados, fora de Git e ZIP público. Retenção continua manual, sem agendamento ativo. Hashes e procedimento em [docs/BACKUP.md](docs/BACKUP.md).
 
-O Vercel Hobby continua destinado a demonstração não comercial, com `noindex`. Abertura comercial requer infraestrutura elegível, dados empresariais e políticas definitivas, logística e homologações. Não há autorização automática para cobranças reais.
+A hospedagem mantém o plano escolhido pelo proprietário. O scheduler frequente pode ser executado pelo Supabase; o cron nativo diário da Vercel é mantido. A ativação comercial é explícita e depende de credenciais de produção e catálogo real, conforme os guias de operação e worker.
 
 Configuração e estado: [docs/DEPLOY.md](docs/DEPLOY.md). Contratos: [docs/INTEGRACOES.md](docs/INTEGRACOES.md). Dependências restantes: [docs/PENDENCIAS.md](docs/PENDENCIAS.md).
 

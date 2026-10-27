@@ -1,7 +1,7 @@
 'use strict';
 
 const { createHash, createHmac, timingSafeEqual } = require('node:crypto');
-const TEMPLATES = Object.freeze(['welcome','email-verification','password-reset','order-confirmation','payment-approved','payment-rejected','order-preparing','order-shipped','order-delivered','order-cancelled','order-refunded','wishlist-available','wishlist-digest','abandoned-cart','tracking-update']);
+const TEMPLATES = Object.freeze(['welcome','email-verification','password-reset','order-confirmation','payment-pending','payment-approved','payment-rejected','order-preparing','order-ready-to-ship','admin-order-paid','order-shipped','order-delivered','order-cancelled','order-refunded','wishlist-available','wishlist-digest','abandoned-cart','tracking-update']);
 const NON_TRANSACTIONAL = new Set(['wishlist-available','wishlist-digest','abandoned-cart']);
 const sha = value => createHash('sha256').update(value).digest('hex');
 const clean = (value, max = 500) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, max);
@@ -63,6 +63,7 @@ function renderEmail(template, data = {}, { env = process.env, redactSecrets = f
   const base = publicBase(env), demo = env.HOSTING_DEMO_ONLY === 'true' || env.BKM_ENVIRONMENT === 'demo' || data.demo === true;
   const storeName = clean(data.storeName || 'BKM TCG', 100), name = clean(data.customerName || data.name || 'colecionador', 100);
   const number = clean(data.orderNumber || data.number || '', 80);
+  const deliveryMode=data.deliveryMode || data.shipping?.deliveryMode || data.address?.deliveryMode || 'delivery';
   const orderLink = safeLink(data.orderUrl || `/conta/pedidos/${encodeURIComponent(data.orderId || '')}`, base) || `${base}/conta`;
   const wishlist = template === 'wishlist-available' || template === 'wishlist-digest';
   const items = Array.isArray(data.items) ? data.items.slice(0, 50) : [];
@@ -70,13 +71,16 @@ function renderEmail(template, data = {}, { env = process.env, redactSecrets = f
   const messages = {
     welcome: ['Bem-vindo à BKM TCG', `Olá, ${name}. Sua conta na ${storeName} foi criada. Acesse a loja para explorar sua próxima descoberta.`, 'Explorar a loja', base],
     'order-confirmation': [`Pedido ${number} recebido`, `Olá, ${name}. Recebemos o pedido ${number}. Você pode acompanhar os detalhes e o andamento na sua conta.`, 'Ver pedido', orderLink],
+    'payment-pending': [`Aguardando pagamento do pedido ${number}`, `Olá, ${name}. Seu pedido ${number} está reservado por 15 minutos a partir da confirmação. Volte ao pedido para concluir o pagamento dentro do prazo exibido. Sem confirmação nesse prazo, o pedido é encerrado e os itens voltam ao estoque.`, 'Retomar pagamento', orderLink],
     'payment-approved': [`Pagamento do pedido ${number} aprovado`, `Olá, ${name}. O pagamento do pedido ${number} foi aprovado${demo ? ' na simulação' : ''}. Acompanhe os próximos passos na sua conta.`, 'Acompanhar pedido', orderLink],
     'payment-rejected': [`Pagamento do pedido ${number} recusado`, `Olá, ${name}. O pagamento do pedido ${number} não foi aprovado${demo ? ' na simulação' : ''}. Consulte o pedido para conferir o resultado.`, 'Ver pedido', orderLink],
     'order-shipped': [`Pedido ${number} enviado`, `Olá, ${name}. O pedido ${number} foi enviado${demo ? ' no fluxo de demonstração' : ''}. Consulte os detalhes de entrega.`, 'Acompanhar entrega', orderLink],
     'tracking-update': [`Rastreamento do pedido ${number}`, `Olá, ${name}. Há uma atualização no rastreamento do pedido ${number}.`, 'Ver rastreamento', orderLink],
     'password-reset': ['Recuperação de senha — BKM TCG', `Olá, ${name}. Recebemos uma solicitação para redefinir sua senha. Se você não fez essa solicitação, ignore esta mensagem. O link é de uso único e expira em 30 minutos.`, 'Redefinir senha', redactSecrets ? `${base}/recuperar-senha` : safeLink(data.resetUrl, base)],
     'email-verification': ['Confirme seu e-mail — BKM TCG', `Olá, ${name}. Confirme o endereço de e-mail da sua conta pelo link seguro. Se não criou a conta, ignore esta mensagem.`, 'Confirmar e-mail', redactSecrets ? `${base}/conta` : safeLink(data.verificationUrl,base)],
-    'order-preparing': [`Pedido ${number} em preparação`, `Olá, ${name}. Seu pedido ${number} está em preparação. Acompanhe as informações na sua conta.`, 'Ver pedido', orderLink],
+    'order-preparing': [`Pedido ${number} em separação`, `Olá, ${name}. O pagamento foi confirmado e seu pedido ${number} está em separação. Acompanhe as informações na sua conta.`, 'Ver pedido', orderLink],
+    'order-ready-to-ship': deliveryMode==='pickup' ? [`Pedido ${number} pronto para retirada`, `Olá, ${name}. Seu pedido ${number} foi separado e está pronto para retirada. Consulte o pedido e combine a retirada pelo contato da loja.`, 'Ver pedido', orderLink] : [`Pedido ${number} separado para ${deliveryMode==='local'?'entrega local':'envio'}`, `Olá, ${name}. Seu pedido ${number} foi separado para ${deliveryMode==='local'?'entrega local':'envio'}. Você receberá outra mensagem quando a ${deliveryMode==='local'?'entrega':'postagem ou entrega'} for registrada.`, 'Ver pedido', orderLink],
+    'admin-order-paid': [`Pagamento recebido — separar pedido ${number}`, data.needsReview ? `O pagamento do pedido ${number} foi confirmado pelo Mercado Pago, mas exige revisão financeira ou de estoque. Não prometa envio antes de resolver a revisão no painel.` : `O pagamento do pedido ${number}, de ${clean(data.customerName || 'cliente',100)}, foi confirmado. O pedido está em separação. Confira os itens no painel administrativo.`, 'Abrir pedido no painel', orderLink],
     'order-delivered': [`Pedido ${number} entregue`, `Olá, ${name}. A entrega do pedido ${number} foi confirmada. Você pode conferir os itens e adicionar cartas recebidas à sua coleção.`, 'Ver pedido',orderLink],
     'order-cancelled': [`Pedido ${number} cancelado`, `Olá, ${name}. O pedido ${number} foi cancelado. Confira o histórico na sua conta.`, 'Ver pedido',orderLink],
     'order-refunded': [`Reembolso do pedido ${number}`, `Olá, ${name}. Há uma atualização de reembolso confirmada para o pedido ${number}. Consulte os detalhes na sua conta.`, 'Ver pedido',orderLink],
@@ -90,13 +94,15 @@ function renderEmail(template, data = {}, { env = process.env, redactSecrets = f
   const tableRows = wishlist ? '' : items.map(item => `<tr><td style="padding:12px 0;border-bottom:1px solid #282d33;color:#f4f5f6">${escape(item.name || item.productName)} <span style="color:#a1a6ad">× ${Number.isInteger(item.quantity) ? item.quantity : 1}</span></td><td style="padding:12px 0;text-align:right;border-bottom:1px solid #282d33;white-space:nowrap;color:#f4f5f6">${escape(money(item.subtotalCents ?? ((item.priceCents ?? item.unitPriceCents ?? 0) * (item.quantity || 1))))}</td></tr>`).join('');
   const totals = wishlist ? (cards.length ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:24px 0">${cards.map(card => card.html).join('')}</table>` : '') : items.length ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:24px 0;font-size:14px">${tableRows}<tr><td style="padding-top:16px;color:#a1a6ad">Subtotal</td><td align="right" style="padding-top:16px;color:#f4f5f6">${escape(money(data.subtotalCents))}</td></tr><tr><td style="color:#a1a6ad">Desconto</td><td align="right" style="color:#f4f5f6">− ${escape(money(data.discountCents))}</td></tr><tr><td style="color:#a1a6ad">Frete${demo ? ' demonstrativo' : ''}</td><td align="right" style="color:#f4f5f6">${escape(money(data.shippingCents))}</td></tr><tr><td style="padding-top:12px;font-weight:bold;color:#f4f5f6">Total</td><td align="right" style="padding-top:12px;font-size:22px;font-weight:bold;color:#44e5ed">${escape(money(data.totalCents))}</td></tr></table>` : '';
   const notice = demo ? '<p style="padding:12px;background:#29191d;border:1px solid #ff3038;color:#ff969b;font-size:12px">DEMONSTRAÇÃO — dados e pagamentos de teste. Nenhuma cobrança ou entrega comercial foi realizada.</p>' : '';
-  const tracking = !wishlist && data.trackingCode ? `<p style="color:#d0d5db">Código de rastreamento: <strong>${escape(data.trackingCode)}</strong></p>` : '';
+  const externalTracking=safeLink(data.trackingUrl || data.tracking?.url,base,{sameOrigin:false});
+  const trackingCode=data.trackingCode || data.tracking?.code;
+  const tracking = !wishlist && trackingCode ? `<p style="color:#d0d5db">Código de rastreamento: <strong>${escape(trackingCode)}</strong>${data.carrier || data.tracking?.carrier ? `<br>Transportadora: ${escape(data.carrier || data.tracking.carrier)}` : ''}${externalTracking ? `<br><a href="${escape(externalTracking)}" style="color:#44e5ed">Rastrear entrega</a>` : ''}</p>` : '';
   const preferencesUrl = `${base}/conta/preferencias`;
   const footer = wishlist ? `Você recebe este alerta porque autorizou notificações da sua lista de desejos.<br><a href="${escape(preferencesUrl)}" style="color:#44e5ed">Gerenciar preferências e desativar alertas</a>` : 'E-mail transacional referente à sua conta ou pedido.';
   const redacted = redactSecrets && ['password-reset','email-verification'].includes(template) ? '<p style="color:#a1a6ad;font-size:12px">Prévia segura: o token de recuperação foi omitido. Nenhum e-mail foi enviado.</p>' : '';
   const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(subject)}</title></head><body style="margin:0;padding:28px 12px;background:#070809;font-family:Arial,Helvetica,sans-serif;color:#f4f5f6"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><table role="presentation" width="560" cellspacing="0" cellpadding="0" style="width:100%;max-width:560px;background:#111417;border:1px solid #282d33;border-top:3px solid #ff3038;border-radius:16px"><tr><td style="padding:32px"><a href="${escape(base)}"><img src="${escape(`${base}/assets/bkm-logo-original.png`)}" width="96" height="96" alt="BKM TCG" style="display:block;border:0"></a><p style="font-size:11px;letter-spacing:3px;color:#44e5ed">SUA PRÓXIMA DESCOBERTA</p>${notice}<h1 style="font-size:26px;line-height:1.2;color:#f4f5f6">${escape(subject)}</h1><p style="font-size:15px;line-height:1.7;color:#d0d5db">${escape(message)}</p>${totals}${tracking}<p style="margin:28px 0"><a href="${escape(url || base)}" style="display:inline-block;background:#ff3038;color:#fff;font-weight:bold;text-decoration:none;padding:15px 22px;border-radius:8px">${escape(cta)}</a></p>${redacted}<p style="margin-top:32px;border-top:1px solid #282d33;padding-top:20px;font-size:12px;line-height:1.7;color:#a1a6ad">${escape(storeName)}<br>${footer}<br>${escape(data.storeContact || '')}</p></td></tr></table></td></tr></table></body></html>`;
   const itemLines = wishlist ? cards.map(card => card.text) : items.map(item => `${clean(item.name || item.productName)} × ${item.quantity || 1}`);
-  const lines = [demo ? 'DEMONSTRAÇÃO — nenhuma cobrança ou entrega comercial.' : '', subject, message, ...itemLines, !wishlist && items.length ? `Total: ${money(data.totalCents)}` : '', !wishlist && data.trackingCode ? `Rastreamento: ${clean(data.trackingCode)}` : '', `${cta}: ${url || base}`, redactSecrets && template === 'password-reset' ? 'Prévia segura: token de recuperação omitido; nenhum envio externo.' : '', wishlist ? `Você recebe este alerta porque autorizou notificações da sua lista de desejos.\nGerenciar preferências e desativar alertas: ${preferencesUrl}` : '', storeName].filter(Boolean);
+  const lines = [demo ? 'DEMONSTRAÇÃO — nenhuma cobrança ou entrega comercial.' : '', subject, message, ...itemLines, !wishlist && items.length ? `Total: ${money(data.totalCents)}` : '', !wishlist && trackingCode ? `Rastreamento: ${clean(trackingCode)}` : '', externalTracking?`Rastrear entrega: ${externalTracking}`:'', `${cta}: ${url || base}`, redactSecrets && template === 'password-reset' ? 'Prévia segura: token de recuperação omitido; nenhum envio externo.' : '', wishlist ? `Você recebe este alerta porque autorizou notificações da sua lista de desejos.\nGerenciar preferências e desativar alertas: ${preferencesUrl}` : '', storeName].filter(Boolean);
   return { template, demo, subject: `${demo ? '[DEMONSTRAÇÃO] ' : ''}${subject}`, html, text: lines.join('\n\n') };
 }
 
@@ -124,15 +130,20 @@ function emailReadiness(env = process.env) {
   const controlledDemo=env.BKM_ENVIRONMENT==='demo'&&env.RESEND_DEMO_TEST_ENABLED==='true'&&allowlist.length>0;
   const development = !controlledDemo && (env.HOSTING_DEMO_ONLY === 'true' || env.BKM_ENVIRONMENT === 'demo' || !env.EMAIL_PROVIDER || env.EMAIL_PROVIDER === 'development');
   const from = env.RESEND_FROM || '', parsedFrom = from.match(/^(?:[^<>\r\n]+ <)?([^<>\s]+@[^<>\s]+)>?$/)?.[1];
-  const enabled = !development && (controlledDemo || ['staging','production'].includes(env.BKM_ENVIRONMENT)) && env.EMAIL_PROVIDER === 'resend' && env.RESEND_ENABLED === 'true' && env.RESEND_DOMAIN_VERIFIED === 'true' && typeof env.RESEND_API_KEY === 'string' && env.RESEND_API_KEY.length > 10 && emailValid(parsedFrom);
-  return { provider: development ? 'development' : 'resend', enabled, externalSend: enabled, controlledDemo:enabled&&controlledDemo, reason: development ? 'Prévias privadas; nenhum envio externo.' : enabled ? controlledDemo?'Teste transacional restrito aos destinatários autorizados.':'Resend configurado; entrega confirmada somente por evento do provedor.' : 'Resend desativado até configurar chave, remetente e domínio verificado.' };
+  const reply=env.RESEND_REPLY_TO,replyValid=reply===undefined||reply===''||typeof reply==='string'&&reply.length<=254&&!/[\r\n]/.test(reply)&&emailValid(reply.trim());
+  const enabled = replyValid && !development && (controlledDemo || ['staging','production'].includes(env.BKM_ENVIRONMENT)) && env.EMAIL_PROVIDER === 'resend' && env.RESEND_ENABLED === 'true' && env.RESEND_DOMAIN_VERIFIED === 'true' && typeof env.RESEND_API_KEY === 'string' && env.RESEND_API_KEY.length > 10 && emailValid(parsedFrom);
+  return { provider: development ? 'development' : 'resend', enabled, externalSend: enabled, controlledDemo:enabled&&controlledDemo, reason: !replyValid?'Configure um endereço de resposta válido.':development ? 'Prévias privadas; nenhum envio externo.' : enabled ? controlledDemo?'Teste transacional restrito aos destinatários autorizados.':'Resend configurado; entrega confirmada somente por evento do provedor.' : 'Resend desativado até configurar chave, remetente e domínio verificado.' };
 }
 
 class ResendEmailProvider extends EmailProvider {
-  constructor({ env = process.env, fetchImpl = globalThis.fetch, timeoutMs = 8000 } = {}) {
-    super(); if (!emailReadiness(env).enabled) throw new EmailError('EMAIL_PROVIDER_UNCONFIGURED', 'Resend não está habilitado neste ambiente.');
+  constructor({ env = process.env, fetchImpl = globalThis.fetch, timeoutMs = 8000, deadlineAt } = {}) {
+    super();
+    const reply=env.RESEND_REPLY_TO;
+    if(reply!==undefined&&reply!==''&&(typeof reply!=='string'||reply.length>254||/[\r\n]/.test(reply)||!emailValid(reply.trim())))throw new EmailError('EMAIL_REPLY_TO_INVALID','Configure um endereço de resposta válido.');
+    if (!emailReadiness(env).enabled) throw new EmailError('EMAIL_PROVIDER_UNCONFIGURED', 'Resend não está habilitado neste ambiente.');
     if (typeof fetchImpl !== 'function' || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new TypeError('Transporte ou timeout inválido.');
-    this.env = { ...env }; this.fetchImpl = fetchImpl; this.timeoutMs = timeoutMs; this.name = 'resend';
+    if(deadlineAt!==undefined&&!Number.isFinite(deadlineAt))throw new TypeError('Prazo operacional inválido.');
+    this.env = { ...env }; this.fetchImpl = fetchImpl; this.timeoutMs = timeoutMs; this.name = 'resend';this.deadlineAt=deadlineAt;
   }
   async send(message, { idempotencyKey } = {}) {
     validateMessage(message, idempotencyKey);
@@ -142,12 +153,14 @@ class ResendEmailProvider extends EmailProvider {
     if(base.protocol!=='https:'||['localhost','127.0.0.1'].includes(base.hostname)||base.hostname.endsWith('.vercel.app'))throw new EmailError('EMAIL_CANONICAL_REQUIRED','Configure o domínio canônico HTTPS antes do envio real.');
     const controlledWishlist=['wishlist-available','wishlist-digest'].includes(message.template)&&message.data?.consentVerified===true;
     if(ready.controlledDemo && (!(this.env.RESEND_TEST_RECIPIENTS||'').split(',').map(value=>value.trim().toLowerCase()).includes(message.to.toLowerCase()) || (NON_TRANSACTIONAL.has(message.template)&&!controlledWishlist)))throw new EmailError('EMAIL_TEST_RECIPIENT_FORBIDDEN','O teste permite destinatários autorizados e alertas desejados com consentimento verificado.');
+    const remaining=this.deadlineAt===undefined?this.timeoutMs:Math.min(this.timeoutMs,this.deadlineAt-Date.now()-1000);
+    if(remaining<=0)throw new EmailError('EMAIL_BUDGET_EXHAUSTED','Envio adiado para a próxima execução.',{retryable:true});
     const controller = new AbortController(); let timer;
     try {
       return await Promise.race([(async () => {
         const response = await this.fetchImpl('https://api.resend.com/emails', { method: 'POST', redirect: 'error', signal: controller.signal,
           headers: { Authorization: `Bearer ${this.env.RESEND_API_KEY}`, 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
-          body: JSON.stringify({ from: this.env.RESEND_FROM, to: [message.to], subject: message.subject, html: message.html, text: message.text }) });
+          body: JSON.stringify({ from: this.env.RESEND_FROM, to: [message.to], ...(this.env.RESEND_REPLY_TO?{reply_to:this.env.RESEND_REPLY_TO.trim().toLowerCase()}:{}), subject: message.subject, html: message.html, text: message.text }) });
         if (Number(response.headers?.get?.('content-length') || 0) > 65536) throw new EmailError('EMAIL_RESPONSE_INVALID', 'Resposta de e-mail inválida.', { retryable: true });
         let raw = '';
         if (response.body?.getReader) {
@@ -165,7 +178,7 @@ class ResendEmailProvider extends EmailProvider {
         if (typeof result.id !== 'string' || !/^[a-zA-Z0-9_-]{5,128}$/.test(result.id)) throw new EmailError('EMAIL_RESPONSE_INVALID', 'O provedor não confirmou o identificador do envio.', { retryable: true });
         // API acceptance is not an inbox delivery receipt.
         return { id: result.id, provider: 'resend', accepted: true, delivered: null };
-      })(), new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new EmailError('EMAIL_TIMEOUT', 'Tempo de envio excedido; a fila tentará novamente com a mesma chave.', { retryable: true })); }, this.timeoutMs); })]);
+      })(), new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new EmailError('EMAIL_TIMEOUT', 'Tempo de envio excedido; a fila tentará novamente com a mesma chave.', { retryable: true })); }, remaining); })]);
     } catch (error) {
       if (error instanceof EmailError) throw error;
       throw new EmailError('EMAIL_NETWORK_ERROR', 'Falha de comunicação com o provedor de e-mail.', { retryable: true });

@@ -2,6 +2,7 @@
 
 const { createHash, createHmac, timingSafeEqual } = require('node:crypto');
 const MP_ORIGIN = 'https://api.mercadopago.com';
+const RESERVATION_MS = 15 * 60 * 1000;
 const MOCK_OUTCOMES = Object.freeze({ approved: 'APPROVED', pending: 'PENDING', rejected: 'REJECTED', refused: 'REJECTED', cancelled: 'CANCELLED', canceled: 'CANCELLED', expired: 'EXPIRED' });
 const validId = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{3,100}$/.test(value);
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -74,7 +75,7 @@ class MockPaymentProvider extends PaymentProvider {
     const id = `mock_${hash(`${payment.orderId}:${payment.idempotencyKey}`).slice(0, 32)}`;
     return { id, provider: 'mock', demo: true, status, orderId: payment.orderId, amountCents: payment.amountCents, currency: 'BRL',
       eventId: `mock_evt_${hash(`${id}:created:${status}`).slice(0, 40)}`, occurredAt: new Date(this.now()).toISOString(),
-      expiresAt: new Date(this.now() + 30 * 60 * 1000).toISOString(), label: 'PAGAMENTO SIMULADO — nenhuma cobrança realizada' };
+      expiresAt: new Date(this.now() + RESERVATION_MS).toISOString(), label: 'PAGAMENTO SIMULADO — nenhuma cobrança realizada' };
   }
   async simulatePayment({ payment, outcome, eventId } = {}) {
     this.assertDemo();
@@ -149,20 +150,24 @@ function completeOrderRefund(data, amountCents) {
 }
 
 class MercadoPagoPaymentProvider extends PaymentProvider {
-  constructor({ env = process.env, fetchImpl = globalThis.fetch, timeoutMs = 8000, now = () => Date.now() } = {}) {
+  constructor({ env = process.env, fetchImpl = globalThis.fetch, timeoutMs = 8000, now = () => Date.now(), deadlineAt } = {}) {
     super();
     const readiness = requirePaymentReady(env);
     if (readiness.provider !== 'mercadopago') throw new PaymentError(503, 'PAYMENT_PROVIDER_MISMATCH', 'A integração Mercado Pago não está habilitada.');
     if (typeof fetchImpl !== 'function' || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new TypeError('Transporte ou timeout inválido.');
-    this.env = { ...env }; this.fetchImpl = fetchImpl; this.timeoutMs = timeoutMs; this.now = now;
+    if(deadlineAt!==undefined&&!Number.isFinite(deadlineAt))throw new TypeError('Prazo operacional inválido.');
+    this.env = { ...env }; this.fetchImpl = fetchImpl; this.timeoutMs = timeoutMs; this.now = now;this.deadlineAt=deadlineAt;
   }
+  withDeadline(deadlineAt){return new MercadoPagoPaymentProvider({env:this.env,fetchImpl:this.fetchImpl,timeoutMs:this.timeoutMs,now:this.now,deadlineAt});}
   async request(method, path, body, idempotencyKey) {
     requirePaymentReady(this.env);
+    const remaining=this.deadlineAt===undefined?this.timeoutMs:Math.min(this.timeoutMs,this.deadlineAt-this.now()-1000);
+    if(remaining<=0)throw new PaymentError(503,'PAYMENT_BUDGET_EXHAUSTED','A operação permanece pendente para a próxima execução.',{retryable:true});
     const controller = new AbortController(); let timer;
     try {
       const operation = (async () => {
         const response = await this.fetchImpl(`${MP_ORIGIN}${path}`, { method, redirect: 'error', signal: controller.signal,
-          headers: { Accept: 'application/json', Authorization: `Bearer ${this.env.MERCADO_PAGO_ACCESS_TOKEN}`, ...(body ? { 'Content-Type': 'application/json', 'X-Idempotency-Key': idempotencyKey } : {}) },
+          headers: { Accept: 'application/json', Authorization: `Bearer ${this.env.MERCADO_PAGO_ACCESS_TOKEN}`, ...(method === 'POST' ? { 'Content-Type': 'application/json', 'X-Idempotency-Key': idempotencyKey } : {}) },
           ...(body ? { body: JSON.stringify(body) } : {}) });
         if (Number(response.headers?.get?.('content-length') || 0) > 1048576) throw new PaymentError(502, 'PAYMENT_RESPONSE_INVALID', 'Resposta de pagamento excessiva.');
         let raw;
@@ -181,7 +186,7 @@ class MercadoPagoPaymentProvider extends PaymentProvider {
         }
         return data;
       })();
-      return await Promise.race([operation, new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new PaymentError(504, 'PAYMENT_TIMEOUT', 'O provedor demorou a responder; consulte o pagamento antes de repetir.', { retryable: true, reconciliationRequired: method === 'POST' })); }, this.timeoutMs); })]);
+      return await Promise.race([operation, new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new PaymentError(504, 'PAYMENT_TIMEOUT', 'O provedor demorou a responder; consulte o pagamento antes de repetir.', { retryable: true, reconciliationRequired: method === 'POST' })); }, remaining); })]);
     } catch (error) {
       if (error instanceof PaymentError) {
         // A malformed success body can still describe a charge that was created.
@@ -212,6 +217,7 @@ class MercadoPagoPaymentProvider extends PaymentProvider {
     const updatedAt = typeof data.last_updated_date === 'string' && Number.isFinite(Date.parse(data.last_updated_date)) ? data.last_updated_date : null;
     return { id: data.id, provider: 'mercadopago', demo: false, sandbox: this.env.MERCADO_PAGO_ENVIRONMENT === 'sandbox', status, providerStatus: String(data.status || '').slice(0, 40), providerStatusDetail: String(data.status_detail || '').slice(0, 80),
       orderId: input.orderId, amountCents: input.amountCents, currency: 'BRL', sellerId: String(data.user_id), pix,
+      installments: Number.isInteger(method.installments) ? method.installments : null,
       eventId: `mp_evt_${hash(`${data.id}:${data.status}:${data.status_detail}:${updatedAt || ''}:${data.total_paid_amount || ''}`).slice(0, 48)}`, providerUpdatedAt: updatedAt && Number.isFinite(Date.parse(updatedAt)) ? updatedAt : null, occurredAt: updatedAt || new Date(this.now()).toISOString() };
   }
   async createPayment(input) {
@@ -225,6 +231,7 @@ class MercadoPagoPaymentProvider extends PaymentProvider {
     else if (method === 'card') {
       const card = input.card || {};
       if (!/^[a-zA-Z0-9_-]{8,256}$/.test(card.token || '') || !/^[a-zA-Z0-9_-]{2,40}$/.test(card.paymentMethodId || '') || !['credit_card', 'debit_card'].includes(card.type) || !Number.isInteger(card.installments) || card.installments < 1 || card.installments > 12) throw new PaymentError(400, 'PAYMENT_CARD_INVALID', 'Token, bandeira ou parcelas do cartão inválidos.');
+      if (card.type === 'debit_card' && card.installments !== 1) throw new PaymentError(400, 'PAYMENT_DEBIT_INSTALLMENTS', 'Cartão de débito permite somente pagamento à vista.');
       paymentMethod = { id: card.paymentMethodId, type: card.type, token: card.token, installments: card.installments };
     } else throw new PaymentError(400, 'PAYMENT_METHOD_INVALID', 'Meio de pagamento inválido.');
     const payerBody = { email: payer.email };
@@ -258,6 +265,15 @@ class MercadoPagoPaymentProvider extends PaymentProvider {
     const data = await this.request('GET', `/v1/orders/${encodeURIComponent(paymentId)}`);
     return this.normalize(data, { ...expected, paymentId });
   }
+  async cancelOrder(paymentId, expected) {
+    // Always validate the seller, environment, reference and immutable amount
+    // before making a financial mutation; a signed webhook alone is not enough.
+    const current = await this.getPayment(paymentId, expected);
+    if (current.status !== 'PENDING') return current;
+    if (!['created','action_required'].includes(current.providerStatus)) throw new PaymentError(409, 'PAYMENT_CANCEL_NOT_READY', 'O pagamento está sendo processado e precisa de nova consulta antes do cancelamento.');
+    await this.request('POST', `/v1/orders/${encodeURIComponent(paymentId)}/cancel`, undefined, idempotencyKeyForOrder(expected.orderId, 'expiry-cancel'));
+    return this.getPayment(paymentId, expected);
+  }
   async reconcileWebhook({ signature, requestId, dataId, expected, now = this.now() } = {}) {
     const proof = verifyWebhookSignature({ signature, requestId, dataId, secret: this.env.MERCADO_PAGO_WEBHOOK_SECRET, now });
     const payment = await this.getPayment(dataId, expected);
@@ -271,4 +287,4 @@ function createPaymentProvider(options = {}) {
 }
 
 module.exports = { PaymentProvider, MockPaymentProvider, MercadoPagoPaymentProvider, PaymentError, paymentReadiness, requirePaymentReady, createPaymentProvider,
-  idempotencyKeyForOrder, verifyWebhookSignature, moneyCents, MOCK_OUTCOMES };
+  idempotencyKeyForOrder, verifyWebhookSignature, moneyCents, MOCK_OUTCOMES, RESERVATION_MS };

@@ -1,14 +1,5 @@
-const crypto = require('node:crypto');
-const EMAIL_JOB_PATH = '/api/jobs/email';
-
-function emailJobAuthorized(headers = {}, env = process.env) {
-  const secret = env.CRON_SECRET;
-  const authorization = headers.authorization;
-  if (typeof secret !== 'string' || !/^[A-Za-z0-9_-]{32,256}$/.test(secret) || typeof authorization !== 'string' || authorization.length > 300) return false;
-  const received = crypto.createHash('sha256').update(authorization).digest();
-  const expected = crypto.createHash('sha256').update('Bearer ' + secret).digest();
-  return crypto.timingSafeEqual(received, expected);
-}
+const {workerAuthorized,commerceJobSignature,EMAIL_JOB_PATH}=require('./worker-auth.cjs');
+const emailJobAuthorized=workerAuthorized;
 
 function createEmailJob({notifications, flushEmails, now = () => Date.now()} = {}) {
   return async function run() {
@@ -26,4 +17,4 @@ function createEmailJob({notifications, flushEmails, now = () => Date.now()} = {
   };
 }
 
-module.exports = {EMAIL_JOB_PATH,emailJobAuthorized,createEmailJob};
+module.exports = {EMAIL_JOB_PATH,emailJobAuthorized,createEmailJob,commerceJobSignature};

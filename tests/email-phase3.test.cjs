@@ -10,7 +10,7 @@ const env={BKM_ENVIRONMENT:'demo',HOSTING_DEMO_ONLY:'true',BKM_PUBLIC_URL:'https
 async function fixture(t){const pg=new PGlite(),db=openStore({pgClient:{query:async(sql,args)=>args?.length?pg.query(sql,args):(await pg.exec(sql)).at(-1),end:()=>pg.close()}});await db.ready;t.after(()=>db.close());const store=createEmailStore(db);return{db,store};}
 test('Resend Fase 3 demo controlado exige optin, allowlist, domínio e impede marketing/carrinho',async()=>{
   let sends=0;const provider=new ResendEmailProvider({env,fetchImpl:async()=>{sends++;return new Response(JSON.stringify({id:'fixture-accepted-email'}));}});
-  assert.equal(TEMPLATES.length,15);assert.equal(emailReadiness(env).controlledDemo,true);
+  for(const template of ['order-confirmation','payment-pending','payment-approved','order-preparing','order-ready-to-ship','admin-order-paid','order-shipped'])assert.ok(TEMPLATES.includes(template));assert.equal(emailReadiness(env).controlledDemo,true);
   assert.equal(emailReadiness({...env,RESEND_DEMO_TEST_ENABLED:'false'}).provider,'development');
   await provider.send({...renderEmail('welcome',{}, {env}),to:'owner@example.test',data:{}},{idempotencyKey:'controlled/welcome'});
   await assert.rejects(provider.send({...renderEmail('welcome',{}, {env}),to:'stranger@example.test',data:{}},{idempotencyKey:'controlled/forbidden'}),e=>e.code==='EMAIL_TEST_RECIPIENT_FORBIDDEN');
