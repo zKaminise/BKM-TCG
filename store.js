@@ -674,7 +674,13 @@ function createMercadoPagoPaymentUi({getQuote,getEmail,config,reserveOnly=false,
   const identificationType=selectField("Tipo de documento","payerIdentificationType",[["CPF","CPF"],["CNPJ","CNPJ"]],"CPF"),identificationNumber=field("Documento do pagador","payerIdentificationNumber","text","",{required:true,inputmode:"numeric",autocomplete:"off",maxlength:"18"});
   const pix=el("div",{class:"shop-payment-pix-fields"},el("p",{class:"shop-fine"},"O código Pix será gerado pelo Mercado Pago após a confirmação do pedido e ficará disponível na sua conta."),el("div",{class:"shop-form-grid"},identificationType,identificationNumber));
   const cardContainer=el("div",{id:`bkm-card-payment-${crypto.randomUUID()}`,class:"shop-card-payment-brick"}),card=el("div",{hidden:initialMethod!=="card"},el("p",{class:"shop-fine"},reserveOnly?"Após confirmar o pedido, você terá 15 minutos para preencher o cartão e pagar. A confirmação reserva os itens; a compra só é aprovada após a confirmação do Mercado Pago.":"Preencha o formulário seguro do Mercado Pago. Confira as parcelas, os juros e o valor total antes de pagar. Cartão de débito é pago em uma parcela."),reserveOnly?null:cardContainer);
-  pix.hidden=initialMethod!=="pix";if(fixedMethod)method.hidden=true;
+  function updateMethodFields(){
+    const isCard=method.querySelector("select").value==="card";
+    pix.hidden=isCard;card.hidden=!isCard;
+    pix.querySelectorAll("input,select").forEach(input=>input.disabled=isCard);
+    return isCard;
+  }
+  updateMethodFields();if(fixedMethod)method.hidden=true;
   const unmount=()=>{if(controller){try{controller.unmount();}catch{}controller=null;}};
   async function renderCard(){
     const version=++mountVersion,quote=getQuote();unmount();cardContainer.replaceChildren();
@@ -688,7 +694,7 @@ function createMercadoPagoPaymentUi({getQuote,getEmail,config,reserveOnly=false,
       if(destroyed||version!==mountVersion){next.unmount();return;}controller=next;
     }catch{if(!destroyed&&version===mountVersion)setChildren(status,message("Não foi possível abrir o formulário seguro. Confira sua conexão e tente novamente.","error"),button("Carregar formulário novamente",renderCard,"shop-button secondary"));}
   }
-  method.querySelector("select").addEventListener("change",()=>{const isCard=method.querySelector("select").value==="card";pix.hidden=isCard;card.hidden=!isCard;if(isCard&&!reserveOnly)renderCard();else{++mountVersion;unmount();status.replaceChildren();}});
+  method.querySelector("select").addEventListener("change",()=>{const isCard=updateMethodFields();if(isCard&&!reserveOnly)renderCard();else{++mountVersion;unmount();status.replaceChildren();}});
   const element=el("section",{class:"shop-admin-section shop-real-payment"},el("h2",{},"Pagamento com Mercado Pago"),config.environment==="sandbox"?message("AMBIENTE SANDBOX — utilize somente dados de teste do Mercado Pago. Este ambiente não recebe pagamentos comerciais."):null,method,pix,card,status);
   return{element,start:renderCard,async updateAmount(value){if(destroyed||reserveOnly)return;if(controller&&value!==amountCents){amountCents=value;if(Number.isSafeInteger(value)&&value>0){const updated=await controller.update({amount:value/100});if(!updated)await renderCard();}else{++mountVersion;unmount();}}else if(!controller&&method.querySelector("select").value==="card"&&element.isConnected)await renderCard();},async getPayment(){
     if(destroyed)throw new Error("Reabra o checkout para continuar.");
