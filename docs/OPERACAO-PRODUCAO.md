@@ -1,14 +1,14 @@
 # BKM TCG — primeira compra e operação do pedido
 
-Guia do administrador, preparado em **27/10/2026** a partir do fluxo implementado. Execute após a publicação e a liberação dos provedores pela equipe responsável. Este documento não confirma que o deploy, uma cobrança real ou todas as entregas de e-mail já foram concluídos.
+Guia do administrador, atualizado em **28/10/2026** a partir do fluxo implementado. Execute após a publicação e a liberação dos provedores pela equipe responsável. Este documento não confirma que o deploy, uma cobrança real ou todas as entregas de e-mail já foram concluídos.
 
 ## Cadastrar e publicar o produto de R$ 10,00
 
-1. Entre em [Produtos](https://lojabkm.com.br/admin/produtos) e escolha **Novo produto**. Selecione **Carta avulsa** ou **Lacrado**.
-2. Preencha nome, SKU único, coleção e descrição reais. Para carta avulsa, confirme a coleção e o número impresso; use o cadastro manual quando necessário.
-3. Adicione uma foto da unidade ou identifique a imagem como referência. Em **Versões, preço e estoque**, informe idioma, condição e acabamento corretos.
-4. Digite **10,00** no preço em reais e a quantidade física disponível. Cada variante tem preço e saldo próprios. Não copie produtos, estoques ou tarifas fictícios da prévia.
-5. Salve primeiro como rascunho. Confira os dados, marque **Publicar na loja** e salve novamente. Abra **Ver anúncio** e verifique preço, foto, variante e disponibilidade.
+1. Entre em [Produtos](https://lojabkm.com.br/admin/produtos) e escolha **Novo produto**. Selecione **Carta avulsa**, **Selado** ou **Personalizado**.
+2. Para carta, digite nome ou número e selecione a referência correta; nome, coleção e imagem são preenchidos. Se não encontrar, expanda a alternativa manual após a pesquisa. Para os demais tipos, informe nome e envie uma foto ou adicione um link HTTPS.
+3. Em **Venda e estoque**, confira idioma, conservação/acabamento e atributos do exemplar. Digite **10,00** e a quantidade física disponível. Cada versão tem preço e saldo próprios.
+4. Revise e salve como rascunho. SKU **BKM1, BKM2…** e endereço são gerados automaticamente; não precisam ser digitados.
+5. Reabra, confira os dados e marque **Publicar este produto na loja ao salvar** na revisão. Salve e abra **Ver anúncio**. Confira preço, foto, versão e disponibilidade. Veja o [guia do novo cadastro](CADASTRO-PRODUTOS.md).
 
 Arquivar retira o anúncio do catálogo público e preserva seu histórico. O filtro **Somente arquivados** permite consultar esses cadastros.
 

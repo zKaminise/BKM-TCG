@@ -22,7 +22,7 @@ function openDatabase(filename) {
   const db = new DatabaseSync(filename);
   db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
   const version = db.prepare("PRAGMA user_version").get().user_version;
-  if (version > 9) {
+  if (version > 10) {
     db.close();
     throw new Error("Banco criado por uma versão mais recente; atualização recusada.");
   }
@@ -84,6 +84,27 @@ function openDatabase(filename) {
     db.exec('BEGIN IMMEDIATE');
     try { db.exec(fs.readFileSync(path.join(__dirname, 'migrations/009_personal_inventory.sql'), 'utf8').split('-- POSTGRES_RLS')[0]); db.exec('PRAGMA user_version=9; COMMIT;'); }
     catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+  if (version < 10) {
+    // SQLite's documented generalized ALTER TABLE procedure: replace the table
+    // without renaming the old one, preserving every dependent FK target/ID.
+    db.exec('PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;');
+    try {
+      db.exec(`CREATE TABLE products_v10(id TEXT PRIMARY KEY,slug TEXT NOT NULL UNIQUE,kind TEXT NOT NULL CHECK(kind IN('SEALED','SINGLE','CUSTOM')),name TEXT NOT NULL,description TEXT NOT NULL,sku TEXT NOT NULL UNIQUE,tcg TEXT NOT NULL,set_id TEXT NOT NULL,set_name TEXT NOT NULL,card_id TEXT REFERENCES card_metadata(id),images_json TEXT NOT NULL,attributes_json TEXT NOT NULL DEFAULT '{}',search_text TEXT NOT NULL,featured INTEGER NOT NULL DEFAULT 0,published INTEGER NOT NULL DEFAULT 0,archived INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+        INSERT INTO products_v10 SELECT * FROM products;
+        DROP TABLE products;
+        ALTER TABLE products_v10 RENAME TO products;
+        CREATE INDEX product_catalog ON products(published,archived,kind,set_id,created_at);
+        CREATE TABLE variants_v10(id TEXT PRIMARY KEY,product_id TEXT NOT NULL REFERENCES products(id),language TEXT NOT NULL,condition TEXT NOT NULL,finish TEXT NOT NULL,price_cents INTEGER NOT NULL CHECK(price_cents>0),compare_at_cents INTEGER CHECK(compare_at_cents IS NULL OR compare_at_cents>0),stock INTEGER NOT NULL CHECK(stock>=0),active INTEGER NOT NULL DEFAULT 1);
+        INSERT INTO variants_v10 SELECT * FROM variants;
+        DROP TABLE variants;
+        ALTER TABLE variants_v10 RENAME TO variants;
+        CREATE INDEX variants_product ON variants(product_id,active,stock,price_cents);`);
+      db.exec(fs.readFileSync(path.join(__dirname,'migrations/010_product_editor.sql'),'utf8').split('-- POSTGRES_ONLY')[0]);
+      if(db.prepare('PRAGMA foreign_key_check').all().length)throw new Error('A migração de produtos não preservou a integridade referencial.');
+      db.exec('PRAGMA user_version=10; COMMIT;');
+    } catch(error) { db.exec('ROLLBACK'); throw error; }
+    finally { db.exec('PRAGMA foreign_keys=ON'); }
   }
   db.prepare("INSERT OR IGNORE INTO settings(id,value_json,updated_at) VALUES(1,?,?)").run(JSON.stringify(defaultSettings), (/* @__PURE__ */ new Date()).toISOString());
   return db;

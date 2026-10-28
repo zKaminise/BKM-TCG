@@ -1,4 +1,8 @@
 const crypto=require('node:crypto');
+// The current wishlist has no explicit attribute criteria. A special-print
+// variant must not be advertised as a match for an ordinary copy. Invalid
+// metadata also fails closed; migrated legacy variants have an empty array.
+function ordinaryWishlistVariant(value){if(value==null)return true;try{const parsed=typeof value==='string'?JSON.parse(value):value;return Array.isArray(parsed)&&parsed.length===0;}catch{return false;}}
 const {EmailError}=require('./email.cjs');
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 const fingerprint=value=>crypto.createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
@@ -43,11 +47,11 @@ function createEmailStore(db) {
       if(!Array.isArray(items)||!items.length||items.length>50||!Number.isSafeInteger(now)||now<0)return [];
       const ids=[...new Set(items.map(item=>item?.variantId).filter(id=>typeof id==='string'&&id&&id.length<=100))];
       if(!ids.length)return [];
-      const rows=await db.prepare("SELECT v.*,p.slug,p.name,p.set_name,p.images_json,cm.number,COALESCE(r.units,0) reserved FROM variants v JOIN products p ON p.id=v.product_id JOIN card_metadata cm ON cm.id=p.card_id LEFT JOIN (SELECT variant_id,SUM(quantity) units FROM inventory_reservations WHERE status='ACTIVE' AND expires_at>? GROUP BY variant_id) r ON r.variant_id=v.id WHERE v.id IN ("+ids.map(()=>'?').join(',')+") AND v.active=1 AND p.kind='SINGLE' AND p.published=1 AND p.archived=0").all(now,...ids);
+      const rows=await db.prepare("SELECT v.*,p.slug,p.name,p.set_name,p.images_json,cm.number,COALESCE(vm.attributes_json,'[]') variant_attributes_json,COALESCE(r.units,0) reserved FROM variants v JOIN products p ON p.id=v.product_id JOIN card_metadata cm ON cm.id=p.card_id LEFT JOIN variant_metadata vm ON vm.variant_id=v.id LEFT JOIN (SELECT variant_id,SUM(quantity) units FROM inventory_reservations WHERE status='ACTIVE' AND expires_at>? GROUP BY variant_id) r ON r.variant_id=v.id WHERE v.id IN ("+ids.map(()=>'?').join(',')+") AND v.active=1 AND p.kind='SINGLE' AND p.published=1 AND p.archived=0").all(now,...ids);
       const byId=new Map(rows.map(row=>[row.id,row])),seen=new Set(),current=[];
-      for(const item of items){const row=byId.get(item.variantId);if(!row||row.product_id!==item.productId||row.stock-Number(row.reserved)<1||seen.has(row.id))continue;seen.add(row.id);
+      for(const item of items){const row=byId.get(item.variantId);if(!row||row.product_id!==item.productId||row.stock-Number(row.reserved)<1||!ordinaryWishlistVariant(row.variant_attributes_json)||seen.has(row.id))continue;seen.add(row.id);
         const images=JSON.parse(row.images_json);
-        current.push({productId:row.product_id,variantId:row.id,slug:row.slug,name:row.name,setName:row.set_name,number:row.number,priceCents:row.price_cents,language:row.language,condition:row.condition,finish:row.finish,image:Array.isArray(images)?images[0]?.url||null:null,productUrl:'/produto/'+encodeURIComponent(row.slug)});
+        current.push({productId:row.product_id,variantId:row.id,slug:row.slug,name:row.name,setName:row.set_name,number:row.number,priceCents:row.price_cents,language:row.language,condition:row.condition,finish:row.finish,attributes:[],image:Array.isArray(images)?images[0]?.url||null:null,productUrl:'/produto/'+encodeURIComponent(row.slug)});
       }
       return store.eligibleWishlistItems({userId,wishlistIds,items:current});
     },
@@ -84,9 +88,9 @@ function createEmailStore(db) {
       const ids=[...new Set(wishlistIds)],wishes=await db.prepare('SELECT * FROM personal_wishlist WHERE user_id=? AND enabled=1 AND id IN ('+ids.map(()=>'?').join(',')+')').all(userId,...ids);
       const normalized=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\b0+(?=\d)/g,'');
       const variantIds=[...new Set(items.map(item=>item?.variantId).filter(id=>typeof id==='string'&&id&&id.length<=100))];if(!variantIds.length||!wishes.length)return [];
-      const variants=await db.prepare("SELECT v.id,v.product_id,v.language,v.condition,v.finish,v.price_cents,p.set_id,p.tcg,cm.number,cm.metadata_json FROM variants v JOIN products p ON p.id=v.product_id JOIN card_metadata cm ON cm.id=p.card_id WHERE v.id IN ("+variantIds.map(()=>'?').join(',')+") AND v.active=1 AND p.kind='SINGLE' AND p.published=1 AND p.archived=0").all(...variantIds);
+      const variants=await db.prepare("SELECT v.id,v.product_id,v.language,v.condition,v.finish,v.price_cents,p.set_id,p.tcg,cm.number,cm.metadata_json,COALESCE(vm.attributes_json,'[]') variant_attributes_json FROM variants v JOIN products p ON p.id=v.product_id JOIN card_metadata cm ON cm.id=p.card_id LEFT JOIN variant_metadata vm ON vm.variant_id=v.id WHERE v.id IN ("+variantIds.map(()=>'?').join(',')+") AND v.active=1 AND p.kind='SINGLE' AND p.published=1 AND p.archived=0").all(...variantIds);
       return items.filter(item=>{
-        const variant=variants.find(row=>row.id===item.variantId&&row.product_id===item.productId);if(!variant)return false;
+        const variant=variants.find(row=>row.id===item.variantId&&row.product_id===item.productId);if(!variant||!ordinaryWishlistVariant(variant.variant_attributes_json)||!ordinaryWishlistVariant(item.attributes))return false;
         const card=JSON.parse(variant.metadata_json);
         return wishes.some(wish=>{
           const prefs=JSON.parse(wish.preferences_json),reference=JSON.parse(wish.metadata_json);
@@ -101,8 +105,8 @@ function createEmailStore(db) {
       const eligible=await store.eligibleWishlistItems({userId:message.data.notificationUserId,wishlistIds:message.data.wishlistIds,items:message.data.items});
       if(eligible.length!==message.data.items.length)return false;
       for(const item of message.data.items) {
-        const variant=await db.prepare('SELECT v.*,p.published,p.archived FROM variants v JOIN products p ON p.id=v.product_id WHERE v.id=? AND p.id=?').get(item.variantId,item.productId);
-        if(!variant||!variant.active||!variant.published||variant.archived||variant.price_cents!==item.priceCents||variant.language!==item.language||variant.condition!==item.condition||variant.finish!==item.finish)return false;
+        const variant=await db.prepare("SELECT v.*,p.published,p.archived,COALESCE(vm.attributes_json,'[]') variant_attributes_json FROM variants v JOIN products p ON p.id=v.product_id LEFT JOIN variant_metadata vm ON vm.variant_id=v.id WHERE v.id=? AND p.id=?").get(item.variantId,item.productId);
+        if(!variant||!ordinaryWishlistVariant(variant.variant_attributes_json)||!variant.active||!variant.published||variant.archived||variant.price_cents!==item.priceCents||variant.language!==item.language||variant.condition!==item.condition||variant.finish!==item.finish)return false;
         const reserved=Number((await db.prepare("SELECT COALESCE(SUM(quantity),0) n FROM inventory_reservations WHERE variant_id=? AND status='ACTIVE' AND expires_at>?").get(variant.id,Date.now())).n);
         if(variant.stock-reserved<1)return false;
       }

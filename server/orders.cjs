@@ -148,7 +148,7 @@ function createOrders({db,quote,env,audit,ApiError,enqueueEmail,paymentProvider,
         await db.prepare('UPDATE orders SET payment_provider_id=? WHERE id=?').run(payment.id,id);
       }
       for(const item of q.items) {
-        const snapshot={language:item.language,condition:item.condition,finish:item.finish,image:item.image,productId:item.productId,slug:item.slug};
+        const snapshot={language:item.language,condition:item.condition,finish:item.finish,attributes:item.attributes||[],image:item.image,productId:item.productId,slug:item.slug};
         await db.prepare('INSERT INTO order_items VALUES(?,?,?,?,?,?,?,?,?)').run(uid(),id,item.variantId,item.name,item.sku,JSON.stringify(snapshot),item.quantity,item.unitPriceCents,item.totalCents);
         await db.prepare("INSERT INTO inventory_reservations VALUES(?,?,?,?,'ACTIVE',?,?)").run(uid(),item.variantId,id,item.quantity,Date.parse(payment?.expiresAt)||Date.parse(created)+RESERVATION_MS,created);
       }

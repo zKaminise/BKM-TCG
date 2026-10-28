@@ -1,6 +1,6 @@
 # BKM TCG — inventário funcional do site
 
-Revisão de **27/10/2026**. Este inventário separa funcionalidades implementadas, configurações efetivas e provas que ainda dependem de operação real. Relatórios datados de fases anteriores são históricos; não descrevem sozinhos o estado atual.
+Revisão de **28/10/2026**. Este inventário separa funcionalidades implementadas, configurações efetivas e provas que ainda dependem de operação real. Relatórios datados de fases anteriores são históricos; não descrevem sozinhos o estado atual.
 
 ## Loja pública
 
@@ -8,7 +8,7 @@ Revisão de **27/10/2026**. Este inventário separa funcionalidades implementada
 |---|---|---|
 | Identidade e início | Logo BKM, tema preto/vermelho/ciano/prata, navegação responsiva, animação 3D de abertura do booster e revelação da carta | Conteúdo e estoque comercial dependem dos cadastros reais do administrador |
 | Catálogo | Cartas avulsas e lacrados, busca, filtros, ordenação, páginas por coleção e aliases | Os 16 anúncios de demonstração foram arquivados; não representam mercadoria disponível |
-| Produto | Fotos próprias e de referência identificadas, ampliação, descrição, variantes de idioma/condição/acabamento, preço e disponibilidade | Administrador deve conferir a unidade física e cadastrar sua quantidade real |
+| Produto | Cartas, selados e personalizados; fotos próprias por upload/link e de referência identificadas, ampliação, descrição, variantes de idioma/condição/acabamento/atributos, preço e disponibilidade | Administrador deve conferir a unidade física e cadastrar sua quantidade real |
 | Carrinho e favoritos | Adicionar/remover/alterar quantidade, drawer, persistência por conta e reconciliação de favoritos arquivados | Carrinho não reserva o estoque |
 | Cupons e frete | Cupons, mínimo de frete grátis editável e barra de progresso; painel com origem privada, embalagens reais, faixas de CEP, transportadora/serviço, preço, prazo e confirmação por região | Envio nacional com `shipping.enabled=false`: não houve cotação operacional válida. Retirada e entrega local têm ativação independente e foram preservadas |
 | Uberlândia | Retirada gratuita e entrega local gratuita quando habilitadas; CEP local conferido; contato por WhatsApp depois do pagamento | Ponto e horário são combinados pelo atendimento |

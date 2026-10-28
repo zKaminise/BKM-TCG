@@ -11,6 +11,7 @@ const { allowedOrigins, safeReturnPath } = require('./domain-policy.cjs');
 const { EMAIL_JOB_PATH, emailJobAuthorized, createEmailJob } = require('./email-job.cjs');
 const { COMMERCE_JOB_PATH, createCommerceJob } = require('./commerce-job.cjs');
 const {shippingSettings,validateShippingSettings,hasConfiguredShipping,createShippingPolicy,publicShippingSettings,REGION_STATES}=require('./shipping-policy.cjs');
+const {normalizeVariantAttributes,attributesFromRow,variantIdentity}=require('./variant-attributes.cjs');
 const uid = () => crypto.randomUUID();
 const now = () => (/* @__PURE__ */ new Date()).toISOString();
 const normalized = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\b0+(?=\d)/g, "");
@@ -101,6 +102,7 @@ function createApi(options = {}) {
   const notifications=require('./email-notifications.cjs').createEmailNotifications({db,emailStore,env:effectiveEnv});
   const market=require('./market-price-provider.cjs').createMarketPriceService({db,ApiError});
   const personal=require('./personal-collection.cjs').createPersonalCollection({db,ApiError,fetchImpl:options.catalogFetch,priceProvider:market.provider});
+  const productWorkflow=require('./product-workflow.cjs').createProductWorkflow({db,ApiError,fetchImpl:options.catalogFetch,audit});
   let emailDispatcher;
   async function enqueueEmail(message) { return emailStore.enqueue(message); }
   async function flushEmails({limit=10,deadlineAt}={}) {
@@ -184,7 +186,7 @@ function createApi(options = {}) {
   }
   async function product(row, admin = false) {
     if (!row) return null;
-    const variants = (await db.prepare("SELECT v.*,(SELECT COALESCE(SUM(r.quantity),0) FROM inventory_reservations r WHERE r.variant_id=v.id AND r.status='ACTIVE' AND r.expires_at>?) reserved FROM variants v WHERE v.product_id=? AND v.active=1 ORDER BY CASE v.language WHEN 'pt' THEN 0 WHEN 'en' THEN 1 ELSE 2 END,v.id").all(Date.now(),row.id)).map((v) => ({ id: v.id, language: v.language, condition: v.condition, finish: v.finish, priceCents: v.price_cents, compareAtCents: v.compare_at_cents, stock: admin ? v.stock : Math.max(0,v.stock-v.reserved), reservedStock:v.reserved }));
+    const variants = (await db.prepare("SELECT v.*,m.attributes_json,(SELECT COALESCE(SUM(r.quantity),0) FROM inventory_reservations r WHERE r.variant_id=v.id AND r.status='ACTIVE' AND r.expires_at>?) reserved FROM variants v LEFT JOIN variant_metadata m ON m.variant_id=v.id WHERE v.product_id=? AND v.active=1 ORDER BY CASE v.language WHEN 'pt' THEN 0 WHEN 'en' THEN 1 ELSE 2 END,v.id").all(Date.now(),row.id)).map((v) => ({ id: v.id, language: v.language, condition: v.condition, finish: v.finish, attributes:attributesFromRow(v), priceCents: v.price_cents, compareAtCents: v.compare_at_cents, stock: admin ? v.stock : Math.max(0,v.stock-v.reserved), reservedStock:v.reserved }));
     const metadata = row.card_id ? JSON.parse((await db.prepare("SELECT metadata_json FROM card_metadata WHERE id=?").get(row.card_id)).metadata_json) : null;
     return { id: row.id, slug: row.slug, kind: row.kind, name: row.name, description: row.description, sku: row.sku, tcg: row.tcg, setId: row.set_id, setName: row.set_name, images: JSON.parse(row.images_json), attributes: JSON.parse(row.attributes_json), card: metadata, featured: !!row.featured, published: !!row.published, createdAt: row.created_at, updatedAt: row.updated_at, variants, ...admin ? { archived: !!row.archived } : {} };
   }
@@ -204,7 +206,7 @@ function createApi(options = {}) {
     const clauses = [admin ? archived==='all'?'1=1':archived==='only'?'p.archived=1':'p.archived=0' : "p.published=1 AND p.archived=0"], params = [];
     if (query.get("kind")) {
       const v = query.get("kind");
-      if (!["SEALED", "SINGLE"].includes(v)) fail("VALIDATION", "Tipo de produto inválido.");
+      if (!["SEALED", "SINGLE", "CUSTOM"].includes(v)) fail("VALIDATION", "Tipo de produto inválido.");
       clauses.push("p.kind=?");
       params.push(v);
     }
@@ -249,9 +251,9 @@ function createApi(options = {}) {
   }
   function validateProduct(data, existing) {
     const kind = text(data.kind, "kind", 10, true);
-    if (!["SEALED", "SINGLE"].includes(kind)) fail("VALIDATION", "Escolha lacrado ou carta avulsa.");
-    const name = text(data.name, "name", 180, true), sku = text(data.sku, "sku", 100, true), slug = text(data.slug || normalized(name).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || sku, "slug", 200, true);
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) fail("VALIDATION", "URL do produto inválida.");
+    if (!["SEALED", "SINGLE", "CUSTOM"].includes(kind)) fail("VALIDATION", "Escolha carta, selado ou personalizado.");
+    const name = text(data.name, "name", 180, true), sku = text(data.sku, "sku", 100)||existing?.sku||'', slug = text(data.slug, "slug", 200)||existing?.slug||'';
+    if (slug && !/^[a-z0-9][a-z0-9-]*$/.test(slug)) fail("VALIDATION", "URL do produto inválida.");
     const setId = text(data.setId, "setId", 100), setName = text(data.setName, "setName", 200), tcg = text(data.tcg || "pokemon", "tcg", 50, true);
     const description = text(data.description, "description", 15e3);
     if (!Array.isArray(data.images) || data.images.length > 12) fail("VALIDATION", "Envie até 12 imagens.");
@@ -259,6 +261,7 @@ function createApi(options = {}) {
       if (!i || typeof i !== "object" || Array.isArray(i)) fail("VALIDATION", "Imagem inválida.");
       return { url: imageUrl(i.url), kind: i.kind === "actual" ? "actual" : "reference", alt: text(i.alt, "alt", 250) };
     });
+    if(data.published===true&&!images.length)fail('VALIDATION','Adicione uma foto real ou imagem de referência antes de publicar o produto.');
     if (!Array.isArray(data.variants) || !data.variants.length || data.variants.length > 50) fail("VALIDATION", "Cadastre entre 1 e 50 variantes.");
     const combinations = /* @__PURE__ */ new Set(), variantIds = /* @__PURE__ */ new Set();
     const variants = data.variants.map((v) => {
@@ -267,31 +270,44 @@ function createApi(options = {}) {
         if (variantIds.has(v.id)) fail("DUPLICATE_VARIANT", "A mesma variante foi enviada mais de uma vez.");
         variantIds.add(v.id);
       }
-      const language = text(v.language || "pt", "language", 15, true), condition = text(v.condition || (kind === "SEALED" ? "SEALED" : "NM"), "condition", 30, true), finish = text(v.finish || "NORMAL", "finish", 60, true), key = `${language}|${condition}|${finish}`;
-      if (combinations.has(key)) fail("DUPLICATE_VARIANT", "Há variantes com idioma, condição e acabamento iguais.");
+      const language = text(v.language || "pt", "language", 15, true), condition = text(v.condition || (kind === "SEALED" ? "SEALED" : kind==='CUSTOM'?'CUSTOM':''), "condition", 30, true), finish = text(v.finish || "NORMAL", "finish", 60, true);
+      if(!['pt','en','ja','zh-tw','zh-cn','zh','ko','es','fr','de','it','th','id'].includes(language))fail('VALIDATION','Selecione um idioma de produto suportado.');
+      const validConditions=kind==='SINGLE'?['M','NM','SP','MP','HP','D','LP','DMG']:kind==='SEALED'?['SEALED','OPENED']:['CUSTOM','M','NM','SP','MP','HP','D','LP','DMG'];
+      if(!validConditions.includes(condition))fail('VALIDATION','Selecione a condição correspondente a este tipo de produto.');
+      if(!['NORMAL','HOLO','REVERSE','POKE_BALL','MASTER_BALL','OTHER','FOIL','PROMO','FIRST_EDITION'].includes(finish))fail('VALIDATION','Selecione um acabamento válido.');
+      let attributes;try{attributes=normalizeVariantAttributes(v.attributes);}catch(error){fail('VALIDATION',error.message);}
+      if(kind!=='SINGLE'&&attributes.length)fail('VALIDATION','Atributos de cartas são exclusivos de cartas avulsas.');
+      const key=variantIdentity({language,condition,finish,attributes});
+      if (combinations.has(key)) fail("DUPLICATE_VARIANT", "Há variantes com idioma, condição, acabamento e atributos iguais.");
       combinations.add(key);
       const priceCents = integer(v.priceCents, "priceCents", 1);
       const compareAtCents = v.compareAtCents == null ? null : integer(v.compareAtCents, "compareAtCents", priceCents);
-      return { id: v.id ? text(v.id, "variantId", 100, true) : null, language, condition, finish, priceCents, compareAtCents, stock: integer(v.stock, "stock", 0, 1e6) };
+      return { id: v.id ? text(v.id, "variantId", 100, true) : null, language, condition, finish, attributes, priceCents, compareAtCents, stock: integer(v.stock, "stock", 0, 1e6) };
     });
     let card = null;
     if (kind === "SINGLE") {
       if (!data.card || typeof data.card !== "object" || Array.isArray(data.card) || !setId) fail("VALIDATION", "Informe a coleção e os metadados da carta.");
       const c = data.card;
-      card = { name: text(c.name || name, "card.name", 200, true), number: text(String(c.number || ""), "card.number", 40, true), total: c.total == null ? null : text(String(c.total), "card.total", 40), rarity: text(c.rarity, "card.rarity", 100), type: text(Array.isArray(c.type) ? c.type.join(", ") : c.type, "card.type", 100), hp: c.hp == null ? null : text(String(c.hp), "card.hp", 20), provider: text(c.provider || "manual", "card.provider", 50, true), providerId: text(c.providerId, "card.providerId", 150), language: text(c.language || variants[0].language, "card.language", 15, true), setId, setName, tcg };
+      card = { name: text(c.name || name, "card.name", 200, true), number: text(String(c.number || ""), "card.number", 40, true), total: c.total == null ? null : text(String(c.total), "card.total", 40), rarity: text(c.rarity, "card.rarity", 100), type: text(Array.isArray(c.type) ? c.type.join(", ") : c.type, "card.type", 100), hp: c.hp == null ? null : text(String(c.hp), "card.hp", 20), provider: text(c.provider || "manual", "card.provider", 50, true), providerId: text(c.providerId, "card.providerId", 150), language: text(c.language || variants[0].language, "card.language", 15, true), referenceLanguage:text(c.referenceLanguage||c.language||variants[0].language,"card.referenceLanguage",15,true),referenceImage:text(c.referenceImage,"card.referenceImage",2000),displayNumber:text(c.displayNumber,"card.displayNumber",100), setId, setName, tcg };
     }
     let attributes = {};
     if (data.attributes && typeof data.attributes === "object" && !Array.isArray(data.attributes)) {
-      for (const k of ["category", "manufacturer", "contents", "specifications", "series", "sellerNotes", "weightGrams", "widthCm", "heightCm", "lengthCm"]) if (data.attributes[k] != null) attributes[k] = text(String(data.attributes[k]), k, 3e3);
+      for (const k of ["category", "itemType", "manufacturer", "contents", "specifications", "series", "sellerNotes", "weightGrams", "widthCm", "heightCm", "lengthCm"]) if (data.attributes[k] != null) attributes[k] = text(String(data.attributes[k]), k, 3e3);
     }
+    if(data.attributes?.manualCatalogFallback)attributes.manualCatalogFallback=data.attributes.manualCatalogFallback;
     const demoRecord=data.attributes?.demo===true||existing&&JSON.parse(existing.attributes_json).demo===true||/^DEMO(?:[-_]|$)/i.test(sku)||existing&&/^DEMO(?:[-_]|$)/i.test(existing.sku);
     if(demoRecord)attributes.demo=true;
     if(demoRecord&&data.published===true&&['production','staging'].includes(effectiveEnv.BKM_ENVIRONMENT))fail('DEMO_PRODUCT_PUBLISH_BLOCKED','Produtos de demonstração não podem ser publicados neste ambiente. Cadastre um produto com estoque real.',undefined,409);
     return { id: existing?.id || uid(), kind, name, slug, sku, setId, setName, tcg, description, images, variants, card, attributes, featured: data.featured === true, published: data.published === true };
   }
-  async function saveProduct(data, actor, existing) {
-    const p = validateProduct(data, existing);
+  async function saveProduct(data, actor, existing, session) {
+    if(!existing&&data.sku&&await db.prepare('SELECT id FROM products WHERE sku=?').get(data.sku))fail('CONFLICT','Já existe um produto com este SKU.',undefined,409);
+    const resolved=await productWorkflow.resolve(data,existing,actor,session),p=validateProduct(resolved.data, existing);
     await transaction(db, async () => {
+      if(existing)await db.prepare('SELECT id FROM products WHERE id=?'+db.lockSuffix).get(existing.id);
+      else await productWorkflow.allocate(p);
+      await productWorkflow.consume(resolved.fallback,actor,session);
+      const previousCardSnapshot=existing?.card_id?JSON.parse((await db.prepare('SELECT metadata_json FROM card_metadata WHERE id=?').get(existing.card_id)).metadata_json):null;
       let cardId = null;
       if (p.card) {
         const c = p.card, key = JSON.stringify([p.tcg, p.setId, normalized(c.number), c.language, c.provider, c.providerId]);
@@ -303,19 +319,26 @@ function createApi(options = {}) {
       const search = normalized([p.name, p.sku, p.setName, p.setId, p.attributes.category, p.attributes.series, p.card?.name, p.card?.number, p.card ? `${p.card.number}/${p.card.total || ""}` : ""].join(" "));
       if (existing) (await db.prepare("UPDATE products SET slug=?,kind=?,name=?,description=?,sku=?,tcg=?,set_id=?,set_name=?,card_id=?,images_json=?,attributes_json=?,search_text=?,featured=?,published=?,updated_at=? WHERE id=?").run(p.slug, p.kind, p.name, p.description, p.sku, p.tcg, p.setId, p.setName, cardId, JSON.stringify(p.images), JSON.stringify(p.attributes), search, +p.featured, +p.published, now(), p.id));
       else (await db.prepare("INSERT INTO products VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(p.id, p.slug, p.kind, p.name, p.description, p.sku, p.tcg, p.setId, p.setName, cardId, JSON.stringify(p.images), JSON.stringify(p.attributes), search, +p.featured, +p.published, 0, now(), now()));
-      const old = (await db.prepare("SELECT * FROM variants WHERE product_id=? ORDER BY id"+db.lockSuffix).all(p.id));
+      const old = (await db.prepare("SELECT v.*,m.attributes_json FROM variants v LEFT JOIN variant_metadata m ON m.variant_id=v.id WHERE v.product_id=? ORDER BY v.id"+(db.engine==='postgres'?' FOR UPDATE OF v':'')).all(p.id));
+      const previousCard=previousCardSnapshot;
+      const cardIdentity=c=>JSON.stringify(c?[String(c.provider||'manual').toLowerCase(),c.providerId||'',c.number,c.language]:null);
+      const productIdentityChanged=existing&&(existing.kind!==p.kind||existing.set_id!==p.setId||cardIdentity(previousCard)!==cardIdentity(p.card)||(JSON.parse(existing.attributes_json||'{}').itemType&&JSON.parse(existing.attributes_json||'{}').itemType!==p.attributes.itemType));
       for (const oldVariant of old) {
         const reserved=(await db.prepare("SELECT COALESCE(SUM(quantity),0) quantity FROM inventory_reservations WHERE variant_id=? AND status='ACTIVE' AND expires_at>?").get(oldVariant.id,Date.now())).quantity;
-        const retained=p.variants.find(value=>value.id===oldVariant.id || !value.id && value.language===oldVariant.language && value.condition===oldVariant.condition && value.finish===oldVariant.finish);
+        if(reserved&&productIdentityChanged)throw new ApiError(409,'STOCK_RESERVED_IDENTITY','O produto possui unidades reservadas. Sua carta, coleção ou tipo não podem ser trocados antes de concluir os pedidos pendentes.');
+        const retained=p.variants.find(value=>value.id===oldVariant.id || !value.id && variantIdentity(value)===variantIdentity({...oldVariant,attributes:attributesFromRow(oldVariant)}));
+        if(reserved&&retained&&variantIdentity(retained)!==variantIdentity({...oldVariant,attributes:attributesFromRow(oldVariant)}))throw new ApiError(409,'STOCK_RESERVED_IDENTITY','Uma variante reservada não pode mudar de idioma, condição, acabamento ou atributos antes de concluir os pedidos pendentes.');
         if(reserved && (!retained || retained.stock<reserved)) throw new ApiError(409,'STOCK_RESERVED','Esta variante possui unidades reservadas em pedidos pendentes. Libere os pedidos antes de reduzir o estoque.');
       }
       (await db.prepare("UPDATE variants SET active=0 WHERE product_id=?").run(p.id));
+      await db.prepare("UPDATE variant_metadata SET active=0 WHERE product_id=?").run(p.id);
       for (const v of p.variants) {
-        let prior = v.id ? old.find((x) => x.id === v.id) : old.find((x) => x.language === v.language && x.condition === v.condition && x.finish === v.finish);
+        let prior = v.id ? old.find((x) => x.id === v.id) : old.find((x) => variantIdentity({...x,attributes:attributesFromRow(x)})===variantIdentity(v));
         if (v.id && !prior) fail("VALIDATION", "Esta variante não pertence ao produto.");
         const id = prior?.id || uid();
         if (prior) (await db.prepare("UPDATE variants SET language=?,condition=?,finish=?,price_cents=?,compare_at_cents=?,stock=?,active=1 WHERE id=?").run(v.language, v.condition, v.finish, v.priceCents, v.compareAtCents, v.stock, id));
         else (await db.prepare("INSERT INTO variants VALUES(?,?,?,?,?,?,?,?,1)").run(id, p.id, v.language, v.condition, v.finish, v.priceCents, v.compareAtCents, v.stock));
+        await db.prepare('INSERT INTO variant_metadata(variant_id,product_id,identity_key,attributes_json,active) VALUES(?,?,?,?,1) ON CONFLICT(variant_id) DO UPDATE SET identity_key=excluded.identity_key,attributes_json=excluded.attributes_json,active=1').run(id,p.id,variantIdentity(v),JSON.stringify(v.attributes));
         const delta = v.stock - (prior?.stock || 0);
         if (delta) (await db.prepare("INSERT INTO stock_movements VALUES(?,?,?,?,?,?,?)").run(uid(), id, actor, delta, v.stock, existing ? "Ajuste administrativo" : "Estoque inicial", now()));
       }
@@ -337,7 +360,7 @@ function createApi(options = {}) {
     const items = [];
     let subtotalCents = 0;
     for (const [variantId, quantity] of [...counts].sort(([a],[b])=>a.localeCompare(b))) {
-      const v = (await db.prepare("SELECT v.*,p.name,p.slug,p.sku,p.images_json,p.published,p.archived FROM variants v JOIN products p ON p.id=v.product_id WHERE v.id=? AND v.active=1" + (lock ? db.lockSuffix : "")).get(variantId));
+      const v = (await db.prepare("SELECT v.*,m.attributes_json,p.name,p.slug,p.sku,p.images_json,p.published,p.archived FROM variants v JOIN products p ON p.id=v.product_id LEFT JOIN variant_metadata m ON m.variant_id=v.id WHERE v.id=? AND v.active=1" + (lock && db.engine==='postgres'?' FOR UPDATE OF v':'')).get(variantId));
       if (!v || !v.published || v.archived) throw new ApiError(409, "PRODUCT_UNAVAILABLE", "Um produto do carrinho não está mais disponível.", { variantId });
       const reserved = (await db.prepare("SELECT COALESCE(SUM(quantity),0) q FROM inventory_reservations WHERE variant_id=? AND status='ACTIVE' AND expires_at>?").get(variantId, Date.now())).q;
       const available = Math.max(0, v.stock - reserved);
@@ -345,7 +368,7 @@ function createApi(options = {}) {
       const totalCents = v.price_cents * quantity;
       subtotalCents += totalCents;
       if (!Number.isSafeInteger(subtotalCents) || subtotalCents > 1e9) fail("CART_LIMIT", "O valor do carrinho excede o limite.");
-      items.push({ variantId, productId: v.product_id, name: v.name, slug: v.slug, sku: v.sku, image: JSON.parse(v.images_json)[0] || null, language: v.language, condition: v.condition, finish: v.finish, quantity, priceCents: v.price_cents, unitPriceCents: v.price_cents, totalCents, availableStock: available });
+      items.push({ variantId, productId: v.product_id, name: v.name, slug: v.slug, sku: v.sku, image: JSON.parse(v.images_json)[0] || null, language: v.language, condition: v.condition, finish: v.finish, attributes:attributesFromRow(v), quantity, priceCents: v.price_cents, unitPriceCents: v.price_cents, totalCents, availableStock: available });
     }
     let discountCents = 0, coupon2 = null;
     if (data.coupon) {
@@ -642,6 +665,13 @@ function createApi(options = {}) {
       }
       if (pathname.startsWith("/api/admin")) {
         const user = auth(session, true);
+        if(pathname.startsWith('/api/admin/catalog/')) {
+          limit(req,'admin-product-catalog',180,60000);
+          if(pathname==='/api/admin/catalog/sets'&&method==='GET')return respond(200,await productWorkflow.sets(query.get('language')||'pt'));
+          if(pathname==='/api/admin/catalog/card'&&method==='GET')return respond(200,await productWorkflow.catalog.card(query.get('id'),query.get('setId'),query.get('language')||'pt'));
+          if(pathname==='/api/admin/catalog/search'&&method==='GET')return respond(200,await productWorkflow.search(query,user,session));
+          if(pathname==='/api/admin/catalog/manual-fallback'&&method==='POST')return respond(200,await productWorkflow.manualFallback(await readJson(req),user,session));
+        }
         if(pathname.startsWith('/api/admin/market-prices')) {
           const result=await market.handleAdmin({user,method,path:pathname,query,body:method==='POST'?await readJson(req,2*1024*1024):{}});
           if(result)return respond(result.status,result.data);
@@ -672,12 +702,12 @@ function createApi(options = {}) {
           return respond(200,{queued:true,demo});
         }
         if (pathname === "/api/admin/products" && method === "GET") return respond(200, await listProducts(query, true));
-        if (pathname === "/api/admin/products" && method === "POST") return respond(201, await saveProduct(await readJson(req), user.id));
+        if (pathname === "/api/admin/products" && method === "POST") return respond(201, await saveProduct(await readJson(req), user.id,undefined,session));
         if (/^\/api\/admin\/products\/[^/]+$/.test(pathname)) {
           const id = pathname.split("/").at(-1), existing = (await db.prepare("SELECT * FROM products WHERE id=?").get(id));
           if (!existing) throw new ApiError(404, "PRODUCT_NOT_FOUND", "Produto não encontrado.");
           if (method === "GET") return respond(200, await product(existing, true));
-          if (method === "PUT") return respond(200, await saveProduct(await readJson(req), user.id, existing));
+          if (method === "PUT") return respond(200, await saveProduct(await readJson(req), user.id, existing,session));
           if (method === "DELETE") {
             await transaction(db, async () => {
               (await db.prepare("UPDATE products SET archived=1,published=0,updated_at=? WHERE id=?").run(now(), id));

@@ -12,7 +12,7 @@ const {openDatabase}=require('../server/db.cjs');
 test('migrations são idempotentes, catálogo comercial inicia vazio e persiste em disco',()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'bkm-db-')),filename=path.join(dir,'store.sqlite');
   let db;
-  try{db=openDatabase(filename);assert.equal(db.prepare('SELECT COUNT(*) n FROM products').get().n,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM users').get().n,0);db.close();db=openDatabase(filename);assert.equal(db.prepare('PRAGMA user_version').get().user_version,9);}finally{db?.close();fs.rmSync(dir,{recursive:true,force:true});}
+  try{db=openDatabase(filename);assert.equal(db.prepare('SELECT COUNT(*) n FROM products').get().n,0);assert.equal(db.prepare('SELECT COUNT(*) n FROM users').get().n,0);db.close();db=openDatabase(filename);assert.equal(db.prepare('PRAGMA user_version').get().user_version,10);}finally{db?.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
 
 test('API integrada: sessões, RBAC, inventário, preços, cupons, frete e privacidade',async t=>{
@@ -40,6 +40,7 @@ test('API integrada: sessões, RBAC, inventário, preços, cupons, frete e priva
   let single,sealed;
   const baseProduct={kind:'SINGLE',name:'Pikáchu ex teste',slug:'pikachu-teste',description:'Registro temporário exclusivo dos testes automatizados.',sku:'TEST-PK-025',setId:'test-set',setName:'Coleção teste',images:[{url:'/assets/pikachu.webp',kind:'reference'}],card:{name:'Pikachu ex',number:'025',total:'198',provider:'manual',language:'pt'},featured:true,published:true,variants:[{language:'pt',condition:'NM',finish:'HOLO',priceCents:10000,stock:1},{language:'en',condition:'LP',finish:'HOLO',priceCents:8000,stock:2}]};
   await t.test('CRUD comercial e filtros reais com acentos, zeros e variantes',async()=>{
+    baseProduct.manualFallbackToken=(await admin.call('/api/admin/catalog/manual-fallback',{method:'POST',body:{q:'Pikachu fixture missing',language:'pt'}})).data.token;
     const saved=await admin.call('/api/admin/products',{method:'POST',body:baseProduct});assert.equal(saved.status,201,JSON.stringify(saved.data));single=saved.data;assert.equal(single.variants.length,2);assert.equal(single.card.number,'025');
     const box=await admin.call('/api/admin/products',{method:'POST',body:{...baseProduct,kind:'SEALED',name:'ETB teste',slug:'etb-teste',sku:'TEST-ETB',card:null,variants:[{language:'pt',condition:'SEALED',finish:'NORMAL',priceCents:8000,stock:10}]}});assert.equal(box.status,201);sealed=box.data;
     assert.equal((await anon.call('/api/products?kind=SINGLE&set=test-set&q=pikachu%20025&language=pt&condition=NM')).data.items.length,1);

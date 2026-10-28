@@ -1,6 +1,8 @@
 import { createPersonalUI, svgIcon } from "./personal-ui.js";
 import {createPasswordField} from './password-ui.js';
 import {createShippingAdminEditor} from './shipping-admin-ui.js';
+import {createAdminProductUI} from './admin-product-ui.js';
+import {productLanguages as languages,productConditions as conditions,productFinishes as finishes,productKindLabel,productKindPath,productVariantText,variantAttributeText} from './product-labels.js';
 
 const navMount = document.querySelector("#store-nav");
 const mount = document.querySelector("#storefront");
@@ -8,9 +10,6 @@ const overlay = document.querySelector("#store-overlay");
 const experience = document.querySelector(".experience");
 const money = (value) => Number.isFinite(value) ? (value / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "A calcular";
 const asArray = (value) => Array.isArray(value) ? value : [];
-const languages = { pt: "Portugu\xEAs", en: "Ingl\xEAs", ja: "Japon\xEAs", es: "Espanhol", fr: "Franc\xEAs", de: "Alem\xE3o", it: "Italiano", ko: "Coreano", zh: "Chin\xEAs" };
-const conditions = { NM: "Near Mint", LP: "Levemente jogada", MP: "Moderadamente jogada", HP: "Muito jogada", DMG: "Danificada", SEALED: "Lacrado" };
-const finishes = { NORMAL: "Normal", HOLO: "Holo", REVERSE: "Reverse holo", FOIL: "Foil" };
 const paymentLabels = {APPROVED:"Aprovado",PENDING:"Pendente",REJECTED:"Recusado",CANCELLED:"Cancelado",EXPIRED:"Expirado",REVIEW:"Em análise",REFUNDED:"Estornado",CHARGEBACK:"Contestado"};
 const orderLabels = {CONFIRMED:"Pagamento confirmado",PENDING:"Aguardando pagamento",PAYMENT_REVIEW:"Pagamento em análise",CANCELLED:"Cancelado",EXPIRED:"Prazo de pagamento encerrado",REFUNDED:"Reembolsado",PROCESSING:"Em separação",READY_TO_SHIP:"Separado para envio",SHIPPED:"Enviado",DELIVERED:"Entregue",UNFULFILLED:"A separar"};
 const shippingRegions = [["N","Norte"],["NE","Nordeste"],["CO","Centro-Oeste"],["SE","Sudeste"],["S","Sul"]];
@@ -99,7 +98,7 @@ async function syncAccount() {
       if (!match || match.variant.stock < 1) continue;
       const existing = state.cart.find(local => local.variantId === item.variantId);
       if(existing) existing.quantity = Math.min(match.variant.stock,Math.max(existing.quantity,item.quantity));
-      else state.cart.push({variantId:item.variantId,productId:match.product.id,slug:match.product.slug,name:match.product.name,image:productImage(match.product).url,language:match.variant.language,condition:match.variant.condition,finish:match.variant.finish,priceCents:match.variant.priceCents,stock:match.variant.stock,quantity:Math.min(item.quantity,match.variant.stock)});
+      else state.cart.push({variantId:item.variantId,productId:match.product.id,slug:match.product.slug,name:match.product.name,image:productImage(match.product).url,language:match.variant.language,condition:match.variant.condition,finish:match.variant.finish,attributes:asArray(match.variant.attributes),priceCents:match.variant.priceCents,stock:match.variant.stock,quantity:Math.min(item.quantity,match.variant.stock)});
     }
     for (const id of asArray(favorites.items)) {
       const product=products.get(typeof id === "string" ? id : id.productId);
@@ -329,7 +328,7 @@ function setupSearchSuggestions(form){
         const data=await api(`/products?q=${encodeURIComponent(q)}&pageSize=6&sort=relevance`);
         if(current!==version||!input.isConnected)return;
         options=asArray(data.items).map((product,index)=>{
-          const item=link(el("span",{},el("strong",{},product.name),el("small",{},`${product.kind==="SINGLE"?"Carta avulsa":"Lacrado"} · ${money(lowest(product))}`)),`/produto/${encodeURIComponent(product.slug)}`,"shop-suggestion");
+          const item=link(el("span",{},el("strong",{},product.name),el("small",{},`${productKindLabel(product.kind)} · ${money(lowest(product))}`)),`/produto/${encodeURIComponent(product.slug)}`,"shop-suggestion");
           item.setAttribute("role","option");item.id=`shop-suggestion-${index}`;item.setAttribute("aria-selected","false");return item;
         });
         setChildren(list,options.length?options:el("p",{role:"status"},"Nenhum anúncio encontrado."));list.hidden=false;input.setAttribute("aria-expanded","true");
@@ -417,7 +416,7 @@ function productCard(product) {
   catalogCache.set(product.id, product);
   const favorited = state.favorites.some((f) => f.id === product.id);
   const photo = productImage(product);
-  return el("article", { class: "shop-product-card" }, el("div", { class: "shop-product-picture" }, link(image(photo.url, product.name), `/produto/${encodeURIComponent(product.slug)}`), button(svgIcon("heart",favorited), (event) => toggleFavorite(product, event.currentTarget), "shop-favorite", { "aria-label": `${favorited ? "Remover" : "Adicionar"} ${product.name} ${favorited ? "dos" : "aos"} favoritos`, "aria-pressed": String(favorited) }), !available(product) ? badge("Indispon\xEDvel") : null), el("div", { class: "shop-product-meta" }, isDemo()?el("span",{class:"shop-demo-product"},"DEMONSTRAÇÃO"):null,el("p", { class: "shop-product-set" }, product.setName || "Pok\xE9mon TCG"), link(el("h3", {}, product.name), `/produto/${encodeURIComponent(product.slug)}`), el("p", { class: "shop-product-detail" }, product.kind === "SINGLE" ? [product.card?.number, asArray(product.variants).map((v) => languages[v.language] || v.language).filter((v, i, a) => a.indexOf(v) === i).join(" \xB7 ")].filter(Boolean).join(" \xB7 ") : "Produto lacrado"), el("p", { class: "shop-price" }, asArray(product.variants).length > 1 ? el("span", {}, "A partir de ") : null, money(lowest(product))), link(available(product) ? "Escolher op\xE7\xE3o \u2197" : "Ver detalhes \u2197", `/produto/${encodeURIComponent(product.slug)}`, "shop-product-action")));
+  return el("article", { class: "shop-product-card" }, el("div", { class: "shop-product-picture" }, link(image(photo.url, product.name), `/produto/${encodeURIComponent(product.slug)}`), button(svgIcon("heart",favorited), (event) => toggleFavorite(product, event.currentTarget), "shop-favorite", { "aria-label": `${favorited ? "Remover" : "Adicionar"} ${product.name} ${favorited ? "dos" : "aos"} favoritos`, "aria-pressed": String(favorited) }), !available(product) ? badge("Indispon\xEDvel") : null), el("div", { class: "shop-product-meta" }, isDemo()?el("span",{class:"shop-demo-product"},"DEMONSTRAÇÃO"):null,el("p", { class: "shop-product-set" }, product.setName || "Pok\xE9mon TCG"), link(el("h3", {}, product.name), `/produto/${encodeURIComponent(product.slug)}`), el("p", { class: "shop-product-detail" }, product.kind === "SINGLE" ? [product.card?.number, asArray(product.variants).map((v) => languages[v.language] || v.language).filter((v, i, a) => a.indexOf(v) === i).join(" \xB7 ")].filter(Boolean).join(" \xB7 ") : productKindLabel(product.kind)), el("p", { class: "shop-price" }, asArray(product.variants).length > 1 ? el("span", {}, "A partir de ") : null, money(lowest(product))), link(available(product) ? "Escolher op\xE7\xE3o \u2197" : "Ver detalhes \u2197", `/produto/${encodeURIComponent(product.slug)}`, "shop-product-action")));
 }
 function toggleFavorite(product, target) {
   const index = state.favorites.findIndex((f) => f.id === product.id);
@@ -480,14 +479,14 @@ async function productPage(slug) {
     addToCart(product, chosen, quantity);
     navigate("/checkout");
   }, "shop-button secondary");
-  const variantButtons = asArray(product.variants).map((variant) => button([el("strong", {}, languages[variant.language] || variant.language), el("span", {}, `${conditions[variant.condition] || variant.condition} \xB7 ${finishes[variant.finish] || variant.finish || "Normal"}`)], (event) => {
+  const variantButtons = asArray(product.variants).map((variant) => button([el("strong", {}, languages[variant.language] || variant.language), el("span", {}, productVariantText(variant,{includeLanguage:false}))], (event) => {
     chosen = variant;
     quantity = 1;
     qtyInput.value = "1";
     variantButtons.forEach((node) => node.classList.remove("selected"));
     event.currentTarget.classList.add("selected");
     sync();
-  }, `shop-variant ${variant.id === chosen?.id ? "selected" : ""}`, { "aria-label": `${languages[variant.language] || variant.language}, ${conditions[variant.condition] || variant.condition}, ${money(variant.priceCents)}`, disabled: variant.stock <= 0 }));
+  }, `shop-variant ${variant.id === chosen?.id ? "selected" : ""}`, { "aria-label": `${productVariantText(variant)}, ${money(variant.priceCents)}`, disabled: variant.stock <= 0 }));
   function sync() {
     setChildren(mainPrice,chosen?.compareAtCents > chosen?.priceCents ? el("del", {}, money(chosen.compareAtCents)) : null, chosen ? money(chosen.priceCents) : "Pre\xE7o indispon\xEDvel");
     stock.textContent = chosen?.stock > 0 ? `${chosen.stock} ${chosen.stock === 1 ? "unidade dispon\xEDvel" : "unidades dispon\xEDveis"}` : "Produto indispon\xEDvel";
@@ -500,7 +499,7 @@ async function productPage(slug) {
   sync();
   const imageNotes = el("p", { class: "shop-image-note" }, asArray(product.images).some((img) => img.kind === "actual") ? "Fotos do produto dispon\xEDveis na galeria." : "Imagem de refer\xEAncia. Confira idioma, condi\xE7\xE3o e acabamento antes de comprar.");
   const shippingBox = shippingForm();
-  const page=el("div", { class: "shop-shell" }, demoNotice(),el("nav", { class: "shop-breadcrumb", "aria-label": "Localiza\xE7\xE3o" }, link("In\xEDcio", "/"), el("span", {}, "/"), link(product.kind === "SINGLE" ? "Cartas avulsas" : "Lacrados", product.kind === "SINGLE" ? "/cartas" : "/lacrados"), el("span", {}, "/"), el("span", {}, product.name)), el("div", { class: "shop-detail-layout" }, el("div", { class: "shop-gallery" }, media, asArray(product.images).length > 1 ? el("div", { class: "shop-thumbnails" }, product.images.map((img, i) => button(image(img.url, `${product.name}, imagem ${i + 1}`), () => {
+  const page=el("div", { class: "shop-shell" }, demoNotice(),el("nav", { class: "shop-breadcrumb", "aria-label": "Localiza\xE7\xE3o" }, link("In\xEDcio", "/"), el("span", {}, "/"), link(productKindLabel(product.kind,{plural:true}),productKindPath(product.kind)), el("span", {}, "/"), el("span", {}, product.name)), el("div", { class: "shop-detail-layout" }, el("div", { class: "shop-gallery" }, media, asArray(product.images).length > 1 ? el("div", { class: "shop-thumbnails" }, product.images.map((img, i) => button(image(img.url, `${product.name}, imagem ${i + 1}`), () => {
     activePhoto=img;setChildren(media,image(img.url,product.name),el("span",{class:"shop-zoom-hint"},"Ampliar imagem ↗"));
   }, "shop-thumbnail", { "aria-label": `Ver imagem ${i + 1}` }))) : null, imageNotes), el("div", { class: "shop-detail-info" }, el("p", { class: "shop-kicker" }, product.setName || "POK\xC9MON TCG"), el("h1", {}, product.name), product.kind === "SINGLE" && product.card ? el("p", { class: "shop-muted" }, [product.card.number, product.card.rarity].filter(Boolean).join(" \xB7 ")) : null, mainPrice, el("div", { class: "shop-variants" }, el("p", { class: "shop-label" }, "Selecione sua vers\xE3o"), variantButtons), stock, el("div", { class: "shop-quantity" }, button("\u2212", () => {
     quantity = Math.max(1, quantity - 1);
@@ -526,7 +525,7 @@ function addToCart(product, variant, quantity) {
   }
   let item = state.cart.find((item2) => item2.variantId === variant.id);
   if (item) item.quantity = Math.min(variant.stock, item.quantity + quantity);
-  else state.cart.push({ variantId: variant.id, productId: product.id, slug: product.slug, name: product.name, image: productImage(product).url, language: variant.language, condition: variant.condition, finish: variant.finish, priceCents: variant.priceCents, stock: variant.stock, quantity: Math.min(variant.stock, quantity) });
+  else state.cart.push({ variantId: variant.id, productId: product.id, slug: product.slug, name: product.name, image: productImage(product).url, language: variant.language, condition: variant.condition, finish: variant.finish, attributes:asArray(variant.attributes), priceCents: variant.priceCents, stock: variant.stock, quantity: Math.min(variant.stock, quantity) });
   persist();
   renderNav();
   toast("Produto adicionado ao carrinho.");
@@ -600,7 +599,7 @@ async function reconcileCart() {
       return false;
     }
     if (item.priceCents !== variant.priceCents || item.quantity > variant.stock) changed = true;
-    Object.assign(item, { name: product.name, priceCents: variant.priceCents, stock: variant.stock, image: productImage(product).url, quantity: Math.min(item.quantity, variant.stock) });
+    Object.assign(item, { name: product.name, priceCents: variant.priceCents, stock: variant.stock, language:variant.language,condition:variant.condition,finish:variant.finish,attributes:asArray(variant.attributes),image: productImage(product).url, quantity: Math.min(item.quantity, variant.stock) });
     return true;
   });
   persist();
@@ -608,7 +607,7 @@ async function reconcileCart() {
   if (changed) toast("Seu carrinho foi atualizado com os pre\xE7os e estoques atuais.");
 }
 function cartItems(onUpdate) {
-  return el("div", { class: "shop-cart-items" }, state.cart.map((item) => el("article", { class: "shop-cart-item", "data-cart-variant":item.variantId }, link(image(item.image, item.name), `/produto/${encodeURIComponent(item.slug)}`, "shop-cart-image"), el("div", { class: "shop-cart-item-info" }, link(el("h3", {}, item.name), `/produto/${encodeURIComponent(item.slug)}`), el("p", {}, `${languages[item.language] || item.language} · ${conditions[item.condition] || item.condition} · ${finishes[item.finish] || item.finish || "Normal"}`), el("strong", {}, money(item.priceCents)), el("div", { class: "shop-cart-quantity" }, button("\u2212", () => updateQuantity(item.variantId, item.quantity - 1, onUpdate), "shop-quantity-button", { "aria-label": `Diminuir quantidade de ${item.name}`, "data-cart-action":"decrease" }), el("span", {"aria-live":"polite"}, item.quantity), button("+", () => updateQuantity(item.variantId, item.quantity + 1, onUpdate), "shop-quantity-button", { "aria-label": `Aumentar quantidade de ${item.name}`, "data-cart-action":"increase", disabled: item.quantity >= item.stock }), button("Remover", () => updateQuantity(item.variantId, 0, onUpdate), "shop-remove",{"data-cart-action":"remove","aria-label":`Remover ${item.name} do carrinho`}))))) );
+  return el("div", { class: "shop-cart-items" }, state.cart.map((item) => el("article", { class: "shop-cart-item", "data-cart-variant":item.variantId }, link(image(item.image, item.name), `/produto/${encodeURIComponent(item.slug)}`, "shop-cart-image"), el("div", { class: "shop-cart-item-info" }, link(el("h3", {}, item.name), `/produto/${encodeURIComponent(item.slug)}`), el("p", {}, productVariantText(item)), el("strong", {}, money(item.priceCents)), el("div", { class: "shop-cart-quantity" }, button("\u2212", () => updateQuantity(item.variantId, item.quantity - 1, onUpdate), "shop-quantity-button", { "aria-label": `Diminuir quantidade de ${item.name}`, "data-cart-action":"decrease" }), el("span", {"aria-live":"polite"}, item.quantity), button("+", () => updateQuantity(item.variantId, item.quantity + 1, onUpdate), "shop-quantity-button", { "aria-label": `Aumentar quantidade de ${item.name}`, "data-cart-action":"increase", disabled: item.quantity >= item.stock }), button("Remover", () => updateQuantity(item.variantId, 0, onUpdate), "shop-remove",{"data-cart-action":"remove","aria-label":`Remover ${item.name} do carrinho`}))))) );
 }
 async function updateQuantity(id, quantity, callback) {
   const item = state.cart.find((v) => v.variantId === id);
@@ -787,7 +786,7 @@ async function checkoutPage() {
       const mode=result.shipping?.deliveryMode||deliveryMode;
       const localDays=result.shipping?.estimatedDays;
       const deliveryLabel=mode==="pickup"?"Retirada na loja — grátis. Prazo e ponto de retirada a combinar pelo WhatsApp após o pagamento.":mode==="local"?`Entrega gratuita em Uberlândia/MG. ${Number.isInteger(localDays)&&localDays>0?`Estimativa de ${localDays} dias úteis.`:"Prazo a combinar pelo WhatsApp após o pagamento."}`:result.shipping?.free?"Frete grátis para seu CEP.":`${isDemo()?"Estimativa ilustrativa de entrega":"Estimativa de entrega"}: ${Number.isSafeInteger(result.shipping?.estimatedDays)&&result.shipping.estimatedDays>0?`${result.shipping.estimatedDays} dias úteis.`:"Prazo de entrega indisponível."}`;
-      setChildren(summary,el("p",{class:"shop-kicker"},isDemo()?"PEDIDO DE DEMONSTRAÇÃO":"RESUMO"),el("h2",{},"Seu pedido"),state.cart.map(item=>el("div",{class:"shop-summary-row"},el("span",{},`${item.quantity} × ${item.name}`),el("span",{},money(item.priceCents*item.quantity)))),el("hr"),summaryRow("Subtotal",result.subtotalCents),result.discountCents?summaryRow("Desconto",-result.discountCents):null,mode==="delivery"?freeShippingProgress(Math.max(0,(result.subtotalCents||0)-(result.discountCents||0))):null,summaryRow(mode==="pickup"?"Retirada":isDemo()?"Frete de demonstração":"Frete",result.shipping?.available?result.shippingCents:null),el("div",{class:"shop-summary-total"},el("span",{},"Total"),el("strong",{},money(result.totalCents))),result.shipping?.available?message(deliveryLabel):message(result.shipping?.reason||"Informe um CEP atendido para conferir a entrega."),...asArray(result.errors).map(error=>message(typeof error==="string"?error:error.message,"error")));
+      setChildren(summary,el("p",{class:"shop-kicker"},isDemo()?"PEDIDO DE DEMONSTRAÇÃO":"RESUMO"),el("h2",{},"Seu pedido"),state.cart.map(item=>el("div",{class:"shop-summary-row"},el("span",{},`${item.quantity} × ${item.name}`,el("small",{class:"shop-fine shop-summary-variant"},productVariantText(item))),el("span",{},money(item.priceCents*item.quantity)))),el("hr"),summaryRow("Subtotal",result.subtotalCents),result.discountCents?summaryRow("Desconto",-result.discountCents):null,mode==="delivery"?freeShippingProgress(Math.max(0,(result.subtotalCents||0)-(result.discountCents||0))):null,summaryRow(mode==="pickup"?"Retirada":isDemo()?"Frete de demonstração":"Frete",result.shipping?.available?result.shippingCents:null),el("div",{class:"shop-summary-total"},el("span",{},"Total"),el("strong",{},money(result.totalCents))),result.shipping?.available?message(deliveryLabel):message(result.shipping?.reason||"Informe um CEP atendido para conferir a entrega."),...asArray(result.errors).map(error=>message(typeof error==="string"?error:error.message,"error")));
       submit.disabled=submitting||!(demoPayments||realPayments)||!result.paymentAvailable||!result.shipping?.available;
       if(realUi)await realUi.updateAmount(result.totalCents);
       if(!result.paymentAvailable)summary.append(message(result.reason||state.config.payments?.reason||"Pagamento indisponível."));
@@ -900,7 +899,7 @@ async function orderPage(id,admin=false){
   const status=el("div",{"aria-live":"polite"});
   const items=asArray(order.items),contact=order.contact||order.customer||{},address=order.address||order.shippingAddress||{};
   const paymentStatus=order.paymentStatus||order.payment?.status||"PENDING";
-  const detail=el("section",{class:"shop-order-detail"},demoNotice(),el("div",{class:"shop-section-top"},el("div",{},el("p",{class:"shop-kicker"},isDemo()?"PEDIDO DE TESTE / SEM COBRANÇA REAL":"ACOMPANHE SEU PEDIDO"),el("h1",{},order.number||order.id),el("p",{class:"shop-muted"},order.createdAt?new Date(order.createdAt).toLocaleString("pt-BR"):"")),link("← Todos os pedidos",admin?"/admin/pedidos":"/conta","shop-text-link")),el("div",{class:"shop-order-statuses"},badge(orderLabels[order.status]||order.status),badge(`Pagamento${isDemo()?" simulado":""}: ${paymentLabels[paymentStatus]||paymentStatus}`),badge(`Entrega${isDemo()?" de teste":""}: ${orderShippingLabel(order)}`)),el("div",{class:"shop-order-layout"},el("div",{},el("section",{class:"shop-admin-section"},el("h2",{},"Itens do pedido"),items.map(item=>{const snapshot={...item.variant,...(item.snapshot||item.productSnapshot||item)};const photoValue=snapshot.image||snapshot.imageUrl||asArray(snapshot.images)[0]?.url;const photo=typeof photoValue==="string"?photoValue:photoValue?.url;return el("article",{class:"shop-order-item"},photo?image(photo,snapshot.name||item.name||"Produto"):null,el("div",{},el("h3",{},snapshot.name||item.name||item.productName||"Produto"),el("p",{class:"shop-muted"},[snapshot.number,snapshot.language?languages[snapshot.language]||snapshot.language:null,snapshot.condition?conditions[snapshot.condition]||snapshot.condition:null,snapshot.finish?finishes[snapshot.finish]||snapshot.finish:null].filter(Boolean).join(" · ")),el("p",{},`${item.quantity} × ${money(item.priceCents??item.unitPriceCents??snapshot.priceCents)}`)),el("strong",{},money(item.totalCents??((item.priceCents??item.unitPriceCents??snapshot.priceCents??0)*item.quantity))));})),el("section",{class:"shop-admin-section"},el("h2",{},"Contato e endereço"),el("p",{},contact.name||address.name||state.user.name),el("p",{class:"shop-muted"},contact.email||order.email||""),el("p",{class:"shop-muted"},contact.phone||address.phone||""),el("p",{class:"shop-muted"},[address.street,address.number,address.complement].filter(Boolean).join(", ")),el("p",{class:"shop-muted"},[address.district,address.city,address.state].filter(Boolean).join(" · ")),el("p",{class:"shop-muted"},`CEP: ${address.zip||address.cep||"—"}`))),el("aside",{class:"shop-summary"},el("h2",{},"Resumo"),summaryRow("Subtotal",order.subtotalCents),order.discountCents?summaryRow("Desconto",-order.discountCents):null,summaryRow(isDemo()?"Frete de demonstração":"Frete",order.shippingCents),el("div",{class:"shop-summary-total"},el("span",{},"Total"),el("strong",{},money(order.totalCents))),order.trackingCode||order.tracking?.code||order.shipment?.trackingCode?el("div",{class:"shop-order-tracking"},el("h3",{},isDemo()?"Rastreamento de teste":"Rastreamento"),el("p",{},order.trackingCode||order.tracking?.code||order.shipment?.trackingCode),safeImage(order.trackingUrl||order.tracking?.url||order.shipment?.trackingUrl)?el("a",{href:safeImage(order.trackingUrl||order.tracking?.url||order.shipment?.trackingUrl),class:"shop-text-link",target:"_blank",rel:"noopener noreferrer"},"Consultar rastreamento ↗"):null):null,isDemo()?message("Este pedido foi gerado em demonstração. Não houve pagamento nem contratação de entrega."):null)),status);
+  const detail=el("section",{class:"shop-order-detail"},demoNotice(),el("div",{class:"shop-section-top"},el("div",{},el("p",{class:"shop-kicker"},isDemo()?"PEDIDO DE TESTE / SEM COBRANÇA REAL":"ACOMPANHE SEU PEDIDO"),el("h1",{},order.number||order.id),el("p",{class:"shop-muted"},order.createdAt?new Date(order.createdAt).toLocaleString("pt-BR"):"")),link("← Todos os pedidos",admin?"/admin/pedidos":"/conta","shop-text-link")),el("div",{class:"shop-order-statuses"},badge(orderLabels[order.status]||order.status),badge(`Pagamento${isDemo()?" simulado":""}: ${paymentLabels[paymentStatus]||paymentStatus}`),badge(`Entrega${isDemo()?" de teste":""}: ${orderShippingLabel(order)}`)),el("div",{class:"shop-order-layout"},el("div",{},el("section",{class:"shop-admin-section"},el("h2",{},"Itens do pedido"),items.map(item=>{const snapshot={...item.variant,...(item.snapshot||item.productSnapshot||item)};const photoValue=snapshot.image||snapshot.imageUrl||asArray(snapshot.images)[0]?.url;const photo=typeof photoValue==="string"?photoValue:photoValue?.url;return el("article",{class:"shop-order-item"},photo?image(photo,snapshot.name||item.name||"Produto"):null,el("div",{},el("h3",{},snapshot.name||item.name||item.productName||"Produto"),el("p",{class:"shop-muted"},[snapshot.number,snapshot.language?languages[snapshot.language]||snapshot.language:null,snapshot.condition?conditions[snapshot.condition]||snapshot.condition:null,snapshot.finish?finishes[snapshot.finish]||snapshot.finish:null,variantAttributeText(snapshot)].filter(Boolean).join(" · ")),el("p",{},`${item.quantity} × ${money(item.priceCents??item.unitPriceCents??snapshot.priceCents)}`)),el("strong",{},money(item.totalCents??((item.priceCents??item.unitPriceCents??snapshot.priceCents??0)*item.quantity))));})),el("section",{class:"shop-admin-section"},el("h2",{},"Contato e endereço"),el("p",{},contact.name||address.name||state.user.name),el("p",{class:"shop-muted"},contact.email||order.email||""),el("p",{class:"shop-muted"},contact.phone||address.phone||""),el("p",{class:"shop-muted"},[address.street,address.number,address.complement].filter(Boolean).join(", ")),el("p",{class:"shop-muted"},[address.district,address.city,address.state].filter(Boolean).join(" · ")),el("p",{class:"shop-muted"},`CEP: ${address.zip||address.cep||"—"}`))),el("aside",{class:"shop-summary"},el("h2",{},"Resumo"),summaryRow("Subtotal",order.subtotalCents),order.discountCents?summaryRow("Desconto",-order.discountCents):null,summaryRow(isDemo()?"Frete de demonstração":"Frete",order.shippingCents),el("div",{class:"shop-summary-total"},el("span",{},"Total"),el("strong",{},money(order.totalCents))),order.trackingCode||order.tracking?.code||order.shipment?.trackingCode?el("div",{class:"shop-order-tracking"},el("h3",{},isDemo()?"Rastreamento de teste":"Rastreamento"),el("p",{},order.trackingCode||order.tracking?.code||order.shipment?.trackingCode),safeImage(order.trackingUrl||order.tracking?.url||order.shipment?.trackingUrl)?el("a",{href:safeImage(order.trackingUrl||order.tracking?.url||order.shipment?.trackingUrl),class:"shop-text-link",target:"_blank",rel:"noopener noreferrer"},"Consultar rastreamento ↗"):null):null,isDemo()?message("Este pedido foi gerado em demonstração. Não houve pagamento nem contratação de entrega."):null)),status);
   if(isDemo()&&paymentStatus==="PENDING"){
     const actions=el("div",{class:"shop-actions"});
     for(const [outcome,label]of[["approved","Simular aprovação"],["rejected","Simular recusa"],["cancelled","Simular cancelamento"],["expired","Simular expiração"]])actions.append(button(label,async event=>{const buttons=[...actions.querySelectorAll("button")];buttons.forEach(node=>node.disabled=true);try{await api(`/${admin?"admin":"account"}/orders/${encodeURIComponent(id)}/simulate`,{method:"POST",body:{outcome,idempotencyKey:crypto.randomUUID()}});toast("Evento de teste registrado.");renderRoute();}catch(error){status.replaceChildren(message(displayError(error),"error"));buttons.forEach(node=>node.disabled=false);}},outcome==="approved"?"shop-button":"shop-button secondary"));
@@ -996,7 +995,7 @@ async function adminPage(path) {
   else if(path === "/admin/integracoes")content=await adminIntegrations();
   else if(path === "/admin/precos")content=await adminMarketPrices();
   else content = empty("P\xE1gina n\xE3o encontrada.", "Escolha uma \xE1rea da administra\xE7\xE3o.", link("Ir para o painel", "/admin", "shop-button"));
-  return el("div", { class: "shop-shell shop-admin" }, el("div", { class: "shop-admin-title" }, heading("BKM TCG / OPERA\xC7\xC3O", "Administra\xE7\xE3o."), link("Ver a loja \u2197", "/busca", "shop-text-link")), el("nav", { class: "shop-admin-nav", "aria-label": "Administra\xE7\xE3o" }, tabs.map(([label, href]) => link(label, href, path === href || href === "/admin/produtos" && path.startsWith("/admin/produtos/") ? "active" : ""))), content);
+  return el("div", { class: `shop-shell shop-admin${path.startsWith("/admin/produtos/")?" shop-admin-product-editor":""}` }, el("div", { class: "shop-admin-title" }, heading("BKM TCG / OPERA\xC7\xC3O", "Administra\xE7\xE3o."), link("Ver a loja \u2197", "/busca", "shop-text-link")), el("nav", { class: "shop-admin-nav", "aria-label": "Administra\xE7\xE3o" }, tabs.map(([label, href]) => link(label, href, path === href || href === "/admin/produtos" && path.startsWith("/admin/produtos/") ? "active" : ""))), content);
 }
 async function adminDashboard() {
   const [summary, coupons] = await Promise.all([api("/admin/summary"), api("/admin/coupons")]);
@@ -1015,7 +1014,7 @@ async function adminProducts() {
   search.querySelector("[name=archived]").addEventListener("change",()=>search.requestSubmit());
   const filtered=!!params.get("q")||!!archived||!!params.get("kind")||!!params.get("set");
   const noResults=filtered?empty(archived==="only"?"Nenhum produto arquivado encontrado.":"Nenhum produto encontrado.","Revise a busca ou selecione outra visualização do catálogo.",link("Ver produtos não arquivados","/admin/produtos","shop-button secondary")):empty("Seu catálogo está pronto para começar.","Cadastre os produtos reais para definir preço, estoque e versões.",link("Cadastrar produto","/admin/produtos/novo","shop-button"));
-  const section=el("section",{},el("div",{class:"shop-section-top"},el("h2",{},"Produtos"),link("Novo produto +","/admin/produtos/novo","shop-button")),search,el("p",{class:"shop-fine"},"Produtos arquivados preservam o histórico e ficam fora do catálogo público."),items.length?el("div",{class:"shop-table-wrap"},el("table",{class:"shop-table"},el("thead",{},el("tr",{},["Produto","SKU","Tipo","Preço","Estoque","Status",""].map(text=>el("th",{},text)))),el("tbody",{},items.map(product=>el("tr",{},el("td",{},el("div",{class:"shop-table-product"},image(productImage(product).url,product.name),el("span",{},product.name))),el("td",{},product.sku||"—"),el("td",{},product.kind==="SINGLE"?"Carta":"Lacrado"),el("td",{},money(lowest(product))),el("td",{},asArray(product.variants).reduce((total,variant)=>total+variant.stock,0)),el("td",{},badge(product.archived?"Arquivado":product.published?"Publicado":"Rascunho")),el("td",{},link(product.archived?"Ver cadastro ↗":"Editar ↗",`/admin/produtos/${encodeURIComponent(product.id)}`,"shop-text-link"))))))):noResults);
+  const section=el("section",{},el("div",{class:"shop-section-top"},el("h2",{},"Produtos"),link("Novo produto +","/admin/produtos/novo","shop-button")),search,el("p",{class:"shop-fine"},"Produtos arquivados preservam o histórico e ficam fora do catálogo público."),items.length?el("div",{class:"shop-table-wrap"},el("table",{class:"shop-table"},el("thead",{},el("tr",{},["Produto","SKU","Tipo","Preço","Estoque","Status",""].map(text=>el("th",{},text)))),el("tbody",{},items.map(product=>el("tr",{},el("td",{},el("div",{class:"shop-table-product"},image(productImage(product).url,product.name),el("span",{},product.name))),el("td",{},product.sku||"—"),el("td",{},productKindLabel(product.kind)),el("td",{},money(lowest(product))),el("td",{},asArray(product.variants).reduce((total,variant)=>total+variant.stock,0)),el("td",{},badge(product.archived?"Arquivado":product.published?"Publicado":"Rascunho")),el("td",{},link(product.archived?"Ver cadastro ↗":"Editar ↗",`/admin/produtos/${encodeURIComponent(product.id)}`,"shop-text-link"))))))):noResults);
   const current=data.pagination?.page||1,pages=data.pagination?.pages||1;
   if(pages>1)section.append(el("nav",{class:"shop-pagination","aria-label":"Paginação administrativa"},button("← Anterior",()=>goPage("/admin/produtos",current-1),"shop-button secondary",{disabled:current<=1}),el("span",{},`Página ${current} de ${pages}`),button("Próxima →",()=>goPage("/admin/produtos",current+1),"shop-button secondary",{disabled:current>=pages})));
   return section;
@@ -1034,7 +1033,7 @@ async function adminInventory(){
   }},el("input",{name:"q",type:"search",placeholder:"Pesquisar produto ou SKU","aria-label":"Pesquisar estoque",value:params.get("q")||""}),button("Buscar",()=>search.requestSubmit(),"shop-button secondary"));
   const rows=asArray(data.items).flatMap(product=>asArray(product.variants).map(variant=>[
     el("div",{},el("strong",{},product.name),el("p",{class:"shop-fine"},product.sku)),
-    `${languages[variant.language]||variant.language} · ${conditions[variant.condition]||variant.condition} · ${finishes[variant.finish]||variant.finish}`,
+    productVariantText(variant),
     badge(variant.stock===0?"Esgotado":`${variant.stock} unidades`),money(variant.priceCents),
     link("Ajustar ↗",`/admin/produtos/${encodeURIComponent(product.id)}`,"shop-text-link")
   ]));
@@ -1050,198 +1049,7 @@ async function adminInventory(){
   );
 }
 async function productEditor(id) {
-  let product = { kind: "SINGLE", name: "", slug: "", sku: "", description: "", setId: "", setName: "", tcg: "pokemon", images: [], variants: [], published: false, featured: false, card: null };
-  if (id) {
-    const result = await api(`/admin/products/${encodeURIComponent(id)}`);
-    product = result.product || result;
-  }
-  let cardMetadata = product.card;
-  const manualNumber=field("Número da carta (manual)","manualNumber","text",cardMetadata?.number||"");
-  const manualTotal=field("Total impresso da coleção","manualTotal","text",cardMetadata?.total||"");
-  const manualRarity=field("Raridade (manual)","manualRarity","text",cardMetadata?.rarity||"");
-  const manualType=field("Tipo da carta (manual)","manualType","text",cardMetadata?.type||"");
-  const manualHp=field("HP (manual)","manualHp","text",cardMetadata?.hp||"");
-  const manualStatus=el("div",{"aria-live":"polite"});
-  const manualSection=el("details",{class:"shop-admin-section"},el("summary",{},"Cadastrar ou corrigir os dados manualmente"),el("p",{class:"shop-fine"},"Use os dados impressos na carta. Preencha também o ID e o nome da coleção abaixo. Essa opção funciona mesmo quando o catálogo externo não responde."),el("div",{class:"shop-form-grid"},manualNumber,manualTotal,manualRarity,manualType,manualHp),button("Confirmar dados manuais",()=>{
-    const read=node=>node.querySelector("input").value.trim();
-    if(!read(manualNumber)||!setId.querySelector("input").value.trim()||!name.querySelector("input").value.trim()){manualStatus.replaceChildren(message("Preencha nome, ID da coleção e número da carta.","error"));return;}
-    cardMetadata={name:name.querySelector("input").value.trim(),number:read(manualNumber),total:read(manualTotal)||null,rarity:read(manualRarity),type:read(manualType),hp:read(manualHp)||null,provider:"manual",providerId:"",language:variantValues[0]?.language||"pt"};
-    manualStatus.replaceChildren(message("Dados manuais confirmados. Confira as imagens, o preço e o estoque antes de salvar.","success"));
-  },"shop-button secondary"),manualStatus);
-  manualSection.hidden=product.kind!=="SINGLE";
-  let imageValues = asArray(product.images).map((img) => ({ ...img }));
-  let variantValues = asArray(product.variants).map((v) => ({ ...v }));
-  if (!variantValues.length) variantValues = [{ language: "pt", condition: product.kind === "SINGLE" ? "NM" : "SEALED", finish: "NORMAL", priceCents: 0, compareAtCents: null, stock: 0 }];
-  const status = el("div", { "aria-live": "polite" });
-  const kind = selectField("Tipo de produto", "kind", [["SINGLE", "Carta avulsa"], ["SEALED", "Produto lacrado"]], product.kind);
-  const name = field("Nome do produto", "name", "text", product.name, { required: true, maxlength: "200" });
-  const setId = field("ID da cole\xE7\xE3o", "setId", "text", product.setId || "");
-  const setName = field("Nome da cole\xE7\xE3o", "setName", "text", product.setName || "");
-  const description = field("Descri\xE7\xE3o", "description", "textarea", product.description, { rows: "5", maxlength: "10000" });
-  const cardSearch = el("section", { class: "shop-admin-section" });
-  const imageList = el("div", { class: "shop-image-editor" });
-  const variantList = el("div", { class: "shop-variant-editor" });
-  function renderImages() {
-    setChildren(imageList,imageValues.map((img, i) => el("div", { class: "shop-image-editor-row" }, image(img.url, `Imagem ${i + 1}`), el("div", {}, el("p", {}, img.kind === "actual" ? "Foto real" : "Imagem de refer\xEAncia"), el("span", { class: "shop-fine" }, img.url)), button("Remover", () => {
-      imageValues.splice(i, 1);
-      renderImages();
-    }, "shop-text-link"))));
-  }
-  function renderVariants() {
-    setChildren(variantList,variantValues.map((variant, index) => {
-      const row = el("fieldset", { class: "shop-variant-row" }, el("legend", {}, `Vers\xE3o ${index + 1}`), selectField("Idioma", "language", Object.entries(languages), variant.language || "pt"), selectField("Condi\xE7\xE3o", "condition", Object.entries(conditions), variant.condition || "NM"), selectField("Acabamento", "finish", Object.entries(finishes), variant.finish || "NORMAL"), field("Pre\xE7o (R$)", "price", "number", ((variant.priceCents || 0) / 100).toFixed(2), { min: ".01", step: ".01", required: true }), field("Pre\xE7o anterior (R$)", "compareAt", "number", variant.compareAtCents ? (variant.compareAtCents / 100).toFixed(2) : "", { min: "0", step: ".01" }), field("Estoque", "stock", "number", variant.stock || 0, { min: "0", step: "1", required: true }), button("Remover vers\xE3o", () => {
-        captureVariants();
-        variantValues.splice(index, 1);
-        renderVariants();
-      }, "shop-text-link", { disabled: variantValues.length === 1 }));
-      row.dataset.variantIndex = index;
-      return row;
-    }));
-  }
-  function captureVariants() {
-    variantValues = [...variantList.children].map((row, index) => {
-      const value = (name2) => row.querySelector(`[name=${name2}]`).value;
-      return { ...variantValues[index], language: value("language"), condition: value("condition"), finish: value("finish"), priceCents: Math.round(Number(value("price")) * 100), compareAtCents: value("compareAt") ? Math.round(Number(value("compareAt")) * 100) : null, stock: Number(value("stock")) };
-    });
-  }
-  renderImages();
-  renderVariants();
-  const imageUrl = el("input", { type: "url", placeholder: "https://\u2026", "aria-label": "Endere\xE7o da imagem" });
-  const imageKind = el("select", { "aria-label": "Tipo da imagem" }, el("option", { value: "actual" }, "Foto real"), el("option", { value: "reference" }, "Imagem de refer\xEAncia"));
-  const addImage = () => {
-    const url = safeImage(imageUrl.value);
-    if (!url) {
-      toast("Informe um endere\xE7o HTTP ou HTTPS v\xE1lido.");
-      return;
-    }
-    imageValues.push({ url, kind: imageKind.value });
-    imageUrl.value = "";
-    renderImages();
-  };
-  const upload = el("input", { type: "file", accept: "image/png,image/jpeg,image/webp", "aria-label": "Enviar foto real do produto", onChange: async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    if (file.size > 8 * 1024 * 1024) {
-      toast("Escolha uma imagem com at\xE9 8 MB.");
-      return;
-    }
-    event.target.disabled = true;
-    try {
-      const payload = await prepareImageUpload(file);
-      const result = await api("/admin/uploads", { method: "POST", body: payload });
-      imageValues.push({ url: result.url, kind: result.kind || "actual" });
-      renderImages();
-      toast("Imagem enviada.");
-    } catch (error) {
-      toast(displayError(error));
-    } finally {
-      event.target.disabled = false;
-      event.target.value = "";
-    }
-  } });
-  const form = el("form", { class: "shop-product-form", onSubmit: async (event) => {
-    event.preventDefault();
-    captureVariants();
-    const values = Object.fromEntries(new FormData(form));
-    if (values.kind === "SINGLE" && !cardMetadata) {
-      status.replaceChildren(message("Busque e confirme a carta, ou use o cadastro manual, antes de salvar.", "error"));
-      return;
-    }
-    if (!imageValues.length) {
-      status.replaceChildren(message("Adicione uma imagem de refer\xEAncia ou uma foto real do produto.", "error"));
-      return;
-    }
-    const payload = { kind: values.kind, name: values.name.trim(), slug: values.slug.trim() || void 0, description: values.description.trim(), sku: values.sku.trim(), setId: values.setId.trim(), setName: values.setName.trim(), tcg: values.tcg, images: imageValues, card: values.kind === "SINGLE" ? cardMetadata : null, variants: variantValues, published: values.published === "on", featured: values.featured === "on", attributes:{...product.attributes,category:values.productCategory.trim(),manufacturer:values.manufacturer.trim(),contents:values.contents.trim(),specifications:values.specifications.trim(),sellerNotes:values.sellerNotes.trim(),weightGrams:Number(values.weightGrams)||null,widthCm:Number(values.widthCm)||null,heightCm:Number(values.heightCm)||null,lengthCm:Number(values.lengthCm)||null} };
-    const submit = form.querySelector("[type=submit]");
-    submit.disabled = true;
-    status.replaceChildren();
-    try {
-      const result = await api(`/admin/products${id ? `/${encodeURIComponent(id)}` : ""}`, { method: id ? "PUT" : "POST", body: payload });
-      toast(product.archived?"Cadastro atualizado. O produto continua arquivado.":id?"Produto atualizado.":"Produto cadastrado.");
-      navigate(`/admin/produtos/${encodeURIComponent((result.product || result).id || id)}`, { replace: true });
-    } catch (error) {
-      status.replaceChildren(message(displayError(error), "error"));
-      submit.disabled = false;
-    }
-  } }, el("div", { class: "shop-section-top" }, el("h2", {}, id ? "Editar produto" : "Novo produto"), link("\u2190 Produtos", "/admin/produtos", "shop-text-link")), el("section", { class: "shop-admin-section" }, el("h3", {}, "Informa\xE7\xF5es do produto"), el("div", { class: "shop-form-grid" }, kind, selectField("TCG", "tcg", [["pokemon", "Pok\xE9mon TCG"]], product.tcg || "pokemon"), name, field("SKU interno", "sku", "text", product.sku || "", { required: true }), field("Endere\xE7o do produto", "slug", "text", product.slug || "", { placeholder: "Gerado a partir do nome" }))), cardSearch, manualSection, el("section",{class:"shop-admin-section"},el("h3",{},"Características e envio"),el("div",{class:"shop-form-grid"},field("Categoria","productCategory","text",product.attributes?.category||"",{placeholder:"Ex.: Booster, ETB, Box, Carta avulsa",maxlength:"100"}),field("Fabricante","manufacturer","text",product.attributes?.manufacturer||"",{maxlength:"100"}),field("Peso (g)","weightGrams","number",product.attributes?.weightGrams||"",{min:"0",step:"1"}),field("Largura (cm)","widthCm","number",product.attributes?.widthCm||"",{min:"0",step:".1"}),field("Altura (cm)","heightCm","number",product.attributes?.heightCm||"",{min:"0",step:".1"}),field("Comprimento (cm)","lengthCm","number",product.attributes?.lengthCm||"",{min:"0",step:".1"})),field("Conteúdo","contents","textarea",product.attributes?.contents||"",{rows:"3",maxlength:"2000"}),field("Especificações","specifications","textarea",product.attributes?.specifications||"",{rows:"3",maxlength:"2000"}),field("Observações do anúncio","sellerNotes","textarea",product.attributes?.sellerNotes||"",{rows:"3",maxlength:"2000"})), el("section", { class: "shop-admin-section" }, el("h3", {}, "Cole\xE7\xE3o e descri\xE7\xE3o"), el("div", { class: "shop-form-grid" }, setId, setName), description), el("section", { class: "shop-admin-section" }, el("div", { class: "shop-section-top" }, el("h3", {}, "Imagens"), el("span", { class: "shop-fine" }, "Refer\xEAncia e foto real identificadas")), imageList, el("div", { class: "shop-inline-form" }, imageUrl, imageKind, button("Adicionar URL", addImage, "shop-button secondary")), el("label", { class: "shop-field" }, el("span", {}, "Enviar foto real (PNG, JPEG ou WebP, at\xE9 8 MB)"), upload)), el("section", { class: "shop-admin-section" }, el("div", { class: "shop-section-top" }, el("h3", {}, "Vers\xF5es, pre\xE7o e estoque"), button("Adicionar vers\xE3o +", () => {
-    captureVariants();
-    variantValues.push({ language: "pt", condition: kind.querySelector("select").value === "SINGLE" ? "NM" : "SEALED", finish: "NORMAL", priceCents: 0, stock: 0 });
-    renderVariants();
-  }, "shop-button secondary")), el("p", { class: "shop-fine" }, "Cada combina\xE7\xE3o de idioma, condi\xE7\xE3o e acabamento tem estoque e pre\xE7o pr\xF3prios. Valores em reais."), variantList), el("section", { class: "shop-admin-section" }, el("h3", {}, "Publica\xE7\xE3o"), checkbox("Publicar na loja", "published", product.published), checkbox("Exibir nos destaques da p\xE1gina inicial", "featured", product.featured)), status, el("div", { class: "shop-actions" }, el("button", { type: "submit", class: "shop-button" }, "Salvar produto"), link("Voltar \xE0 lista", "/admin/produtos", "shop-button secondary"),id&&product.published&&!product.archived?link("Ver anúncio ↗",`/produto/${encodeURIComponent(product.slug)}`,"shop-button secondary"):null,id&&!product.archived?button("Arquivar produto",()=>{const confirm=button("Confirmar arquivamento",async()=>{confirm.disabled=true;try{await api(`/admin/products/${encodeURIComponent(id)}`,{method:"DELETE"});toast("Produto arquivado e removido do catálogo público.");navigate("/admin/produtos");}catch(error){status.replaceChildren(message(displayError(error),"error"));}},"shop-button secondary");setChildren(status,message("Arquivar remove o anúncio da loja e preserva seu histórico. Deseja continuar?"),confirm,button("Manter produto",()=>status.replaceChildren(),"shop-text-link"));confirm.focus();},"shop-text-link"):null));
-  if(product.archived){form.prepend(message("Este produto está arquivado e permanece fora da loja. Alterar o cadastro não publica o anúncio."));for(const name of["published","featured"]){const input=form.querySelector(`[name=${name}]`);input.checked=false;input.disabled=true;}}
-  kind.querySelector("select").addEventListener("change", () => {
-    captureVariants();
-    const sealed=kind.querySelector("select").value==="SEALED";
-    variantValues=variantValues.map(variant=>({...variant,condition:sealed?"SEALED":variant.condition==="SEALED"?"NM":variant.condition}));
-    renderVariants();
-    renderCardSearch();
-  });
-  async function renderCardSearch() {
-    const isSingle = kind.querySelector("select").value === "SINGLE";
-    cardSearch.hidden = !isSingle;
-    manualSection.hidden = !isSingle;
-    if (!isSingle) return;
-    const body = el("div", {}, loading("Carregando cole\xE7\xF5es\u2026"));
-    cardSearch.replaceChildren(el("h3", {}, "Identifique a carta"), el("p", { class: "shop-fine" }, "Selecione a cole\xE7\xE3o, informe o n\xFAmero e confirme o resultado. Os dados do cat\xE1logo preenchem a ficha; pre\xE7o e estoque s\xE3o definidos por voc\xEA."), body);
-    try {
-      let showSelected = function() {
-        setChildren(chosen,cardMetadata ? message(`Dados confirmados: ${cardMetadata.name || name.querySelector("input").value} \xB7 ${cardMetadata.number || ""}.`, "success") : null);
-      };
-      const sets = await api("/catalog/sets?language=pt");
-      const lang = selectField("Idioma de refer\xEAncia", "catalogLanguage", [["pt", "Portugu\xEAs"], ["en", "Ingl\xEAs"], ["ja", "Japon\xEAs"]], "pt");
-      const set = selectField("Cole\xE7\xE3o", "catalogSet", [["", "Selecione a cole\xE7\xE3o"], ...asArray(sets.items || sets.sets).map((s) => [s.id, s.name])], product.setId || "");
-      const number = field("N\xFAmero da carta", "catalogNumber", "text", cardMetadata?.number || "", { placeholder: "Ex.: 276" });
-      const results = el("div", { "aria-live": "polite" });
-      const chosen = el("div");
-      showSelected();
-      lang.querySelector("select").addEventListener("change", async (event) => {
-        set.querySelector("select").replaceChildren(el("option", { value: "" }, "Carregando\u2026"));
-        try {
-          const next = await api(`/catalog/sets?language=${encodeURIComponent(event.target.value)}`);
-          set.querySelector("select").replaceChildren(el("option", { value: "" }, "Selecione a cole\xE7\xE3o"), ...asArray(next.items || next.sets).map((s) => el("option", { value: s.id }, s.name)));
-        } catch (error) {
-          results.replaceChildren(message(displayError(error), "error"));
-        }
-      });
-      const searchButton = button("Buscar carta", async () => {
-        const collection = set.querySelector("select").value;
-        const cardNumber = number.querySelector("input").value.trim();
-        if (!collection || !cardNumber) {
-          results.replaceChildren(message("Escolha uma cole\xE7\xE3o e informe o n\xFAmero da carta.", "error"));
-          return;
-        }
-        searchButton.disabled = true;
-        results.replaceChildren(loading("Consultando o cat\xE1logo de cartas\u2026"));
-        try {
-          const response = await api(`/catalog/search?set=${encodeURIComponent(collection)}&number=${encodeURIComponent(cardNumber)}&language=${encodeURIComponent(lang.querySelector("select").value)}`);
-          const cards = asArray(response.items || response.cards || response.results);
-          results.replaceChildren(cards.length ? el("div", { class: "shop-catalog-choices" }, cards.map((card) => el("article", { class: "shop-catalog-choice" }, image(card.image || card.imageUrl || card.images?.large || card.images?.[0]?.url, card.name), el("div", {}, el("h4", {}, card.name), el("p", {}, `${card.number} \xB7 ${card.setName || set.querySelector("select").selectedOptions[0]?.textContent || ""}`), el("p", { class: "shop-fine" }, [card.rarity, card.artist].filter(Boolean).join(" \xB7 ")), button("Confirmar esta carta", () => {
-            cardMetadata = { ...card, number: String(card.number), name: card.name, provider: card.provider || response.provider };
-            name.querySelector("input").value = card.name;
-            setId.querySelector("input").value = card.setId || collection;
-            setName.querySelector("input").value = card.setName || set.querySelector("select").selectedOptions[0]?.textContent || "";
-            const url = card.image || card.imageUrl || card.images?.large || card.images?.[0]?.url;
-            if (safeImage(url) && !imageValues.some((img) => img.url === url)) {
-              imageValues.push({ url, kind: "reference" });
-              renderImages();
-            }
-            showSelected();
-            results.replaceChildren();
-            toast("Dados da carta preenchidos. Confira as vers\xF5es comerciais abaixo.");
-          }))))) : message("Nenhuma carta encontrada. Confira cole\xE7\xE3o, idioma e n\xFAmero."));
-        } catch (error) {
-          results.replaceChildren(message(displayError(error), "error"));
-        } finally {
-          searchButton.disabled = false;
-        }
-      }, "shop-button secondary");
-      body.replaceChildren(el("div", { class: "shop-form-grid" }, lang, set, number), searchButton, chosen, results);
-    } catch (error) {
-      body.replaceChildren(message(displayError(error), "error"), button("Tentar carregar cole\xE7\xF5es", () => renderCardSearch(), "shop-button secondary"));
-    }
-  }
-  renderCardSearch();
-  return form;
+  return createAdminProductUI({el,field,selectField,checkbox,button,link,api,navigate,toast,message,image,safeImage,prepareImageUpload,money,asArray,displayError,svgIcon,openImageZoom,getState:()=>state,setRouteCleanup:fn=>{routeCleanup=fn;}}).productEditor(id);
 }
 async function adminSettings() {
   const response=await api("/admin/settings"),settings=response.settings||response,shipping=settings.shipping||{},status=el("div",{"aria-live":"polite"});
