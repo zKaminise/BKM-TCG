@@ -6,7 +6,7 @@ import {createAdminProductUI} from './admin-product-ui.js';
 import {createOrderProgress,createOrderTracking,createPixPayment} from './order-ui.js';
 import {createHeroMediaEditor} from './hero-admin-ui.js';
 import {applySeoState} from './seo-client.js';
-import {productLanguages as languages,productConditions as conditions,productFinishes as finishes,productKindLabel,productKindPath,productVariantText,variantAttributeText,catalogCardConditions} from './product-labels.js';
+import {productLanguages as languages,productConditions as conditions,productFinishes as finishes,productKindLabel,productKindPath,productVariantText,variantAttributeText,catalogCardConditions,createProductVariantChoice,setProductVariantChoiceSelected} from './product-labels.js';
 
 const navMount = document.querySelector("#store-nav");
 const mount = document.querySelector("#storefront");
@@ -494,14 +494,13 @@ async function productPage(slug) {
     addToCart(product, chosen, quantity);
     navigate("/checkout");
   }, "shop-button secondary");
-  const variantButtons = asArray(product.variants).map((variant) => button([el("strong", {}, languages[variant.language] || variant.language), el("span", {}, productVariantText(variant,{includeLanguage:false}))], (event) => {
+  const variantButtons = asArray(product.variants).map((variant) => createProductVariantChoice({el,button,money},variant,{selected:variant.id===chosen?.id,onSelect:(variant,event) => {
     chosen = variant;
     quantity = 1;
     qtyInput.value = "1";
-    variantButtons.forEach((node) => node.classList.remove("selected"));
-    event.currentTarget.classList.add("selected");
+    variantButtons.forEach((node) => setProductVariantChoiceSelected(node,node===event.currentTarget));
     sync();
-  }, `shop-variant ${variant.id === chosen?.id ? "selected" : ""}`, { "aria-label": `${productVariantText(variant)}, ${money(variant.priceCents)}`, disabled: variant.stock <= 0 }));
+  }}));
   function sync() {
     shippingBox?.invalidate();
     setChildren(mainPrice,chosen?.compareAtCents > chosen?.priceCents ? el("del", {}, money(chosen.compareAtCents)) : null, chosen ? money(chosen.priceCents) : "Pre\xE7o indispon\xEDvel");

@@ -86,3 +86,5 @@ Ajustes desta entrega: tela de conclusão após cadastro/salvamento; códigos de
 
 
 Entrega de pedidos/home: QR Code Pix, cinco etapas visuais, correção do null e botão após aprovação, rastreio destacado e novo pack configurável pelo admin. Suíte completa atual: **471 testes aprovados**. Ver [relatório](PEDIDOS-PIX-E-HOME.md).
+
+Entrega de endereços/fotos: CEP automático também na conta do cliente; bandeiras e conservação destacada nas versões do produto; upload reconhecendo o formato real do arquivo e galeria com até cinco fotos, múltipla seleção, links, reordenação e capa. Suíte completa atual: **493 testes aprovados**. Ver [relatório](AJUSTES-ENDERECOS-FOTOS.md).

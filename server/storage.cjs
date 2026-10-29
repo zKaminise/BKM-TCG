@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { detectImageFormat } = require('./image-format.cjs');
 
 const formats = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 function storageError(message) { return Object.assign(new Error(message), { status: 503, code: 'STORAGE_UNAVAILABLE' }); }
@@ -16,7 +17,10 @@ function createStorage({ root = path.resolve(__dirname, '..'), env = process.env
   const headers = () => ({ apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}` });
   async function upload({ buffer, mime }) {
     if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > 8 * 1024 * 1024 || !formats[mime]) throw Object.assign(new Error('Envie uma imagem PNG, JPEG ou WebP de até 8 MB.'), { status: 422, code: 'VALIDATION' });
-    const filename = `${crypto.randomUUID()}.${formats[mime]}`;
+    const format=detectImageFormat(buffer);
+    if(!format)throw Object.assign(new Error('O arquivo não contém uma imagem PNG, JPEG ou WebP válida.'),{status:422,code:'INVALID_IMAGE'});
+    mime=format.mime;
+    const filename = `${crypto.randomUUID()}.${format.extension}`;
     if (!configured) {
       if (env.VERCEL || env.BKM_ENVIRONMENT === 'production') throw storageError('Armazenamento persistente ainda não configurado.');
       const folder = path.join(root, 'uploads');

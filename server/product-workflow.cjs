@@ -38,9 +38,17 @@ function createProductWorkflow({db,ApiError,fetchImpl,audit,now=Date.now}){
         // already verified identity, or prevent an existing stock-only edit.
         return {data:{...data,name:existing.name,setId:existing.set_id,setName:existing.set_name,tcg:existing.tcg,card:previous,images:JSON.parse(existing.images_json)}};
       }
-      const actual=(Array.isArray(data.images)?data.images:[]).filter(image=>image?.kind==='actual');
+      // Keep the administrator's gallery order (and therefore cover photo),
+      // while allowing only the verified reference plus actual product photos.
+      let referenceAdded=false;
+      const images=(Array.isArray(data.images)?data.images:[]).flatMap(image=>{
+        if(image?.kind==='actual')return [image];
+        if(!referenceAdded&&card.image&&image?.url===card.image){referenceAdded=true;return [{url:card.image,kind:'reference',alt:`${card.name} · ${card.displayNumber}`}];}
+        return [];
+      });
+      if(card.image&&!referenceAdded)images.unshift({url:card.image,kind:'reference',alt:`${card.name} · ${card.displayNumber}`});
       const metadata={name:card.name,number:card.number,total:card.total,rarity:card.rarity,type:card.types||[],hp:card.hp||null,provider:'tcgdex',providerId:card.providerId,language:card.referenceLanguage,displayNumber:card.displayNumber,referenceImage:card.image,referenceLanguage:card.referenceLanguage};
-      return {data:{...data,name:card.name,setId:card.setId,setName:card.setName,tcg:'pokemon',card:metadata,images:[...(card.image?[{url:card.image,kind:'reference',alt:`${card.name} · ${card.displayNumber}`}]:[]),...actual]}};
+      return {data:{...data,name:card.name,setId:card.setId,setName:card.setName,tcg:'pokemon',card:metadata,images}};
     }
     // Existing manual listings may be edited without manufacturing another
     // lookup failure. New manual identities require a session-bound proof.

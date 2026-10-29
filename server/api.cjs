@@ -256,7 +256,7 @@ function createApi(options = {}) {
     if (slug && !/^[a-z0-9][a-z0-9-]*$/.test(slug)) fail("VALIDATION", "URL do produto inválida.");
     const setId = text(data.setId, "setId", 100), setName = text(data.setName, "setName", 200), tcg = text(data.tcg || "pokemon", "tcg", 50, true);
     const description = text(data.description, "description", 15e3);
-    if (!Array.isArray(data.images) || data.images.length > 12) fail("VALIDATION", "Envie até 12 imagens.");
+    if (!Array.isArray(data.images) || data.images.length > 5) fail("VALIDATION", "Envie até 5 fotos por produto, incluindo a imagem do catálogo quando existir.");
     const images = data.images.map((i) => {
       if (!i || typeof i !== "object" || Array.isArray(i)) fail("VALIDATION", "Imagem inválida.");
       return { url: imageUrl(i.url), kind: i.kind === "actual" ? "actual" : "reference", alt: text(i.alt, "alt", 250) };
@@ -753,11 +753,11 @@ function createApi(options = {}) {
           if (!match) fail("INVALID_IMAGE", "Envie uma imagem PNG, JPEG ou WebP.");
           const bytes = Buffer.from(match[2], "base64");
           if (bytes.length < 12 || bytes.length > 8 * 1024 * 1024) fail("INVALID_IMAGE", "A imagem deve ter até 8 MB.");
-          const type = match[1], valid = type === "png" ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) : type === "jpeg" ? bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 : bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
-          if (!valid) fail("INVALID_IMAGE", "O conteúdo do arquivo não corresponde ao formato informado.");
-          const filename = uid() + "." + (type === "jpeg" ? "jpg" : type);
+          const format=require('./image-format.cjs').detectImageFormat(bytes);
+          if (!format) fail("INVALID_IMAGE", "O arquivo não contém uma imagem PNG, JPEG ou WebP válida. Escolha outra imagem.");
+          const filename = uid() + "." + format.extension;
           const {createStorage}=require('./storage.cjs');
-          const uploaded=await createStorage({root,env}).upload({buffer:bytes,mime:'image/'+type,filename});
+          const uploaded=await createStorage({root,env}).upload({buffer:bytes,mime:format.mime,filename});
           await audit(user.id, "IMAGE_UPLOADED", filename, { size: bytes.length });
           return respond(201, uploaded);
         }

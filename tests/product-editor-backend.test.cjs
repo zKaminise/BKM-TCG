@@ -31,6 +31,12 @@ for(const engine of ['sqlite','postgres'])test(`novo editor ${engine}: identidad
   const [a,b,c]=await Promise.all([create(body()),create(body()),create(body('CUSTOM'))]);assert.deepEqual([a.sku,b.sku,c.sku].sort(),['BKM1','BKM2','BKM3']);assert.equal(new Set([a.slug,b.slug,c.slug]).size,3);assert.equal(c.kind,'CUSTOM');assert.equal(c.variants[0].condition,'CUSTOM');assert.equal((await anon.call('/products?kind=CUSTOM')).data.items[0].kind,'CUSTOM');
   const edited=await admin.call('/admin/products/'+a.id,'PUT',body('SEALED',{name:'Nome atualizado',variants:a.variants}));assert.equal(edited.status,200);assert.equal(edited.data.sku,a.sku);assert.equal(edited.data.slug,a.slug);
  });
+ await t.test('galeria persiste cinco fotos em ordem e recusa a sexta sem criar produto',async()=>{
+  const images=Array.from({length:5},(_,index)=>({url:`https://images.example.invalid/photo-${index}.png`,kind:'actual',alt:'Foto '+index}));
+  const before=(await db.prepare('SELECT COUNT(*) n FROM products').get()).n;
+  const invalid=await admin.call('/admin/products','POST',body('SEALED',{images:[...images,{url:'https://images.example.invalid/extra.png',kind:'actual'}]}));assert.equal(invalid.status,422);assert.match(invalid.data.error.message,/5 fotos/);assert.equal((await db.prepare('SELECT COUNT(*) n FROM products').get()).n,before);
+  const made=await create(body('SEALED',{images}));assert.deepEqual(made.images,images);const reversed=images.slice().reverse();const edited=await admin.call('/admin/products/'+made.id,'PUT',{...made,images:reversed});assert.equal(edited.status,200);assert.deepEqual(edited.data.images,reversed);assert.deepEqual((await anon.call('/products/'+made.slug)).data.images,reversed);
+ });
  let card;
  await t.test('seleção de catálogo é resolvida no servidor e não altera preço ou estoque',async()=>{
   card=await create(selection());assert.equal(card.name,'Bulbasaur');assert.equal(card.setId,'fixture151');assert.equal(card.setName,'Coleção de referência');assert.equal(card.card.number,'166');assert.equal(card.card.total,'165');assert.equal(card.card.provider,'tcgdex');assert.match(card.images[0].url,/assets\.tcgdex\.net/);assert.equal(card.images[0].kind,'reference');assert.ok(!JSON.stringify(card).includes('wrong.webp'));assert.equal(card.variants[0].priceCents,1000);assert.equal(card.variants[0].stock,3);
@@ -83,9 +89,12 @@ test('SQLite v9 → v10 preserva IDs, estoque, pedidos, reservas e FKs; legados 
 
 test('edição de referência existente durante indisponibilidade preserva somente o snapshot confiável',async t=>{
  const f=await fixture(t),made=await f.admin.call('/admin/products','POST',f.selection());assert.equal(made.status,201);
+ const reference=made.data.images[0],actual=Array.from({length:4},(_,i)=>({url:`https://images.example.invalid/real-${i}.png`,kind:'actual',alt:'Foto real '+i})),gallery=[actual[0],actual[1],reference,actual[2],actual[3]];
+ const changed=await f.admin.call('/admin/products/'+made.data.id,'PUT',{...made.data,images:gallery,catalogSelection:{language:'pt',cardId:'fixture151-166',setId:'fixture151'}});assert.equal(changed.status,200,JSON.stringify(changed.data));assert.deepEqual(changed.data.images,gallery,'verified reference may follow a real cover photo');
+ const tooMany=await f.admin.call('/admin/products/'+made.data.id,'PUT',{...changed.data,images:[...gallery,{url:'https://images.example.invalid/extra.png',kind:'actual'}],catalogSelection:{language:'pt',cardId:'fixture151-166',setId:'fixture151'}});assert.equal(tooMany.status,422);assert.match(tooMany.data.error.message,/5 fotos/);
  const existing=await f.db.prepare('SELECT * FROM products WHERE id=?').get(made.data.id);await f.db.prepare('DELETE FROM personal_reference_cache').run();
  const {createProductWorkflow}=require('../server/product-workflow.cjs'),{ApiError}=require('../server/api.cjs');const workflow=createProductWorkflow({db:f.db,ApiError,fetchImpl:async()=>{throw Error('Unavailable controlled source');}});
  const safe=await workflow.resolve({...made.data,name:'Forged while offline',images:[{url:'https://example.invalid/forged.webp',kind:'reference'}],catalogSelection:{language:'pt',cardId:'fixture151-166',setId:'fixture151'}},existing,f.ids.admin,{});
- assert.equal(safe.data.name,'Bulbasaur');assert.equal(safe.data.card.providerId,'fixture151-166');assert.deepEqual(safe.data.images,made.data.images);
+ assert.equal(safe.data.name,'Bulbasaur');assert.equal(safe.data.card.providerId,'fixture151-166');assert.deepEqual(safe.data.images,gallery,'outage preserves trusted order and cover, not forged images');
  await assert.rejects(()=>workflow.resolve({...made.data,catalogSelection:{language:'pt',cardId:'fixture151-170',setId:'fixture151'}},existing,f.ids.admin,{}),error=>error.status===503);
 });
