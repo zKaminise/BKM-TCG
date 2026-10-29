@@ -1,4 +1,5 @@
 import * as THREE from './vendor/three.module.js';
+import {DEFAULT_HERO_PACK_IMAGE,normalizeHeroPackImage,heroPackImageFrame,createHeroPackImageController} from './hero-media.js';
 
 const $ = s => document.querySelector(s);
 const clamp = (x, a=0, b=1) => Math.min(b, Math.max(a, x));
@@ -12,6 +13,7 @@ let renderer, scene, camera, pack, body, cap, card, foil, dust, dustData;
 let routeActive=location.pathname==='/'||location.pathname.endsWith('/ABRIR.html');
 let initStarted=false;
 let isReady=false, failed=false, chapter=-1, isHidden=document.hidden, uiProgress=-1;
+let desiredPackImage=DEFAULT_HERO_PACK_IMAGE,packImageController=null,packTexture=null,packNormal=null,packRoughness=null,packContour=false;
 const hero=$('.hero-copy'), reveal=$('.reveal-copy'), caption=$('.chapter-caption');
 const packLabel=$('.pack-label'), sideLabel=$('.card-side-label'), loader=$('#loading');
 const autoButton=$('#auto-play'), rail=[...document.querySelectorAll('[data-step]')];
@@ -74,8 +76,13 @@ for(const a of document.querySelectorAll('a[href="#inicio"]'))a.addEventListener
 addEventListener('scroll',readScroll,{passive:true});
 addEventListener('resize',metrics,{passive:true});
 addEventListener('bkm:route',e=>{routeActive=e.detail.home;stopAuto();lastTime=performance.now();if(routeActive){requestAnimationFrame(metrics);ensureScene();}});
+addEventListener('bkm:hero-config',event=>{
+  desiredPackImage=normalizeHeroPackImage(event.detail?.packImageUrl);
+  $('#fallback-pack').src=desiredPackImage;
+  if(isReady&&!failed)void packImageController?.update(desiredPackImage);
+});
+queueMicrotask(()=>dispatchEvent(new CustomEvent('bkm:hero-ready')));
 window.visualViewport?.addEventListener('resize',metrics,{passive:true});
-addEventListener('bkm:route',e=>{routeActive=e.detail.home;stopAuto();lastTime=performance.now();if(routeActive)requestAnimationFrame(metrics);});
 for(const name of ['wheel','touchstart'])addEventListener(name,()=>{if(auto||travel)stopAuto();},{passive:true});
 addEventListener('keydown',e=>{if(e.key===' '&&e.target.closest('button,a,input,textarea,select'))return;if(['ArrowDown','ArrowUp','PageDown','PageUp','Home','End',' '].includes(e.key)){if(auto||travel)stopAuto();}});
 stage.addEventListener('pointermove',e=>{pointer.x=(e.clientX/innerWidth-.5)*2;pointer.y=(e.clientY/sceneHeight-.5)*2;},{passive:true});
@@ -151,7 +158,7 @@ function packetGeometry(yMin,yMax,side=1,isCap=false){
   for(let iy=0;iy<=rows;iy++){
     const v=iy/rows, sy=mix(yMin,yMax,v);
     for(let ix=0;ix<=cols;ix++){
-      const u=ix/cols, x=(u-.5)*PW;
+      const u=ix/cols,globalY=(sy+PH/2)/PH,contour=packContour?1-.046*Math.sin(clamp(globalY)*Math.PI):1,mappedU=.5+(u-.5)*contour,x=(mappedU-.5)*PW;
       let y=sy;
       if(!isCap)y+=seam(x)*Math.pow(v,12);else y+=seam(x)*Math.pow(1-v,5);
       const globalV=(y+PH/2)/PH;
@@ -159,7 +166,7 @@ function packetGeometry(yMin,yMax,side=1,isCap=false){
       const wrinkles=(Math.sin(x*32+y*5)*.004+Math.sin(x*55-y*9)*.002)*Math.sin(u*Math.PI);
       const crimp=(globalV<.055||globalV>.947)?Math.sin(x*225)*.003:0;
       const z=side*(.022+pillow+wrinkles+crimp);
-      positions.push(x,y-(isCap?capPivot:0),z);uvs.push(side===1?u:1-u,globalV);
+      positions.push(x,y-(isCap?capPivot:0),z);uvs.push(side===1?mappedU:1-mappedU,globalV);
       if(iy<rows&&ix<cols){const a=iy*(cols+1)+ix,b=a+cols+1;if(side===1)indices.push(a,a+1,b,a+1,b+1,b);else indices.push(a,b,a+1,a+1,b,b+1);}
     }
   }
@@ -167,7 +174,9 @@ function packetGeometry(yMin,yMax,side=1,isCap=false){
 }
 function makePack(texture,normal,roughness){
   const group=new THREE.Group();body=new THREE.Group();cap=new THREE.Group();cap.position.y=capPivot;
-  const front=new THREE.MeshPhysicalMaterial({map:texture,normalMap:normal,normalScale:new THREE.Vector2(.14,.14),roughnessMap:roughness,roughness:.82,metalness:.12,clearcoat:.45,clearcoatRoughness:.3,envMapIntensity:.32,side:THREE.DoubleSide,alphaTest:.08});
+  // Printed artwork already contains the supplied photograph's highlights.
+  // Preserve its sRGB colors instead of lighting and tone-mapping them a second time.
+  const front=new THREE.MeshBasicMaterial({map:texture,toneMapped:false,side:THREE.DoubleSide,alphaTest:.08});
   const back=new THREE.MeshStandardMaterial({color:0x202328,metalness:.65,roughness:.44,normalMap:normal,normalScale:new THREE.Vector2(.15,.15),side:THREE.DoubleSide});
   for(const side of [1,-1]){
     body.add(new THREE.Mesh(packetGeometry(-PH/2,CUT,side),side===1?front:back));
@@ -180,6 +189,34 @@ function makePack(texture,normal,roughness){
   // Back seam gives the wrapper thickness during its departure.
   const fold=new THREE.Mesh(new THREE.PlaneGeometry(.08,CUT+PH/2-.1),back);fold.position.set(.1,(CUT-PH/2)/2,-.14);fold.rotation.y=.25;body.add(fold);
   group.add(body,cap);return group;
+}
+
+function setPackDimensions(texture,url){
+  const width=texture.image?.width,height=texture.image?.height;
+  if(!Number.isFinite(width)||!Number.isFinite(height)||width<1||height<1)throw new Error('Imagem do pacote inválida.');
+  const framing=heroPackImageFrame(url),ratio=height*framing.height/(width*framing.width);
+  if(ratio<1.2||ratio>2.8)throw new Error('Use uma imagem vertical do pacote, sem margens largas.');
+  packContour=framing.contour;texture.offset.set(framing.left,framing.bottom);texture.repeat.set(framing.width,framing.height);
+  PH=PW*ratio;CUT=PH*(framing.contour ? .442 : 1.15/2.832);capPivot=(CUT+PH/2)/2;
+  mouthLocalPlane.set(new THREE.Vector3(0,1,0),-(CUT+.015));
+}
+async function loadPackTexture(loader,url){
+  const texture=await loader.loadAsync(url),ratio=texture.image?.height/texture.image?.width;
+  if(!Number.isFinite(ratio)||ratio<1.2||ratio>2.8){texture.dispose();throw new Error('A imagem precisa mostrar o pacote na vertical.');}
+  return texture;
+}
+function replacePackImage(texture,url){
+  setPackDimensions(texture,url);
+  texture.colorSpace=THREE.SRGBColorSpace;
+  texture.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());
+  const previous=pack,oldTexture=packTexture;
+  previous.remove(card);scene.remove(previous);
+  pack=makePack(texture,packNormal,packRoughness);pack.add(card);scene.add(pack);packTexture=texture;
+  const geometries=new Set(),materials=new Set();
+  previous.traverse(node=>{if(node.geometry)geometries.add(node.geometry);for(const material of Array.isArray(node.material)?node.material:[node.material])if(material)materials.add(material);});
+  geometries.forEach(geometry=>geometry.dispose());materials.forEach(material=>material.dispose());oldTexture?.dispose();
+  $('#fallback-pack').src=url;
+  uiProgress=-1;
 }
 
 function makeDust(){
@@ -205,17 +242,20 @@ async function init(){
     const fill=new THREE.DirectionalLight(0xffffff,.9);fill.position.set(4,0,5);scene.add(fill);
     const rim=new THREE.DirectionalLight(0xaeeff5,2.5);rim.position.set(1,4,-4);scene.add(rim);
     const textureLoader=new THREE.TextureLoader();
-    const urls=['/assets/pack.webp','/assets/pikachu.webp','/assets/pokemon-back.webp','/assets/pack-normal.png','/assets/pack-roughness.png'];
-    const textures=await Promise.all(urls.map(url=>textureLoader.loadAsync(url)));
+    let initialPackImage=desiredPackImage;
+    const firstPack=(async()=>{let lastError;for(const url of [...new Set([desiredPackImage,DEFAULT_HERO_PACK_IMAGE,'/assets/pack.webp'])]){try{const texture=await loadPackTexture(textureLoader,url);initialPackImage=url;return texture;}catch(error){lastError=error;}}throw lastError;})();
+    const textures=await Promise.all([firstPack,...['/assets/pikachu.webp','/assets/pokemon-back.webp','/assets/pack-normal.png','/assets/pack-roughness.png'].map(url=>textureLoader.loadAsync(url))]);
     textures.forEach((t,i)=>{if(i<3)t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());});
-    PH=PW*textures[0].image.height/textures[0].image.width;
-    CUT=PH*(1.15/2.832);capPivot=(CUT+PH/2)/2;
+    setPackDimensions(textures[0],initialPackImage);
     cardHeight=CARD_W*textures[1].image.height/textures[1].image.width;
-    mouthLocalPlane.set(new THREE.Vector3(0,1,0),-(CUT+.015));
-    pack=makePack(textures[0],textures[3],textures[4]);card=makeCard(textures[1],textures[2]);pack.add(card);scene.add(pack);makeDust();
+    packTexture=textures[0];packNormal=textures[3];packRoughness=textures[4];
+    pack=makePack(packTexture,packNormal,packRoughness);card=makeCard(textures[1],textures[2]);pack.add(card);scene.add(pack);makeDust();
+    packImageController=createHeroPackImageController({initialUrl:initialPackImage,load:url=>loadPackTexture(textureLoader,url),apply:replacePackImage,onError:()=>console.warn('A nova imagem do pacote não pôde ser carregada. A imagem anterior foi preservada.')});
+    $('#fallback-pack').src=initialPackImage;
     metrics();await renderer.compileAsync(scene,camera);
     renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();showFallback();});
     isReady=true;loader.classList.add('is-loaded');
+    if(desiredPackImage!==initialPackImage)void packImageController.update(desiredPackImage);
   }catch(err){console.error('A cena 3D não pôde ser iniciada.',err);showFallback();}
 }
 function showFallback(){failed=true;$('#fallback').hidden=false;host.style.display='none';loader.classList.add('is-loaded');metrics();}

@@ -39,7 +39,7 @@ Revisão de **29/10/2026**. Este inventário separa funcionalidades implementada
 
 Mercado Pago está configurado com a conta real em produção; a consulta de meios ativos confirmou **Pix, crédito e débito**. Parcelas e juros são os apresentados pelo SDK/provedor. O webhook real está configurado. Cartões, aprovação/recusa, Pix e reembolso integral foram exercitados no sandbox separado; isso não comprova recebimento comercial de uma compra real.
 
-A primeira compra de **R$ 10,00 com retirada em Uberlândia** continua sendo a prova de recebimento real a executar pelo comprador e pelo administrador: cadastrar estoque verdadeiro, comprar, pagar, conferir os avisos e o lançamento/liquidação no Mercado Pago. O agente não efetuou cobrança comercial. Reembolsos parciais e a matriz completa de disputas/estornos ainda não têm homologação externa; reembolso e reposição de estoque não são a mesma ação.
+O proprietário confirmou a primeira compra real via Pix: cadastro, carrinho, checkout, pagamento recebido, e-mails e atualização automática do pedido funcionaram. Essa é evidência operacional relatada pelo titular; o agente não executou cobrança comercial. Novas provas de cartão e outros destinos continuam independentes desse teste. Reembolsos parciais e a matriz completa de disputas/estornos ainda não têm homologação externa; reembolso e reposição de estoque não são a mesma ação.
 
 O Pix do provedor tem prazo remoto mínimo diferente do prazo comercial da loja. A reserva local continua sendo 15 minutos; a execução periódica, rede ou indisponibilidade podem acrescentar atraso ao cancelamento remoto. Não há promessa de agendamento com precisão absoluta nem reembolso automático de pagamento tardio.
 
@@ -69,17 +69,20 @@ O painel de logística informa o que falta antes de habilitar cada região. Alte
 - Migrações versionadas, testes SQLite e PostgreSQL/PGlite, build e CI. Chaves reais, `.env`, bancos e backups estão excluídos do Git e do pacote público.
 - Backup criptografado e restauração isolada implementados e testados. Ainda falta instituir rotina automatizada, retenção e cópia independente operacional.
 - Monitoramento operacional existe pelo painel e pelos provedores; atendimento contínuo, alertas de infraestrutura e acompanhamento de incidentes dependem da rotina da loja.
-- A indexação pública continua bloqueada por `robots`/`X-Robots-Tag` da publicação atual. A liberação de SEO público e o sitemap comercial devem ser tratados antes de buscar tráfego orgânico; as páginas privadas devem continuar fora da indexação.
+- A entrega atual libera as páginas públicas do domínio oficial para indexação e inclui HTML inicial do catálogo real, dados estruturados e sitemap dinâmico. Áreas privadas, APIs, sandbox e preview seguem noindex. A verificação no Search Console e a decisão de indexar/posicionar pertencem ao Google; consulte SEO-E-IDENTIDADE-EMAIL.md.
 
 ## Pendências reais por prioridade
 
-1. **Primeira compra real:** publicar o produto físico de R$ 10,00, testar com o amigo, conferir pagamento/valor líquido, os e-mails por etapa, aviso administrativo e retirada. Código e credenciais não substituem essa prova.
+1. **Operação contínua:** a primeira compra real Pix foi confirmada pelo proprietário. Conferir cada venda, separação/retirada e recebimento líquido; cartões e cenários adicionais ainda exigem suas provas comerciais próprias.
 2. **Logística nacional:** fornecer endereço completo da origem (CEP, rua, número, bairro, cidade/UF), nomes e peso total embalado/medidas externas das embalagens, embalagem padrão, transportadora/serviço operacional, regiões/faixas de CEP atendidas e preços/prazos conferidos; definir a promoção de frete grátis e ativar as regiões somente depois dessa conferência. A integração Melhor Envio agora cota produção, permite escolha no checkout e preserva o serviço no pedido; credencial de cotação/rastreio validada e salva privadamente. Quatro cotações reais com embalagens simuladas comprovaram a conexão. A API não compra etiquetas. Faltam número da origem e conferência dos pesos/capacidades reais dos dois perfis sugeridos; nacional permanece desligado. Consulte LOGISTICA.md.
 3. **Preço brasileiro automático e por condição:** obter uma fonte/API autorizada com cobertura e identidade exatas. Não há integração licenciada configurada com a Liga Pokémon; referências manuais são identificadas e nunca viram cotação oficial. A integração TCGdex implementada fornece referências internacionais separadas em EUR/USD e não supre a ausência de preços brasileiros ou ajuste por conservação.
 4. **Dados comerciais e conteúdo final:** informar razão social/CNPJ e dados definitivos de retirada/atendimento quando existirem; revisar políticas e conteúdo conforme a operação real.
-5. **Aquisição e continuidade:** liberar/configurar SEO público, instituir backups/retencão/cópia separada, monitoramento e testar os caminhos externos restantes de Google/alertas/disputas/reembolso parcial antes de depender deles operacionalmente.
+5. **Aquisição e continuidade:** concluir Search Console e acompanhar indexação/SEO público, instituir backups/retencão/cópia separada, monitoramento e testar os caminhos externos restantes de Google/alertas/disputas/reembolso parcial antes de depender deles operacionalmente.
 
 Essas pendências não impedem o uso privado da coleção ou o teste de compra com retirada descrito no [guia operacional](OPERACAO-PRODUCAO.md). Não representam promessa de cotação nacional, liquidação financeira, prazo de transportadora ou SLA que não tenha sido comprovado.
 
 
 Ajustes desta entrega: tela de conclusão após cadastro/salvamento; códigos de conservação no catálogo; CEP automático na origem; perfis, tabela por UF com herança regional e Melhor Envio integrado ao simulador/checkout. 443 testes aprovados. Detalhes e tamanhos de embalagem propostos em [Logística](LOGISTICA.md).
+
+
+Entrega de pedidos/home: QR Code Pix, cinco etapas visuais, correção do null e botão após aprovação, rastreio destacado e novo pack configurável pelo admin. Ver [relatório](PEDIDOS-PIX-E-HOME.md).

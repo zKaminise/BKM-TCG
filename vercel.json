@@ -8,12 +8,14 @@
   "redirects": [{ "source": "/ABRIR.html", "destination": "/", "permanent": false }],
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/index" },
-    { "source": "/((?!assets/|vendor/|api/|.*\\.[a-zA-Z0-9]+$).*)", "destination": "/index.html" }
+    { "source": "/robots.txt", "destination": "/api/index" },
+    { "source": "/sitemap.xml", "destination": "/api/index" },
+    { "source": "/index.html", "destination": "/api/index" },
+    { "source": "/((?!assets/|vendor/|api/|.*\\.[a-zA-Z0-9]+$).*)", "destination": "/api/index" }
   ],
   "headers": [{ "source": "/(.*)", "headers": [
     { "key": "X-Content-Type-Options", "value": "nosniff" },
     { "key": "X-Frame-Options", "value": "DENY" },
-    { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-    { "key": "X-Robots-Tag", "value": "noindex, nofollow" }
+    { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
   ] }]
 }

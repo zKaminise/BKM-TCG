@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const {createPixPresentation}=require('./pix-qr.cjs');
 const uid = () => crypto.randomUUID();
 const stamp = () => new Date().toISOString();
 const outcomes = new Set(['approved','pending','rejected','cancelled','expired']);
@@ -46,12 +47,13 @@ function createOrders({db,quote,env,audit,ApiError,enqueueEmail,paymentProvider,
     const paymentEnvironment=payment?.environment==='demo'?'demo':remote?.sandbox?'sandbox':['sandbox','production'].includes(payload?.gatewayEnvironment)?payload.gatewayEnvironment:env.MERCADO_PAGO_ENVIRONMENT || 'production';
     const address=JSON.parse(row.address_json),expiresAt=payload?.expiresAt || new Date(Date.parse(row.created_at)+RESERVATION_MS).toISOString();
     const canResume=row.status==='PENDING'&&row.payment_status==='PENDING'&&Date.parse(expiresAt)>now();
+    const pix=canResume&&payment?.provider==='mercadopago'&&remote?.pix?.copyPaste?await createPixPresentation(remote.pix.copyPaste):null;
     return { id:row.id,number:row.number || row.id,status:row.status,paymentStatus:row.payment_status,
       shippingStatus:row.shipping_status,currency:row.currency,environment:row.environment,demo:row.environment==='demo',
       subtotalCents:row.subtotal_cents,discountCents:row.discount_cents,shippingCents:row.shipping_cents,totalCents:row.total_cents,
       createdAt:row.created_at,updatedAt:row.updated_at,address,deliveryMode:address.deliveryMode || 'delivery',shipping:address.shipping || {deliveryMode:address.deliveryMode || 'delivery'},contact:JSON.parse(row.contact_json || '{}'),tracking:JSON.parse(row.tracking_json || '{}'),
       expiresAt,paymentExpiresAt:expiresAt,reservationExpiresAt:expiresAt,
-      payment:payment ? {id:payment.id,providerId:row.payment_provider_id || null,provider:payment.provider,status:payment.status,demo:payment.environment==='demo',sandbox:paymentEnvironment==='sandbox',environment:paymentEnvironment,expiresAt,canResume,method:payload.method || (remote?.pix?'pix':null),creationState:payload.creationState || null,installments:remote?.installments || null,...(payment.provider==='mercadopago' && remote?.pix?.copyPaste ? {pix:{copyPaste:remote.pix.copyPaste}} : {})} : null,
+      payment:payment ? {id:payment.id,providerId:row.payment_provider_id || null,provider:payment.provider,status:payment.status,demo:payment.environment==='demo',sandbox:paymentEnvironment==='sandbox',environment:paymentEnvironment,expiresAt,canResume,method:payload.method || (remote?.pix?'pix':null),creationState:payload.creationState || null,installments:remote?.installments || null,...(pix?{pix}:{})} : null,
       items:items.map(item => { const variant=JSON.parse(item.variant_json);return {id:item.id,variantId:item.variant_id,name:item.name,sku:item.sku,quantity:item.quantity,unitPriceCents:item.unit_price_cents,priceCents:item.unit_price_cents,totalCents:item.total_cents,variant,image:variant.image || null}; }),
       history:history.map(item => ({id:item.id,type:item.type,status:item.status,message:item.message,createdAt:item.created_at})) };
   }

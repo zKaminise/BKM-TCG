@@ -3,9 +3,30 @@
   "version": "2.1.0",
   "private": true,
   "description": "BKM TCG: loja de demonstração com catálogo persistente, administração e animação Pokémon em 3D.",
-  "scripts": {"start": "node serve.cjs", "check": "node scripts/check.cjs", "test": "node scripts/test.cjs", "db:configure": "node scripts/configure-supabase.cjs", "db:migrate": "node scripts/migrate.cjs", "db:import": "node scripts/import-sqlite.cjs", "storage:configure": "node scripts/configure-storage.cjs", "admin:create": "node scripts/create-admin.cjs", "demo:seed": "node scripts/seed-demo.cjs", "build": "node scripts/build-web.cjs", "build:offline": "node build-offline.cjs"},
-  "engines": {"node": "22.x"},
-  "dependencies": {"pg": "^8.16.3"},
-  "devDependencies": {"esbuild": "0.28.2", "@electric-sql/pglite": "^0.3.14"},
+  "scripts": {
+    "start": "node serve.cjs",
+    "check": "node scripts/check.cjs",
+    "test": "node scripts/test.cjs",
+    "db:configure": "node scripts/configure-supabase.cjs",
+    "db:migrate": "node scripts/migrate.cjs",
+    "db:import": "node scripts/import-sqlite.cjs",
+    "storage:configure": "node scripts/configure-storage.cjs",
+    "admin:create": "node scripts/create-admin.cjs",
+    "demo:seed": "node scripts/seed-demo.cjs",
+    "build": "node scripts/build-web.cjs",
+    "build:offline": "node build-offline.cjs"
+  },
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "pg": "^8.16.3",
+    "qrcode": "1.5.4"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "esbuild": "0.28.2",
+    "jsqr": "1.4.0"
+  },
   "type": "module"
 }

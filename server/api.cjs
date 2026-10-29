@@ -388,6 +388,7 @@ function createApi(options = {}) {
   }
   async function saveSettings(data, user) {
     const current = await settings(), result = { ...current };
+    if('heroPackImageUrl' in data){try{result.heroPackImageUrl=require('./hero-settings.cjs').heroPackSetting(data.heroPackImageUrl);}catch(error){fail('VALIDATION',error.message);}}
     for (const key of ["storeName", "contactEmail", "whatsapp", "instagram", "companyName", "cnpj", "address", "city", "state", "heroTitle", "heroSubtitle", "about", "shippingPolicy", "returnsPolicy", "privacyPolicy", "terms"]) if (key in data) result[key] = text(data[key], key, ["about", "shippingPolicy", "returnsPolicy", "privacyPolicy", "terms"].includes(key) ? 2e4 : 400, key === "storeName");
     if (result.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.contactEmail)) fail("VALIDATION", "E-mail de contato inválido.");
     if(result.state){result.state=result.state.toUpperCase();if(!Object.values(REGION_STATES).some(states=>states.includes(result.state)))fail('VALIDATION','Informe uma UF brasileira válida.');}

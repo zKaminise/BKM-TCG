@@ -4,11 +4,13 @@ const path = require("node:path");
 const envFile = path.join(__dirname, '.env');
 if (require.main === module) require('./server/env.cjs').loadProjectEnvFile(envFile);
 const { createApi } = require("./server/api.cjs");
+const {createSeoHandler}=require('./server/seo.cjs');
 const mime = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".ico": "image/x-icon", ".woff2": "font/woff2", ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8" };
 function createServer(options = {}) {
   const root = options.root || __dirname;
   const api = createApi({ ...options, root });
-  const publicFiles = /* @__PURE__ */ new Set(["index.html", "styles.css", "app.js", "store.js", "personal-ui.js", "collection-ui.js", "collection-domain.js", "collection.css", "password-ui.js", "password-ui.css", "shipping-ui.js", "shipping-admin-ui.js", "shipping-admin.css", "admin-product-ui.js", "admin-product.css", "product-labels.js", "store.css", "ABRIR.html", "favicon.ico", "robots.txt", "sitemap.xml"]);
+  const seo=createSeoHandler({db:api.asyncStore,env:options.env||process.env,root});
+  const publicFiles = /* @__PURE__ */ new Set(["index.html", "styles.css", "app.js", "store.js", "personal-ui.js", "collection-ui.js", "collection-domain.js", "collection.css", "password-ui.js", "password-ui.css", "shipping-ui.js", "seo-client.js", "hero-media.js", "hero-admin-ui.js", "order-ui.js", "order-ui.css", "shipping-admin-ui.js", "shipping-admin.css", "admin-product-ui.js", "admin-product.css", "product-labels.js", "store.css", "ABRIR.html", "favicon.ico", "robots.txt", "sitemap.xml"]);
   const server = http.createServer(async (req, res) => {
     if (!/^(?:127\.0\.0\.1|localhost)(?::\d{1,5})?$/.test(req.headers.host || "")) {
       res.writeHead(400);
@@ -34,6 +36,7 @@ function createServer(options = {}) {
       res.writeHead(405, { "Allow": "GET, HEAD" });
       return res.end();
     }
+    if(await seo.handle(req,res,pathname))return;
     const relative = pathname.replace(/^\/+/, "");
     const segments = relative.split("/");
     if (segments.some((s) => s === ".." || s.startsWith(".") || s.includes("\\") || s.includes("\0"))) {
