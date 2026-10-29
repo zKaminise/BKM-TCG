@@ -7,6 +7,7 @@
   "functions": { "api/index.js": { "maxDuration": 60, "includeFiles": "server/**" } },
   "redirects": [{ "source": "/ABRIR.html", "destination": "/", "permanent": false }],
   "rewrites": [
+    { "source": "/", "destination": "/api/index" },
     { "source": "/api/:path*", "destination": "/api/index" },
     { "source": "/robots.txt", "destination": "/api/index" },
     { "source": "/sitemap.xml", "destination": "/api/index" },
