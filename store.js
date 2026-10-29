@@ -1,8 +1,9 @@
 import { createPersonalUI, svgIcon } from "./personal-ui.js";
 import {createPasswordField} from './password-ui.js';
 import {createShippingAdminEditor} from './shipping-admin-ui.js';
+import {createShippingPreview,createShippingOptionList,shippingServiceLabel} from './shipping-ui.js';
 import {createAdminProductUI} from './admin-product-ui.js';
-import {productLanguages as languages,productConditions as conditions,productFinishes as finishes,productKindLabel,productKindPath,productVariantText,variantAttributeText} from './product-labels.js';
+import {productLanguages as languages,productConditions as conditions,productFinishes as finishes,productKindLabel,productKindPath,productVariantText,variantAttributeText,catalogCardConditions} from './product-labels.js';
 
 const navMount = document.querySelector("#store-nav");
 const mount = document.querySelector("#storefront");
@@ -412,11 +413,15 @@ async function collectionsPage(){const data=await api("/collections");return el(
 function productGrid(products) {
   return el("div", { class: "shop-grid" }, products.map(productCard));
 }
+function productConditionBadges(product){
+ const values=catalogCardConditions(product);if(!values.length)return null;
+ return el('div',{class:'shop-card-conditions','aria-label':'Conservação de '+product.name},values.map(value=>el('span',{class:'shop-card-condition'+(value.available?'':' is-unavailable'),title:value.label+(value.available?'':' · Esgotada'),'aria-label':value.code+' — '+value.label+(value.available?'':' — Esgotada')},value.code)));
+}
 function productCard(product) {
   catalogCache.set(product.id, product);
   const favorited = state.favorites.some((f) => f.id === product.id);
   const photo = productImage(product);
-  return el("article", { class: "shop-product-card" }, el("div", { class: "shop-product-picture" }, link(image(photo.url, product.name), `/produto/${encodeURIComponent(product.slug)}`), button(svgIcon("heart",favorited), (event) => toggleFavorite(product, event.currentTarget), "shop-favorite", { "aria-label": `${favorited ? "Remover" : "Adicionar"} ${product.name} ${favorited ? "dos" : "aos"} favoritos`, "aria-pressed": String(favorited) }), !available(product) ? badge("Indispon\xEDvel") : null), el("div", { class: "shop-product-meta" }, isDemo()?el("span",{class:"shop-demo-product"},"DEMONSTRAÇÃO"):null,el("p", { class: "shop-product-set" }, product.setName || "Pok\xE9mon TCG"), link(el("h3", {}, product.name), `/produto/${encodeURIComponent(product.slug)}`), el("p", { class: "shop-product-detail" }, product.kind === "SINGLE" ? [product.card?.number, asArray(product.variants).map((v) => languages[v.language] || v.language).filter((v, i, a) => a.indexOf(v) === i).join(" \xB7 ")].filter(Boolean).join(" \xB7 ") : productKindLabel(product.kind)), el("p", { class: "shop-price" }, asArray(product.variants).length > 1 ? el("span", {}, "A partir de ") : null, money(lowest(product))), link(available(product) ? "Escolher op\xE7\xE3o \u2197" : "Ver detalhes \u2197", `/produto/${encodeURIComponent(product.slug)}`, "shop-product-action")));
+  return el("article", { class: "shop-product-card" }, el("div", { class: "shop-product-picture" }, link(image(photo.url, product.name), `/produto/${encodeURIComponent(product.slug)}`), button(svgIcon("heart",favorited), (event) => toggleFavorite(product, event.currentTarget), "shop-favorite", { "aria-label": `${favorited ? "Remover" : "Adicionar"} ${product.name} ${favorited ? "dos" : "aos"} favoritos`, "aria-pressed": String(favorited) }), !available(product) ? badge("Indispon\xEDvel") : null), el("div", { class: "shop-product-meta" }, isDemo()?el("span",{class:"shop-demo-product"},"DEMONSTRAÇÃO"):null,el("p", { class: "shop-product-set" }, product.setName || "Pok\xE9mon TCG"), link(el("h3", {}, product.name), `/produto/${encodeURIComponent(product.slug)}`), el("p", { class: "shop-product-detail" }, product.kind === "SINGLE" ? [product.card?.number, asArray(product.variants).map((v) => languages[v.language] || v.language).filter((v, i, a) => a.indexOf(v) === i).join(" \xB7 ")].filter(Boolean).join(" \xB7 ") : productKindLabel(product.kind)),productConditionBadges(product), el("p", { class: "shop-price" }, asArray(product.variants).length > 1 ? el("span", {}, "A partir de ") : null, money(lowest(product))), link(available(product) ? "Escolher op\xE7\xE3o \u2197" : "Ver detalhes \u2197", `/produto/${encodeURIComponent(product.slug)}`, "shop-product-action")));
 }
 function toggleFavorite(product, target) {
   const index = state.favorites.findIndex((f) => f.id === product.id);
@@ -462,14 +467,14 @@ async function productPage(slug) {
   const product = response.product || response;
   catalogCache.set(product.id, product);
   let chosen = asArray(product.variants).find((v) => v.stock > 0) || asArray(product.variants)[0];
-  let quantity = 1;
+  let quantity = 1,shippingBox=null;
   let activePhoto=productImage(product);
   const media = button([image(activePhoto.url, product.name),el("span",{class:"shop-zoom-hint"},"Ampliar imagem ↗")],()=>openImageZoom(activePhoto.url,product.name),"shop-product-main-image",{"aria-label":`Ampliar imagem de ${product.name}`});
   const mainPrice = el("p", { class: "shop-detail-price" });
   const stock = el("p", { class: "shop-stock" });
   const qtyInput = el("input", { type: "number", name: "quantity", min: "1", value: "1", "aria-label": "Quantidade", onChange: (event) => {
     quantity = Math.max(1, Math.min(chosen?.stock || 1, Math.trunc(Number(event.target.value)) || 1));
-    event.target.value = quantity;
+    event.target.value = quantity;shippingBox?.invalidate();
   } });
   const add = button("Adicionar ao carrinho", () => {
     addToCart(product, chosen, quantity);
@@ -488,6 +493,7 @@ async function productPage(slug) {
     sync();
   }, `shop-variant ${variant.id === chosen?.id ? "selected" : ""}`, { "aria-label": `${productVariantText(variant)}, ${money(variant.priceCents)}`, disabled: variant.stock <= 0 }));
   function sync() {
+    shippingBox?.invalidate();
     setChildren(mainPrice,chosen?.compareAtCents > chosen?.priceCents ? el("del", {}, money(chosen.compareAtCents)) : null, chosen ? money(chosen.priceCents) : "Pre\xE7o indispon\xEDvel");
     stock.textContent = chosen?.stock > 0 ? `${chosen.stock} ${chosen.stock === 1 ? "unidade dispon\xEDvel" : "unidades dispon\xEDveis"}` : "Produto indispon\xEDvel";
     stock.classList.toggle("unavailable", !chosen?.stock);
@@ -498,15 +504,15 @@ async function productPage(slug) {
   }
   sync();
   const imageNotes = el("p", { class: "shop-image-note" }, asArray(product.images).some((img) => img.kind === "actual") ? "Fotos do produto dispon\xEDveis na galeria." : "Imagem de refer\xEAncia. Confira idioma, condi\xE7\xE3o e acabamento antes de comprar.");
-  const shippingBox = shippingForm();
+  shippingBox=shippingForm({product:true,getItems:()=>chosen?.stock>0?[{variantId:chosen.id,quantity}]:[]});
   const page=el("div", { class: "shop-shell" }, demoNotice(),el("nav", { class: "shop-breadcrumb", "aria-label": "Localiza\xE7\xE3o" }, link("In\xEDcio", "/"), el("span", {}, "/"), link(productKindLabel(product.kind,{plural:true}),productKindPath(product.kind)), el("span", {}, "/"), el("span", {}, product.name)), el("div", { class: "shop-detail-layout" }, el("div", { class: "shop-gallery" }, media, asArray(product.images).length > 1 ? el("div", { class: "shop-thumbnails" }, product.images.map((img, i) => button(image(img.url, `${product.name}, imagem ${i + 1}`), () => {
     activePhoto=img;setChildren(media,image(img.url,product.name),el("span",{class:"shop-zoom-hint"},"Ampliar imagem ↗"));
   }, "shop-thumbnail", { "aria-label": `Ver imagem ${i + 1}` }))) : null, imageNotes), el("div", { class: "shop-detail-info" }, el("p", { class: "shop-kicker" }, product.setName || "POK\xC9MON TCG"), el("h1", {}, product.name), product.kind === "SINGLE" && product.card ? el("p", { class: "shop-muted" }, [product.card.number, product.card.rarity].filter(Boolean).join(" \xB7 ")) : null, mainPrice, el("div", { class: "shop-variants" }, el("p", { class: "shop-label" }, "Selecione sua vers\xE3o"), variantButtons), stock, el("div", { class: "shop-quantity" }, button("\u2212", () => {
     quantity = Math.max(1, quantity - 1);
-    qtyInput.value = quantity;
+    qtyInput.value = quantity;shippingBox.invalidate();
   }, "shop-quantity-button", { "aria-label": "Diminuir quantidade" }), qtyInput, button("+", () => {
     quantity = Math.min(chosen?.stock || 1, quantity + 1);
-    qtyInput.value = quantity;
+    qtyInput.value = quantity;shippingBox.invalidate();
   }, "shop-quantity-button", { "aria-label": "Aumentar quantidade" })), el("div", { class: "shop-purchase-actions" }, add, buy), button(state.favorites.some((f) => f.id === product.id) ? "\u2665 Salvo nos favoritos" : "\u2661 Salvar nos favoritos", (event) => {
     toggleFavorite(product);
     event.currentTarget.textContent = state.favorites.some((f) => f.id === product.id) ? "\u2665 Salvo nos favoritos" : "\u2661 Salvar nos favoritos";
@@ -543,6 +549,7 @@ function setOverlayBackgroundInert(value){
   }
 }
 function closeOverlay() {
+  overlay?.querySelectorAll('.bkm-shipping-preview').forEach(form=>form.destroy?.());
   overlay?.replaceChildren();
   document.body.classList.remove("shop-overlay-open");
   setOverlayBackgroundInert(false);
@@ -630,6 +637,7 @@ async function cartContent(drawer = false) {
   if (!state.cart.length) return empty("Seu carrinho espera uma descoberta.", "Explore o cat\xE1logo e escolha o pr\xF3ximo destaque da sua cole\xE7\xE3o.", link("Explorar produtos", "/busca", "shop-button"));
   const content = el("div", { class: drawer ? "" : "shop-cart-layout" });
   const rerender = async () => {
+    content.querySelectorAll('.bkm-shipping-preview').forEach(form=>form.destroy?.());
     if (drawer) {
       content.replaceWith(await cartContent(true));
     } else await renderRoute();
@@ -648,34 +656,11 @@ function freeShippingProgress(subtotal){
   const shipping=state.config.shipping||{},threshold=shipping.enabled&&shipping.freeShippingEnabled?Number(shipping.freeShippingThresholdCents||state.config.freeShippingThresholdCents):0;
   if(!Number.isSafeInteger(threshold)||threshold<=0)return null;
   const reached=subtotal>=threshold;
-  return el("div",{class:`shop-free-shipping${reached?" is-complete":""}`},el("p",{},el("strong",{},reached?"Frete grátis desbloqueado":`Faltam ${money(Math.max(0,threshold-subtotal))}`),el("span",{},reached?"Confira a cobertura para seu CEP no checkout.":` para ganhar frete grátis em compras de ${money(threshold)}.`)),el("progress",{max:threshold,value:Math.min(Math.max(0,subtotal),threshold),"aria-label":`Progresso para frete grátis: ${money(subtotal)} de ${money(threshold)}`}),el("small",{},"Valor dos produtos após descontos. Válido nas regiões atendidas."));
+  return el("div",{class:`shop-free-shipping${reached?" is-complete":""}`},el("p",{},el("strong",{},reached?"Frete grátis desbloqueado":`Faltam ${money(Math.max(0,threshold-subtotal))}`),el("span",{},reached?"Confira a cobertura para seu CEP no checkout.":` para ganhar frete grátis em compras de ${money(threshold)}.`)),el("progress",{max:threshold,value:Math.min(Math.max(0,subtotal),threshold),"aria-label":`Progresso para frete grátis: ${money(subtotal)} de ${money(threshold)}`}),el("small",{},"Valor dos produtos após descontos. Válido nas regiões atendidas. Na cotação com transportadoras, a opção econômica fica grátis e as demais cobram a diferença."));
 }
-function shippingForm() {
-  const result = el("div", { "aria-live": "polite" });
-  const form = el("form", { class: "shop-shipping-form", onSubmit: async (event) => {
-    event.preventDefault();
-    const cep = new FormData(form).get("cep").replace(/\D/g, "");
-    if (cep.length !== 8) {
-      result.replaceChildren(message("Informe um CEP com 8 n\xFAmeros.", "error"));
-      return;
-    }
-    localStorage.setItem("bkm-cep", cep);
-    const submit = form.querySelector("button");
-    submit.disabled = true;
-    try {
-      let items = state.cart.map((item) => ({ variantId: item.variantId, quantity: item.quantity }));
-      if (!items.length) {
-        result.replaceChildren(message(state.config.shipping?.enabled ? "Adicione um produto ao carrinho para calcular o frete." : "O c\xE1lculo de entrega ainda n\xE3o foi configurado."));
-        return;
-      }
-      const quote = await api("/checkout/quote", { method: "POST", body: { items, cep } });
-      result.replaceChildren(message(quote.shipping?.available ? `${isDemo()?"Frete de demonstração: ":""}${money(quote.shippingCents)}${quote.shipping?.estimatedDays ? ` \xB7 estimativa de ${quote.shipping.estimatedDays} dias \xFAteis` : ""}` : quote.reason || quote.shipping?.reason || "Entrega indispon\xEDvel para este CEP."));
-    } catch (error) {
-      result.replaceChildren(message(displayError(error), "error"));
-    } finally {
-      submit.disabled = false;
-    }
-  } }, el("label", { class: "shop-label" }, "Entrega para o seu CEP"), el("div", { class: "shop-inline-form" }, el("input", { name: "cep", placeholder: "00000-000", "aria-label": "CEP de entrega", inputmode: "numeric", maxlength: "9", value: localStorage.getItem("bkm-cep") || "", required: true, pattern: "[0-9]{5}-?[0-9]{3}" }), button("Calcular", () => form.requestSubmit(), "shop-button secondary")), result);
+function shippingForm(options={}) {
+  const form=createShippingPreview({el,button,api,message,money},{getItems:()=>state.cart.map(item=>({variantId:item.variantId,quantity:item.quantity})),initialCep:localStorage.getItem("bkm-cep")||"",saveCep:cep=>localStorage.setItem("bkm-cep",cep),...options});
+  const previous=routeCleanup;routeCleanup=()=>{form.destroy();previous?.();};
   return form;
 }
 async function favoritesPage() {
@@ -742,7 +727,8 @@ async function checkoutPage() {
   if(!state.cart.length)return el("div",{class:"shop-shell"},heading("FINALIZAR PEDIDO","Checkout."),empty("Seu carrinho está vazio.","Escolha um produto para continuar.",link("Explorar o catálogo","/busca","shop-button")));
   if(!state.user)return el("div",{class:"shop-shell shop-checkout-login"},demoNotice(),heading("SUA PRÓXIMA DESCOBERTA","Entre para continuar.","Sua conta guarda os pedidos e permite acompanhar o pagamento e a entrega."),el("div",{class:"shop-actions"},link("Entrar na minha conta","/entrar?next=%2Fcheckout","shop-button"),link("Criar uma conta","/cadastro?next=%2Fcheckout","shop-button secondary")));
   const status=el("div",{"aria-live":"polite"}),summary=el("aside",{class:"shop-summary"},loading("Calculando o pedido…"));
-  let currentQuote=null,quoteVersion=0,submitting=false,disposed=false,lastVerifiedCep="";
+  let currentQuote=null,quoteVersion=0,submitting=false,disposed=false,lastVerifiedCep="",shippingOptionId="",quoteTimer=null;
+  const serviceOptions=el("div",{class:"shop-checkout-services","aria-live":"polite"});
   const idempotencyKey=crypto.randomUUID();
   const submit=el("button",{type:"submit",class:"shop-button",disabled:true},isDemo()?"Confirmar pedido de teste":"Confirmar pedido e ir para pagamento");
   const demoPayments=isDemo()&&state.config.payments?.provider==="mock";
@@ -770,17 +756,18 @@ async function checkoutPage() {
       const payment=demoPayments?{provider:"mock",outcome:values.paymentOutcome}:await realUi.getPayment();
       if(disposed)return;
       const value=name=>String(values[name]||"").trim();
-      const result=await api("/checkout",{method:"POST",body:{items:orderedItems,coupon:value("coupon")||null,cep,deliveryMode,contact:{name:value("name"),email:value("email"),phone:value("phone")},address:{name:value("name"),phone:value("phone"),zip:cep,cep,street:value("street"),number:value("number"),complement:value("complement"),district:value("district"),city:value("city"),state:value("state")},shipping:{method:deliveryMode,deliveryMode},payment,idempotencyKey}});
+      const result=await api("/checkout",{method:"POST",body:{items:orderedItems,coupon:value("coupon")||null,cep,deliveryMode,shippingOptionId:shippingOptionId||undefined,contact:{name:value("name"),email:value("email"),phone:value("phone")},address:{name:value("name"),phone:value("phone"),zip:cep,cep,street:value("street"),number:value("number"),complement:value("complement"),district:value("district"),city:value("city"),state:value("state")},shipping:{method:deliveryMode,deliveryMode},payment,idempotencyKey}});
       const order=result.order||result;if(!order.id)throw new Error("O servidor não retornou a identificação do pedido.");
       showCreatedOrder(order.id,orderedItems,customerId);
     }catch(error){if(error.fields?.orderId){showCreatedOrder(error.fields.orderId,orderedItems,customerId,true);return;}if(disposed)return;status.replaceChildren(message(displayError(error),"error"));submitting=false;submit.textContent=isDemo()?"Confirmar pedido de teste":"Confirmar pedido e ir para pagamento";await quote();}
-  }},el("h2",{},"Contato e entrega"),el("p",{class:"shop-fine"},isDemo()?"Use dados de teste. O endereço será salvo neste ambiente para demonstrar o fluxo de entrega.":"Confirme a entrega para reservar seus itens e continuar para o pagamento."),el("div",{class:"shop-form-grid"},field("Nome completo","name","text",state.user.name||"",{required:true,minlength:"2",maxlength:"120",autocomplete:"name"}),field("E-mail","email","email",state.user.email||"",{required:true,maxlength:"254",autocomplete:"email"}),field("Celular","phone","tel","",{required:true,minlength:"10",maxlength:"20",autocomplete:"tel",placeholder:"(34) 99999-9999"})),el("fieldset",{class:"shop-checkout-choice"},el("legend",{},"Como deseja receber?"),modes.map(([mode,label],index)=>el("label",{class:"shop-check shop-delivery-option"},el("input",{type:"radio",name:"shippingMethod",value:mode,checked:index===0,required:true}),el("span",{},label))),!modes.length?message("As modalidades de entrega ainda não estão disponíveis."):null,el("p",{class:"shop-fine"},"Entrega gratuita em Uberlândia exige CEP da cidade. O ponto de retirada e os detalhes da entrega local são combinados pelo WhatsApp após a confirmação do pagamento."),shipping.pickup?.enabled&&storeLocation()?el("p",{class:"shop-fine"},`Localidade da retirada: ${storeLocation()}. O ponto de retirada será combinado pelo WhatsApp após o pagamento.`):null),addressFields,el("div",{class:"shop-coupon-form"},field("Cupom de desconto","coupon","text","",{placeholder:"Informe seu cupom"}),button("Atualizar valores",()=>quote(),"shop-button secondary")),el("fieldset",{class:"shop-checkout-choice"},el("legend",{},"Pagamento"),demoPayments?el("div",{},selectField("Resultado do pagamento de teste","paymentOutcome",[["approved","Aprovado — simular baixa de estoque"],["pending","Pendente — simular reserva de estoque"],["rejected","Recusado — simular liberação"],["cancelled","Cancelado — simular liberação"],["expired","Expirado — simular liberação"]],"approved"),message("SIMULAÇÃO: este pagamento não utiliza Pix, cartão ou dinheiro. Nenhuma cobrança será feita.")):realPayments?el("p",{class:"shop-fine"},"Escolha Pix ou cartão abaixo. O prazo para pagar é de 15 minutos a partir da confirmação do pedido."):message(state.config.payments?.reason||"Pagamento indisponível no momento.")),status,submit,el("p",{class:"shop-fine"},"O carrinho não reserva estoque. Os itens são reservados ao confirmar o pedido e liberados se o prazo de pagamento terminar. A preparação começa após a confirmação do pagamento."));
+  }},el("h2",{},"Contato e entrega"),el("p",{class:"shop-fine"},isDemo()?"Use dados de teste. O endereço será salvo neste ambiente para demonstrar o fluxo de entrega.":"Confirme a entrega para reservar seus itens e continuar para o pagamento."),el("div",{class:"shop-form-grid"},field("Nome completo","name","text",state.user.name||"",{required:true,minlength:"2",maxlength:"120",autocomplete:"name"}),field("E-mail","email","email",state.user.email||"",{required:true,maxlength:"254",autocomplete:"email"}),field("Celular","phone","tel","",{required:true,minlength:"10",maxlength:"20",autocomplete:"tel",placeholder:"(34) 99999-9999"})),el("fieldset",{class:"shop-checkout-choice"},el("legend",{},"Como deseja receber?"),modes.map(([mode,label],index)=>el("label",{class:"shop-check shop-delivery-option"},el("input",{type:"radio",name:"shippingMethod",value:mode,checked:index===0,required:true}),el("span",{},label))),!modes.length?message("As modalidades de entrega ainda não estão disponíveis."):null,el("p",{class:"shop-fine"},"Entrega gratuita em Uberlândia exige CEP da cidade. O ponto de retirada e os detalhes da entrega local são combinados pelo WhatsApp após a confirmação do pagamento."),shipping.pickup?.enabled&&storeLocation()?el("p",{class:"shop-fine"},`Localidade da retirada: ${storeLocation()}. O ponto de retirada será combinado pelo WhatsApp após o pagamento.`):null),addressFields,serviceOptions,el("div",{class:"shop-coupon-form"},field("Cupom de desconto","coupon","text","",{placeholder:"Informe seu cupom"}),button("Atualizar valores",()=>quote(),"shop-button secondary")),el("fieldset",{class:"shop-checkout-choice"},el("legend",{},"Pagamento"),demoPayments?el("div",{},selectField("Resultado do pagamento de teste","paymentOutcome",[["approved","Aprovado — simular baixa de estoque"],["pending","Pendente — simular reserva de estoque"],["rejected","Recusado — simular liberação"],["cancelled","Cancelado — simular liberação"],["expired","Expirado — simular liberação"]],"approved"),message("SIMULAÇÃO: este pagamento não utiliza Pix, cartão ou dinheiro. Nenhuma cobrança será feita.")):realPayments?el("p",{class:"shop-fine"},"Escolha Pix ou cartão abaixo. O prazo para pagar é de 15 minutos a partir da confirmação do pedido."):message(state.config.payments?.reason||"Pagamento indisponível no momento.")),status,submit,el("p",{class:"shop-fine"},"O carrinho não reserva estoque. Os itens são reservados ao confirmar o pedido e liberados se o prazo de pagamento terminar. A preparação começa após a confirmação do pagamento."));
   async function quote(){
-    if(disposed)return;
-    const version=++quoteVersion,data=new FormData(checkoutForm),cep=String(data.get("cep")||"").replace(/\D/g,""),deliveryMode=String(data.get("shippingMethod")||"delivery");submit.disabled=true;
+    if(disposed)return;clearTimeout(quoteTimer);
+    const version=++quoteVersion,data=new FormData(checkoutForm),cep=String(data.get("cep")||"").replace(/\D/g,""),deliveryMode=String(data.get("shippingMethod")||"delivery");submit.disabled=true;currentQuote=null;serviceOptions.replaceChildren();
     setChildren(summary,loading("Conferindo valores…"));
     try{
-      const result=await api("/checkout/quote",{method:"POST",body:{items:state.cart.map(item=>({variantId:item.variantId,quantity:item.quantity})),coupon:String(data.get("coupon")||"").trim()||null,cep,deliveryMode}});if(disposed||version!==quoteVersion)return;currentQuote=result;
+      const result=await api("/checkout/quote",{method:"POST",body:{items:state.cart.map(item=>({variantId:item.variantId,quantity:item.quantity})),coupon:String(data.get("coupon")||"").trim()||null,cep,deliveryMode,shippingOptionId:shippingOptionId||undefined}});if(disposed||version!==quoteVersion)return;currentQuote=result;shippingOptionId=result.shipping?.selectedOptionId||"";
+      const optionList=result.shipping?.deliveryMode==="delivery"?createShippingOptionList({el,money,shipping:result.shipping,selectedId:shippingOptionId,onSelect:id=>{shippingOptionId=id;quote();},name:"checkoutShippingService"}):null;serviceOptions.replaceChildren(...(optionList?[optionList]:[]));
       if(cep.length===8)localStorage.setItem("bkm-cep",cep);
       const destination=result.shipping?.destination;if(destination&&deliveryMode!=="pickup"){for(const name of["city","state"]){const input=checkoutForm.querySelector(`[name=${name}]`);if(destination[name]&&input)input.value=destination[name];}if(lastVerifiedCep!==destination.zip){for(const name of["street","district"])checkoutForm.querySelector(`[name=${name}]`).value=destination[name]||"";lastVerifiedCep=destination.zip;}}
       const mode=result.shipping?.deliveryMode||deliveryMode;
@@ -790,15 +777,17 @@ async function checkoutPage() {
       submit.disabled=submitting||!(demoPayments||realPayments)||!result.paymentAvailable||!result.shipping?.available;
       if(realUi)await realUi.updateAmount(result.totalCents);
       if(!result.paymentAvailable)summary.append(message(result.reason||state.config.payments?.reason||"Pagamento indisponível."));
-    }catch(error){if(disposed||version!==quoteVersion)return;currentQuote=null;setChildren(summary,message(displayError(error),"error"),["INSUFFICIENT_STOCK","PRODUCT_UNAVAILABLE","VARIANT_UNAVAILABLE"].includes(error.code)?link("Revisar carrinho","/carrinho","shop-button secondary"):null);submit.disabled=true;}
+    }catch(error){if(disposed||version!==quoteVersion)return;currentQuote=null;if(error.code==="SHIPPING_OPTION_CHANGED")shippingOptionId="";setChildren(summary,message(displayError(error),"error"),error.code==="SHIPPING_OPTION_CHANGED"?button("Consultar novas opções de frete",()=>quote(),"shop-button secondary"):null,["INSUFFICIENT_STOCK","PRODUCT_UNAVAILABLE","VARIANT_UNAVAILABLE"].includes(error.code)?link("Revisar carrinho","/carrinho","shop-button secondary"):null);submit.disabled=true;}
   }
-  function updateDelivery(){const pickup=checkoutForm.querySelector("[name=shippingMethod]:checked")?.value==="pickup";addressFields.hidden=pickup;addressFields.querySelectorAll("input,select").forEach(input=>input.disabled=pickup);quote();}
-  checkoutForm.querySelector("[name=cep]").addEventListener("change",()=>quote());
-  checkoutForm.querySelector("[name=coupon]").addEventListener("change",()=>quote());
+  function updateDelivery(){shippingOptionId="";const pickup=checkoutForm.querySelector("[name=shippingMethod]:checked")?.value==="pickup";addressFields.hidden=pickup;addressFields.querySelectorAll("input,select").forEach(input=>input.disabled=pickup);quote();}
+  function invalidateShipping(){shippingOptionId="";currentQuote=null;++quoteVersion;submit.disabled=true;serviceOptions.replaceChildren();clearTimeout(quoteTimer);setChildren(summary,message("Atualizando o frete e os valores…"));quoteTimer=setTimeout(quote,350);}
+  for(const name of["cep","coupon"])checkoutForm.querySelector("[name="+name+"]").addEventListener("input",invalidateShipping);
+  checkoutForm.querySelector("[name=cep]").addEventListener("change",()=>{shippingOptionId="";quote();});
+  checkoutForm.querySelector("[name=coupon]").addEventListener("change",()=>{shippingOptionId="";quote();});
   checkoutForm.querySelectorAll("[name=shippingMethod]").forEach(input=>input.addEventListener("change",updateDelivery));
   const checkoutFlow=el("div",{class:"shop-checkout-flow"},checkoutForm);
   if(realPayments){realUi=createMercadoPagoPaymentUi({getQuote:()=>currentQuote,getEmail:()=>checkoutForm.querySelector("[name=email]").value.trim(),config:state.config.payments,reserveOnly:true});submit.remove();submit.setAttribute("form",checkoutForm.id);checkoutFlow.append(realUi.element,submit);}
-  routeCleanup=()=>{disposed=true;++quoteVersion;realUi?.destroy();};
+  routeCleanup=()=>{disposed=true;++quoteVersion;clearTimeout(quoteTimer);realUi?.destroy();};
   const pickup=checkoutForm.querySelector("[name=shippingMethod]:checked")?.value==="pickup";addressFields.hidden=pickup;addressFields.querySelectorAll("input,select").forEach(input=>input.disabled=pickup);
   await quote();return el("div",{class:"shop-shell"},demoNotice(),heading("UMA NOVA HISTÓRIA PARA SUA COLEÇÃO",isDemo()?"Checkout de demonstração.":"Checkout."),el("ol",{class:"shop-checkout-steps","aria-label":"Etapas da compra"},el("li",{class:"active","aria-current":"step"},"1. Contato e entrega"),el("li",{},"2. Pagamento"),el("li",{},"3. Acompanhar pedido")),el("div",{class:"shop-checkout-layout"},checkoutFlow,summary));
 }
@@ -909,6 +898,7 @@ async function orderPage(id,admin=false){
   const deadlineValues=[order.paymentExpiresAt,order.reservationExpiresAt,order.expiresAt,order.payment?.expiresAt].map(value=>Date.parse(value)).filter(Number.isFinite);
   const deadline=deadlineValues.length?Math.min(...deadlineValues):null;
   const deliveryMode=order.deliveryMode||order.shipping?.deliveryMode||order.shipment?.deliveryMode||"delivery";
+  if(deliveryMode==="delivery"&&(order.shipping?.carrier||order.shipping?.serviceName)){const selected=order.shipping;detail.querySelector(".shop-summary").append(el("p",{class:"shop-fine"},el("strong",{},shippingServiceLabel(selected)),Number.isSafeInteger(selected.estimatedDays)?el("span",{},` · Estimativa de ${selected.estimatedDays} dias úteis após a postagem.`):null));}
   if(["pickup","local"].includes(deliveryMode)){const days=order.shipping?.estimatedDays;detail.querySelector(".shop-summary").append(el("p",{class:"shop-fine"},deliveryMode==="pickup"?"Retirada gratuita. Prazo e ponto de retirada a combinar pelo WhatsApp após a confirmação do pagamento.":`Entrega gratuita em Uberlândia/MG. ${Number.isInteger(days)&&days>0?`Estimativa de ${days} dias úteis.`:"Prazo a combinar pelo WhatsApp após a confirmação do pagamento."}`));}
   if(!admin&&order.status==="CONFIRMED"&&paymentStatus==="APPROVED"&&order.shippingStatus!=="DELIVERED"&&["pickup","local"].includes(deliveryMode)){
     let phone=String(state.config.whatsapp||"").replace(/\D/g,"");if(phone.length===10||phone.length===11)phone=`55${phone}`;
@@ -1049,7 +1039,7 @@ async function adminInventory(){
   );
 }
 async function productEditor(id) {
-  return createAdminProductUI({el,field,selectField,checkbox,button,link,api,navigate,toast,message,image,safeImage,prepareImageUpload,money,asArray,displayError,svgIcon,openImageZoom,getState:()=>state,setRouteCleanup:fn=>{routeCleanup=fn;}}).productEditor(id);
+  return createAdminProductUI({el,field,selectField,checkbox,button,link,api,navigate,toast,message,image,safeImage,prepareImageUpload,money,asArray,displayError,svgIcon,openImageZoom,getState:()=>state,setRouteCleanup:fn=>{routeCleanup=fn;}}).productEditor(id,{completion:new URLSearchParams(location.search).get("salvo")});
 }
 async function adminSettings() {
   const response=await api("/admin/settings"),settings=response.settings||response,shipping=settings.shipping||{},status=el("div",{"aria-live":"polite"});
@@ -1060,8 +1050,9 @@ async function adminSettings() {
     const upload=el("input",{type:"file",accept:"image/png,image/jpeg,image/webp","aria-label":`Enviar imagem do banner ${index+1}`,onChange:async event=>{const file=event.target.files[0];if(!file)return;if(file.size>8*1024*1024){toast("Escolha uma imagem com até 8 MB.");return;}event.target.disabled=true;try{const payload=await prepareImageUpload(file);const result=await api("/admin/uploads",{method:"POST",body:payload});imageField.querySelector("input").value=result.url;setChildren(preview,image(result.url,item.title||"Banner"));toast("Imagem do banner enviada.");}catch(error){toast(displayError(error));}finally{event.target.disabled=false;event.target.value="";}}});
     return el("fieldset",{class:"shop-banner-row"},el("legend",{},`Banner ${index+1}`),preview,el("div",{class:"shop-form-grid"},field("Título","bannerTitle","text",item.title||"",{required:true,maxlength:"150"}),field("Subtítulo","bannerSubtitle","text",item.subtitle||"",{maxlength:"300"}),imageField,field("Destino dentro da loja","bannerUrl","text",item.url||"",{placeholder:"Ex.: /cartas?set=sv09",pattern:"/[^]*",maxlength:"300"})),el("label",{class:"shop-field"},el("span",{},"Enviar imagem (até 8 MB)"),upload),checkbox("Exibir este banner","bannerActive",item.active!==false),button("Remover banner",()=>{captureBanners();banners.splice(index,1);renderBanners();},"shop-text-link"));}));}
   renderBanners();
-  const shippingControls=createShippingAdminEditor({ctx:{el,field,selectField,checkbox,button,message},shipping,production:state.config.environment==="production"});
+  const shippingControls=createShippingAdminEditor({ctx:{el,field,selectField,checkbox,button,message,api},shipping,production:state.config.environment==="production"});
   const shippingEditor=shippingControls.element;
+  routeCleanup=()=>shippingControls.destroy?.();
   const form=el("form",{class:"shop-settings-form",onSubmit:async event=>{event.preventDefault();const values=Object.fromEntries(new FormData(form)),submit=form.querySelector("[type=submit]");submit.disabled=true;status.replaceChildren();try{captureBanners();if(banners.some(item=>item.url&&(!item.url.startsWith("/")||item.url.startsWith("//"))))throw new Error("O destino dos banners deve ser um endereço interno, como /cartas.");const payload={...settings,storeName:values.storeName.trim(),contactEmail:values.contactEmail.trim(),whatsapp:values.whatsapp.trim(),instagram:values.instagram.trim(),companyName:values.companyName.trim(),cnpj:values.cnpj.trim(),address:values.address.trim(),city:values.storeCity.trim(),state:values.storeState,about:values.about.trim(),privacyPolicy:values.privacyPolicy.trim(),shippingPolicy:values.shippingPolicy.trim(),returnsPolicy:values.returnsPolicy.trim(),terms:values.terms.trim(),categories:values.categories.split(",").map(item=>item.trim()).filter(Boolean),banners,shipping:shippingControls.read()};await api("/admin/settings",{method:"PUT",body:payload});const config=await api("/config");state.config=config.config||config;renderNav();status.replaceChildren(message("Configurações salvas.","success"));toast("Configurações atualizadas.");}catch(error){status.replaceChildren(message(displayError(error),"error"));}finally{submit.disabled=false;}}},el("h2",{},"Configurações da loja"),el("section",{class:"shop-admin-section"},el("h3",{},"Informações e contato"),el("div",{class:"shop-form-grid"},field("Nome da loja","storeName","text",settings.storeName||"BKM TCG",{required:true}),field("E-mail de atendimento","contactEmail","email",settings.contactEmail||""),field("WhatsApp com DDD","whatsapp","tel",settings.whatsapp||""),field("Instagram","instagram","text",settings.instagram||""),field("Razão social","companyName","text",settings.companyName||""),field("CNPJ","cnpj","text",settings.cnpj||""),field("Cidade de atendimento","storeCity","text",settings.city||"",{placeholder:"Ex.: Uberlândia"}),selectField("UF de atendimento","storeState",[["","Selecione"],..."AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO".split(" ").map(uf=>[uf,uf])],settings.state||""),field("Endereço público — opcional","address","text",settings.address||"",{placeholder:"Deixe vazio para combinar o ponto de retirada pelo WhatsApp"})),field("Categorias (separadas por vírgula)","categories","text",asArray(settings.categories).join(", "),{placeholder:"Booster, ETB, Box, Blister, Carta avulsa"})),shippingEditor,el("section",{class:"shop-admin-section"},el("div",{class:"shop-section-top"},el("h3",{},"Banners da home"),button("Adicionar banner +",()=>{captureBanners();banners.push({title:"",subtitle:"",image:"",url:"/busca",active:true});renderBanners();},"shop-button secondary")),bannerList),el("section",{class:"shop-admin-section"},el("h3",{},"Pagamentos"),message(isDemo()?"Provedor de demonstração: simule resultados no checkout. Cobranças reais estão desativadas.":state.config.payments?.reason||"O provedor real deve ser configurado e validado antes da abertura comercial."),el("p",{class:"shop-fine"},"As credenciais permanecem no ambiente seguro do servidor e nunca são solicitadas neste painel.")),el("section",{class:"shop-admin-section"},el("h3",{},"Sobre e políticas da loja"),field("Sobre a BKM","about","textarea",settings.about||"",{rows:"4"}),field("Política de privacidade","privacyPolicy","textarea",settings.privacyPolicy||"",{rows:"5"}),field("Política de envio","shippingPolicy","textarea",settings.shippingPolicy||"",{rows:"5"}),field("Trocas e devoluções","returnsPolicy","textarea",settings.returnsPolicy||"",{rows:"5"}),field("Termos de uso","terms","textarea",settings.terms||"",{rows:"5"})),status,el("button",{type:"submit",class:"shop-button"},"Salvar configurações"));
   const minimum=form.querySelector("[name=freeShippingThreshold]");
   function updateShippingRequirements(){const pickup=form.querySelector("[name=pickupEnabled]").checked,local=form.querySelector("[name=localDeliveryEnabled]").checked;minimum.required=form.querySelector("[name=freeShippingEnabled]").checked;for(const name of["storeCity","storeState","whatsapp"])form.querySelector(`[name=${name}]`).required=pickup||local;}

@@ -10,3 +10,10 @@ export function variantAttributeText(variant={}){return [...new Set(Array.isArra
 export function productVariantText(variant={}, {includeLanguage=true}={}){
   return [includeLanguage&&variant.language?(productLanguages[variant.language]||variant.language):null,variant.condition?(productConditions[variant.condition]||variant.condition):null,variant.finish?(productFinishes[variant.finish]||variant.finish):null,variantAttributeText(variant)].filter(Boolean).join(' · ');
 }
+
+export function catalogCardConditions(product={}){
+ if(product.kind!=='SINGLE')return [];
+ const groups=new Map(),rank=['M','NM','SP','LP','MP','HP','D','DMG'];
+ for(const variant of Array.isArray(product.variants)?product.variants:[]){const code=typeof variant.condition==='string'?variant.condition.trim():'';if(!code)continue;const prior=groups.get(code);groups.set(code,{code,label:productConditions[code]||code,available:!!prior?.available||variant.stock>0});}
+ return [...groups.values()].sort((a,b)=>(rank.includes(a.code)?rank.indexOf(a.code):99)-(rank.includes(b.code)?rank.indexOf(b.code):99));
+}

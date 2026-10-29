@@ -127,7 +127,7 @@ function createOrders({db,quote,env,audit,ApiError,enqueueEmail,paymentProvider,
     const deliveryMode=data.deliveryMode || data.shipping?.deliveryMode || 'delivery';
     if(!['delivery','pickup','local'].includes(deliveryMode)) fail(422,'DELIVERY_MODE','Escolha uma modalidade de entrega válida.');
     if((deliveryMode!=='pickup'&&(address.zip.length!==8 || !address.street || !address.number || !address.district || !address.city || !/^[A-Z]{2}$/.test(address.state))) || Object.values(address).some(value=>value.length>200)) fail(422,'ADDRESS','Preencha o endereço completo com CEP e UF válidos.');
-    const key=digest([user.id,data.idempotencyKey]),hash=digest({items:data.items,coupon:data.coupon||'',contact,address,deliveryMode,shippingMethod:data.shippingMethod || '',payment:demo?data.payment:realInput});
+    const key=digest([user.id,data.idempotencyKey]),hash=digest({items:data.items,coupon:data.coupon||'',contact,address,deliveryMode,shippingMethod:data.shippingMethod || '',shippingOptionId:data.shippingOptionId||data.shipping?.optionId||'',payment:demo?data.payment:realInput});
     const result=await db.transaction(async()=>{
       // Serializes retries of the same request before checking its unique key.
       if(db.engine==='postgres') await db.prepare('SELECT pg_advisory_xact_lock(hashtext(?))').get(key);

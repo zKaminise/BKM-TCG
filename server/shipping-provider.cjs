@@ -1,5 +1,6 @@
-// Read-only Melhor Envio sandbox adapter. No cart, checkout, label purchase or cancellation API.
-const API_ORIGIN = 'https://sandbox.melhorenvio.com.br';
+// Read-only Melhor Envio quote/tracking adapter. Environment and credentials are explicit.
+// No cart, checkout, label purchase, payment or cancellation API is exposed.
+const API_ORIGINS={sandbox:'https://sandbox.melhorenvio.com.br',production:'https://melhorenvio.com.br'};
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 class ShippingError extends Error {
   constructor(code, message, status = 502) { super(message); this.name = 'ShippingError'; this.code = code; this.status = status; }
@@ -25,13 +26,15 @@ function shippingReadiness(env = process.env) {
   const missing = [];
   if (env.SHIPPING_PROVIDER !== 'melhorenvio') missing.push('SHIPPING_PROVIDER');
   if (env.MELHOR_ENVIO_ENABLED !== 'true') missing.push('MELHOR_ENVIO_ENABLED');
-  if (env.MELHOR_ENVIO_ENVIRONMENT !== 'sandbox') missing.push('MELHOR_ENVIO_ENVIRONMENT');
+  if (!Object.hasOwn(API_ORIGINS,env.MELHOR_ENVIO_ENVIRONMENT||'')) missing.push('MELHOR_ENVIO_ENVIRONMENT');
+  if(env.MELHOR_ENVIO_ENVIRONMENT==='production'&&(env.BKM_ENVIRONMENT!=='production'||env.HOSTING_DEMO_ONLY==='true'))missing.push('BKM_ENVIRONMENT');
   const token = String(env.MELHOR_ENVIO_TOKEN || '');
   if (!/^[\x21-\x7e]{20,8192}$/.test(token)) missing.push('MELHOR_ENVIO_TOKEN');
   const userAgent = String(env.MELHOR_ENVIO_USER_AGENT || '');
   if (userAgent.length < 8 || userAgent.length > 250 || /[\r\n\x00-\x1f]/.test(userAgent) || !/[^\s<>@()]+@[^\s<>@()]+\.[a-z]{2,}/i.test(userAgent)) missing.push('MELHOR_ENVIO_USER_AGENT');
   try { postalCode(env.MELHOR_ENVIO_ORIGIN_ZIP); } catch { missing.push('MELHOR_ENVIO_ORIGIN_ZIP'); }
-  return { provider:'melhorenvio', environment:'sandbox', enabled:missing.length === 0, productionSupported:false, checkoutIntegrated:false, purchasesEnabled:false, mode:'quote_and_tracking_only', missing, reason:missing.length ? 'Cotação sandbox desativada: faltam configuração explícita, credencial de teste ou origem.' : 'Somente cotação e consulta de etiquetas já existentes no sandbox; sem compra de frete.' };
+  const environment=Object.hasOwn(API_ORIGINS,env.MELHOR_ENVIO_ENVIRONMENT||'')?env.MELHOR_ENVIO_ENVIRONMENT:'unconfigured';
+  return {provider:'melhorenvio',environment,enabled:missing.length===0,productionSupported:true,checkoutIntegrated:true,purchasesEnabled:false,mode:'quote_and_tracking_only',missing,reason:missing.length?'Cotação desativada: faltam ambiente explícito, credencial autorizada, contato técnico ou origem.':`Cotação e consulta de rastreio no ambiente ${environment}; compra de etiquetas permanece desativada.`};
 }
 function createShippingProvider({env = process.env, fetchImpl = globalThis.fetch, now = Date.now, timeoutMs = 8000} = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl deve ser uma função.');
@@ -45,7 +48,7 @@ function createShippingProvider({env = process.env, fetchImpl = globalThis.fetch
     const aborted = new Promise((_,reject) => controller.signal.addEventListener('abort', () => reject(new ShippingError('SHIPPING_TIMEOUT', 'A consulta de logística excedeu o tempo limite.', 504)), {once:true}));
     const bounded = promise => Promise.race([promise,aborted]);
     try {
-      const response = await bounded(fetchImpl(API_ORIGIN + path, {method:'POST', redirect:'manual', signal:controller.signal, headers:{Authorization:`Bearer ${config.MELHOR_ENVIO_TOKEN}`, 'User-Agent':config.MELHOR_ENVIO_USER_AGENT, Accept:'application/json', 'Content-Type':'application/json'}, body:JSON.stringify(payload)}));
+      const response = await bounded(fetchImpl(API_ORIGINS[config.MELHOR_ENVIO_ENVIRONMENT] + path, {method:'POST', redirect:'manual', signal:controller.signal, headers:{Authorization:`Bearer ${config.MELHOR_ENVIO_TOKEN}`, 'User-Agent':config.MELHOR_ENVIO_USER_AGENT, Accept:'application/json', 'Content-Type':'application/json'}, body:JSON.stringify(payload)}));
       if (!response.ok) {
         const status = response.status;
         if (status >= 300 && status < 400) throw new ShippingError('SHIPPING_REDIRECT_REJECTED', 'Redirecionamento inesperado do provedor de logística.');
@@ -82,7 +85,7 @@ function createShippingProvider({env = process.env, fetchImpl = globalThis.fetch
     });
     const packedVolumes=volumes?.map(volume=>{
       if(!volume||typeof volume!=='object'||Array.isArray(volume)||Object.keys(volume).some(key=>!['widthCm','heightCm','lengthCm','weightGrams','insuranceValueCents'].includes(key)))invalid('Volume de postagem inválido.');
-      return {width:decimal(volume.widthCm,.1,300,'largura em centímetros'),height:decimal(volume.heightCm,.1,300,'altura em centímetros'),length:decimal(volume.lengthCm,.1,300,'comprimento em centímetros'),weight:integer(volume.weightGrams,1,30000,'peso embalado em gramas')/1000,insurance_value:integer(volume.insuranceValueCents,0,100000000,'valor segurado do volume em centavos')/100};
+      return {width:decimal(volume.widthCm,.1,300,'largura em centímetros'),height:decimal(volume.heightCm,.1,300,'altura em centímetros'),length:decimal(volume.lengthCm,.1,300,'comprimento em centímetros'),weight:integer(volume.weightGrams,1,30000,'peso embalado em gramas')/1000,insurance:integer(volume.insuranceValueCents,0,100000000,'valor segurado do volume em centavos')/100};
     });
     const payload = {from:{postal_code:origin}, to:{postal_code:destination}, ...(products?{products}:{volumes:packedVolumes}), options:{receipt:false, own_hand:false}};
     if (serviceIds.length) payload.services = serviceIds.join(',');
@@ -92,12 +95,19 @@ function createShippingProvider({env = process.env, fetchImpl = globalThis.fetch
     for (const row of data) {
       if (!row || !Number.isSafeInteger(row.id) || row.id < 1 || seen.has(row.id) || serviceIds.length && !serviceIds.includes(row.id)) responseInvalid(); seen.add(row.id);
       if (row.error) { unavailable.push({serviceId:row.id, reason:'Serviço indisponível para os dados consultados.'}); continue; }
+      // The provider may consolidate volumes. Its package count need not equal
+      // the requested count, but explicit package errors cannot become offers.
+      if(row.packages!==undefined){
+        if(!Array.isArray(row.packages)||row.packages.length>100||row.packages.some(pack=>!pack||typeof pack!=='object'||Array.isArray(pack)))responseInvalid();
+        if(!row.packages.length||row.packages.some(pack=>pack.error)){unavailable.push({serviceId:row.id,reason:'Serviço indisponível para todos os volumes consultados.'});continue;}
+        for(const pack of row.packages)if(pack.price!==undefined)brlToCents(pack.price);
+      }
       if (!['R$','BRL'].includes(row.currency) || typeof row.name !== 'string' || !row.name.trim() || row.name.length > 120 || !Number.isSafeInteger(row.custom_delivery_time) || row.custom_delivery_time < 0 || row.custom_delivery_time > 365 || row.company && (typeof row.company.name !== 'string' || row.company.name.length > 120)) responseInvalid();
       let range = null;
       if (row.custom_delivery_range != null) { const {min,max} = row.custom_delivery_range; if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min < 0 || max < min || max > 365) responseInvalid(); range = {min,max}; }
-      quotes.push({serviceId:row.id, name:row.name, company:row.company?.name || null, amountCents:brlToCents(row.custom_price), currency:'BRL', estimatedDays:row.custom_delivery_time, deliveryRange:range, quotedAt, sandbox:true, contracted:false});
+      quotes.push({serviceId:row.id, name:row.name, company:row.company?.name || null, amountCents:brlToCents(row.custom_price), currency:'BRL', estimatedDays:row.custom_delivery_time, deliveryRange:range,packageCount:row.packages?.length??null, quotedAt, sandbox:config.MELHOR_ENVIO_ENVIRONMENT==='sandbox', contracted:false});
     }
-    return {provider:'melhorenvio', environment:'sandbox', originZip:origin, destinationZip:destination, quotes, unavailable, quotedAt, purchasesEnabled:false};
+    return {provider:'melhorenvio', environment:config.MELHOR_ENVIO_ENVIRONMENT, originZip:origin, destinationZip:destination, quotes, unavailable, quotedAt, purchasesEnabled:false};
   }
   async function tracking({orderIds} = {}) {
     ready();
@@ -113,9 +123,9 @@ function createShippingProvider({env = process.env, fetchImpl = globalThis.fetch
       for (const field of ['tracking','protocol']) if (row[field] != null && (typeof row[field] !== 'string' || !/^[a-zA-Z0-9._/-]{1,100}$/.test(row[field]))) responseInvalid();
       const dates = {};
       for (const field of ['created_at','paid_at','generated_at','posted_at','delivered_at','canceled_at']) if (row[field] != null) { if (typeof row[field] !== 'string' || !Number.isFinite(Date.parse(row[field]))) responseInvalid(); dates[field] = new Date(row[field]).toISOString(); }
-      parsed.set(id,{id,found:true,providerStatus:row.status,trackingCode:row.tracking || null,protocol:row.protocol || null,dates,sandbox:true});
+      parsed.set(id,{id,found:true,providerStatus:row.status,trackingCode:row.tracking || null,protocol:row.protocol || null,dates,sandbox:config.MELHOR_ENVIO_ENVIRONMENT==='sandbox'});
     }
-    return {provider:'melhorenvio', environment:'sandbox', checkedAt:new Date(now()).toISOString(), items:ids.map(id=>parsed.get(id)||{id,found:false,providerStatus:null,trackingCode:null,sandbox:true})};
+    return {provider:'melhorenvio', environment:config.MELHOR_ENVIO_ENVIRONMENT, checkedAt:new Date(now()).toISOString(), items:ids.map(id=>parsed.get(id)||{id,found:false,providerStatus:null,trackingCode:null,sandbox:config.MELHOR_ENVIO_ENVIRONMENT==='sandbox'})};
   }
   return {readiness:()=>shippingReadiness(config), quote, tracking};
 }

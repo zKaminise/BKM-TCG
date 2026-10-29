@@ -6,7 +6,7 @@ const valid={id:1,name:'PAC',price:'88.88',custom_price:'12.34',currency:'R$',de
 const uuid='ca4a67e4-4432-4cf5-8f17-9bdc2fd7aaa1';
 const json=data=>new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
 const provider=(data,options={})=>createShippingProvider({env,fetchImpl:async()=>json(data),...options});
-test('shipping readiness is explicit, sandbox only and never exposes credentials',async()=>{
+test('shipping readiness requires explicit matching environments and never exposes credentials',async()=>{
   assert.equal(shippingReadiness({}).enabled,false);assert.equal(shippingReadiness(env).enabled,true);assert.equal(shippingReadiness({...env,MELHOR_ENVIO_ENVIRONMENT:'production'}).enabled,false);assert.equal(shippingReadiness({...env,MELHOR_ENVIO_USER_AGENT:'BKM\r\nInjected: value'}).enabled,false);
   const readiness=shippingReadiness(env);assert.equal(readiness.purchasesEnabled,false);assert(!JSON.stringify(readiness).includes(env.MELHOR_ENVIO_TOKEN));let called=false;
   await assert.rejects(createShippingProvider({env:{},fetchImpl:async()=>{called=true;}}).quote({zip:'20040002',items:[item]}),{code:'SHIPPING_NOT_CONFIGURED'});assert.equal(called,false);
@@ -23,7 +23,14 @@ test('money conversion rejects imprecise or non-BRL-looking numeric input',()=>{
 test('packed volumes quote real package totals, not per-card quantities, without purchasing labels',async()=>{
   let payload;const p=createShippingProvider({env,fetchImpl:async(url,options)=>{payload=JSON.parse(options.body);return json([valid]);}});
   const result=await p.quote({zip:'20040002',volumes:[{weightGrams:250,widthCm:12,heightCm:3,lengthCm:17,insuranceValueCents:4500}]});
-  assert.deepEqual(payload.volumes,[{weight:.25,width:12,height:3,length:17,insurance_value:45}]);assert.equal(payload.products,undefined);assert.equal(result.purchasesEnabled,false);assert.equal(p.readiness().productionSupported,false);assert.equal(p.readiness().checkoutIntegrated,false);
+  assert.deepEqual(payload.volumes,[{weight:.25,width:12,height:3,length:17,insurance:45}]);assert.equal(payload.products,undefined);assert.equal(result.purchasesEnabled,false);assert.equal(p.readiness().productionSupported,true);assert.equal(p.readiness().checkoutIntegrated,true);
+});
+
+test('production quotations use the fixed production origin only with production store configuration',async()=>{
+  const production={...env,BKM_ENVIRONMENT:'production',MELHOR_ENVIO_ENVIRONMENT:'production'};let url;
+  const p=createShippingProvider({env:production,fetchImpl:async value=>{url=value;return json([valid]);}});
+  const result=await p.quote({zip:'20040002',items:[item]});assert.equal(url,'https://melhorenvio.com.br/api/v2/me/shipment/calculate');assert.equal(result.environment,'production');assert.equal(result.quotes[0].sandbox,false);assert.equal(result.purchasesEnabled,false);
+  for(const mode of[{BKM_ENVIRONMENT:'demo'},{HOSTING_DEMO_ONLY:'true'}])assert.equal(shippingReadiness({...production,...mode}).enabled,false);
 });
 test('packed volume validation rejects mixing products, missing values and unavailable sandbox responses',async()=>{
   let calls=0;const p=createShippingProvider({env,fetchImpl:async()=>{calls++;return json([]);}}),volume={weightGrams:250,widthCm:12,heightCm:3,lengthCm:17,insuranceValueCents:4500};
@@ -35,6 +42,12 @@ test('invalid CEP, dimensions, quantity, weight, prices or service cannot trigge
   for(const request of [{zip:'http://127.0.0.1',items:[item]},{zip:'00000000',items:[item]},{zip:'20040002',items:[{...item,heightCm:0}]},{zip:'20040002',items:[{...item,weightGrams:0}]},{zip:'20040002',items:[{...item,quantity:1.5}]},{zip:'20040002',items:[{...item,priceCents:1.1}]},{zip:'20040002',items:[item,item]},{zip:'20040002',items:[item],services:['1']}])await assert.rejects(p.quote(request),{code:'SHIPPING_INVALID_INPUT'});assert.equal(calls,0);
 });
 test('provider unavailable service stays unavailable without invented price',async()=>{const result=await provider([{id:1,error:'Provider-specific private body'}]).quote({zip:'20040002',items:[item]});assert.equal(result.quotes.length,0);assert.equal(result.unavailable.length,1);assert(!JSON.stringify(result).includes('Provider-specific'));});
+
+test('explicit incomplete package quotations are unavailable; legitimate consolidation does not require equal package counts',async()=>{
+  const volumes=[{weightGrams:200,widthCm:12,heightCm:3,lengthCm:17,insuranceValueCents:1000},{weightGrams:200,widthCm:12,heightCm:3,lengthCm:17,insuranceValueCents:1000}];
+  const result=await provider([{...valid,packages:[{price:'12.34',weight:.4}]},{...valid,id:2,packages:[{error:'Private package error'}]},{...valid,id:3,packages:[]}]).quote({zip:'20040002',volumes});assert.equal(result.quotes.length,1);assert.equal(result.quotes[0].packageCount,1);assert.equal(result.unavailable.length,2);assert(!JSON.stringify(result).includes('Private'));
+  for(const packages of[{},[null],[{price:'1.005'}]])await assert.rejects(provider([{...valid,packages}]).quote({zip:'20040002',volumes}),{code:'SHIPPING_INVALID_RESPONSE'});
+});
 test('foreign currency, missing custom quote, wrong service and malformed delivery fail closed',async()=>{
   for(const row of [{...valid,currency:'USD'},{...valid,custom_price:undefined},{...valid,custom_delivery_time:undefined},{...valid,custom_delivery_range:{min:8,max:3}},{...valid,id:2}])await assert.rejects(provider([row]).quote({zip:'20040002',items:[item],services:[1]}),{code:'SHIPPING_INVALID_RESPONSE'});
 });

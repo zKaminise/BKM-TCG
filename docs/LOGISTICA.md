@@ -1,79 +1,75 @@
 # Logística BKM TCG
 
-Auditoria e documentação atualizadas em **27/10/2026**. Esta etapa não comprou etiquetas, contratou serviços, adicionou créditos, ativou integração de produção ou inventou tarifas. Os testes usam banco temporário e transportes simulados.
+Revisão de **29/10/2026**. A loja mantém retirada e entrega local habilitadas e envio nacional desligado até a conferência operacional. O acesso Melhor Envio de produção foi validado em consultas reais, sem comprar etiquetas. O código possui três modos de frete; não existe tarifa nacional presumida.
 
-## Comportamento implementado
+## Configuração no painel
 
-- Retirada gratuita funciona independentemente da origem postal e dispensa consulta de CEP. Cidade/UF e WhatsApp da loja precisam estar cadastrados. O ponto de retirada pode ser combinado após o pagamento.
-- Entrega local gratuita exige CEP confirmado de Uberlândia/MG (município IBGE `3170206`). Cidade/UF digitadas não substituem a verificação. Prazo local vazio significa combinar, sem promessa automática de dias.
-- Envio nacional usa uma **tabela manual operacionalmente validada**, com transportadora, serviço, preço em centavos, prazo em dias úteis, data de conferência e ativação por macrorregião do IBGE. A loja precisa confirmar que o preço cobre todos os CEPs habilitados.
-- A administração cadastra origem de postagem privada (CEP, rua, número, complemento, bairro, cidade e UF), perfis de embalagens reais (peso total em gramas e medidas externas em centímetros), embalagem padrão e cobertura geral/regional por faixas de CEP.
-- Sem origem completa, embalagem padrão ativa ou tarifa comprovada para as regiões habilitadas, o servidor recusa ativar o nacional. Uma configuração antiga incompleta também não fornece preço nacional no checkout. Não existe preço/prazo alternativo presumido.
-- Mudanças em origem, embalagem, preço, serviço, prazo ou cobertura exigem nova confirmação explícita das tarifas ativas. O editor informa a configuração faltante e limpa a confirmação quando esses dados mudam.
-- A API pública remove endereço de postagem, perfis de embalagem, identificador da embalagem padrão e metadados internos de conferência. Esses dados permanecem na administração.
+Em `/admin/configuracoes`, a administração escolhe:
 
-## Cobertura, valores e falhas
+- **Melhor Envio:** consulta os serviços disponíveis para origem, destino, valor segurado e volumes calculados. O cliente escolhe a opção, e o servidor confere novamente antes de criar o pedido.
+- **Tabela por perfil/estado:** a base do estado substitui a regional; estados sem valor próprio herdam sua região. Bloquear um estado impede a herança. Cada volume custa base do destino + acréscimo do perfil; o pedido soma todos os volumes.
+- **Tabela regional anterior:** mantém o comportamento dos cadastros legados, com embalagem padrão e preço/prazo operacionalmente confirmados.
 
-As faixas usam oito dígitos e limites inclusivos. São ordenadas e não podem se sobrepor dentro da mesma lista. Faixas gerais e regionais restringem o mesmo destino; nenhuma amplia a cobertura da outra. Sem faixas numa região, a tarifa se aplica a todos os CEPs daquela região, razão pela qual a confirmação operacional é necessária.
+O CEP de origem preenche rua, bairro, cidade e UF via consulta limitada ao ViaCEP. Número e complemento são preservados e informados pela loja. Campos ausentes no CEP continuam editáveis, com aviso. Consultas antigas e respostas após sair da página são descartadas. O endereço de origem e os perfis permanecem privados da administração.
 
-O total considerado no mínimo de frete grátis é o valor dos produtos **depois dos descontos**. A promoção não ativa uma região desativada, um CEP fora da cobertura ou uma configuração incompleta. Preço regional vazio não vira zero; zero precisa ser informado e validado explicitamente. Mudança de endereço ou configuração gera novo cálculo; o cache guarda apenas a identificação do CEP, nunca uma tarifa.
+Perfis são configurados uma vez, com peso total embalado, medidas externas, capacidade, tipos atendidos e ativação. Não é necessário pesar ou preencher cada anúncio. Um perfil específico de ETB prevalece sobre um perfil genérico de selados. A quantidade dividida pela capacidade, arredondada para cima, determina o número de volumes. Carrinhos mistos somam perfis diferentes; acima de 20 volumes, ou sem perfil compatível, o envio fica indisponível. Isto é um agrupador por capacidade, não um empacotador tridimensional.
 
-A identificação usa ViaCEP com conferência de CEP, UF, município e IBGE, timeout e cache limitado. CEP inexistente, endereço incompatível ou serviço indisponível falha com mensagem específica. Uma falha de consulta não vira entrega local nem frete grátis. Retirada continua funcionando sem essa API.
+## Simulador, checkout e benefício
 
-Os perfis de embalagem registram dados operacionais; não implementam empacotamento tridimensional nem garantem que qualquer quantidade de produtos cabe na embalagem padrão. Antes de abrir uma cobertura nacional, a loja deve definir embalagens e tarifas compatíveis com os pedidos que aceitará e conferir o volume final antes da postagem. Etiquetas e custos adicionais por divergência não são calculados pelo módulo manual.
+O simulador na página do produto usa a versão e quantidade escolhidas, mesmo com carrinho vazio. O carrinho calcula o conjunto de itens. Troca de versão/quantidade/CEP invalida o resultado. As opções mostram transportadora, modalidade, preço e prazo recebido, sem prazo alternativo inventado.
 
-## Dados mínimos que o proprietário precisa fornecer
+O checkout envia apenas o identificador do serviço escolhido. Preço, classificação dos produtos, quantidades e embalagem vêm do banco no servidor; valores, pesos ou tipos forjados pelo cliente são ignorados. O pedido guarda a opção, transportadora, prazo, benefício e resumo de volumes. A opção integra a chave idempotente do pedido. CEP, cupom e modalidade invalidam a cotação na interface; serviço que deixou de existir exige nova escolha. Cotações idênticas possuem cache de dois minutos e requisições concorrentes compartilhadas; alterações nos volumes/destino/valor segurado mudam a chave.
 
-1. **Origem real:** CEP, rua, número, complemento quando houver, bairro, cidade e UF. A origem de postagem pode diferir do endereço público de atendimento.
-2. **Embalagens:** nome de cada perfil, peso total pronto para postagem, largura/altura/comprimento externos, embalagem padrão e limites operacionais de uso por pedido. Meça e pese um pacote real com cartas e proteções.
-3. **Transportadora e modalidade:** prestador/serviço utilizado, acesso autorizado, eventual contrato, agência ou ponto de postagem e documentação exigida pela transportadora.
-4. **Destinos:** regiões ou faixas reais de CEP atendidas, preço final a cobrar e prazo operacional em dias úteis. Se cobrar tabela fixa, inclua apenas destinos para os quais ela foi efetivamente conferida e indique a data dessa conferência.
-5. **Frete grátis:** mínimo desejado, capacidade de absorver o custo nos destinos habilitados e eventuais restrições de cobertura. O padrão de mínimo de R$ 150 pode ser alterado pelo administrador.
-6. **Operação local:** cidade/UF, WhatsApp, ponto/horário combinado de retirada e disponibilidade real da entrega em Uberlândia.
+O mínimo de frete grátis usa o valor dos produtos **após descontos**. Na cotação automática o benefício cobre a opção mais econômica; serviços superiores cobram somente a diferença mostrada. Na tabela própria, o frete do serviço configurado fica grátis. A promoção não amplia cobertura nem ativa um destino indisponível. O valor atual de **R$ 150** foi preservado e pode ser alterado, inclusive para R$ 200, pelo administrador.
 
-Não há cálculo responsável de uma tarifa universal por macrorregião sem CEP de origem/destino, peso, medidas e serviço. Nenhum preço estimado para Norte/Nordeste/Centro-Oeste/Sudeste/Sul foi incorporado à produção nesta etapa.
+Retirada gratuita independe de CEP e embalagem nacional. Entrega gratuita em Uberlândia exige CEP confirmado da cidade (IBGE 3170206); texto livre de cidade/UF não substitui a verificação. Prazo local vazio significa combinar pelo WhatsApp depois do pagamento. Falha na consulta de endereço não se transforma em entrega local.
 
-## Melhor Envio: viabilidade e limites reais
+## Melhor Envio: configuração e limites
 
-A documentação oficial oferece cotação e rastreio autenticados. Sandbox e produção têm contas e credenciais separadas; etiquetas de sandbox não servem para postagem. O acesso pede Bearer Token e User-Agent com aplicação e contato técnico. Serviços/transportadoras e agência de postagem dependem da conta operacional. A escolha é tecnicamente viável, mas precisa de configuração e homologação reais. [FAQ oficial](https://docs.melhorenvio.com.br/reference/faq).
+A credencial pessoal foi criada pelo titular com permissões **shipping-calculate** e **shipping-tracking**, guardada apenas no ambiente privado/Vercel Production. A validade informada pelo painel é 29/10/2027. Não estão autorizadas compra, emissão, pagamento ou cancelamento de etiquetas pelo código.
 
-A página comercial apresenta plano Free de R$ 0/mês e planos pagos opcionais. Isso não elimina o preço de cada envio, seguro, taxas ou eventuais ajustes por medidas divergentes. Nenhuma assinatura foi criada. Condições comerciais devem ser reconfirmadas no cadastro do titular. [Planos oficiais](https://lp.melhorenvio.com.br/assinaturas/).
-
-O código atual implementa **somente consulta autenticada no sandbox**. A instância de `server/shipping-provider.cjs` expõe `readiness()`, `quote()` e `tracking()`. O status declara `productionSupported:false`, `checkoutIntegrated:false` e `purchasesEnabled:false`. Não há compra, carrinho do provedor, emissão, cancelamento ou pagamento de etiquetas. O checkout comercial utiliza a tabela manual validada da BKM, e não este adaptador.
-
-Na auditoria local de `.env`, `.env.local` e `.env.sandbox`, não estavam configurados os seis campos de ativação/credencial abaixo. Somente presença/ausência foi verificada; segredos não foram impressos. Este levantamento não substitui uma auditoria de variáveis remotas da hospedagem.
+Produção usa `https://melhorenvio.com.br`, sandbox usa `https://sandbox.melhorenvio.com.br`. O ambiente é explícito, sem inferência pelo formato da chave. O checkout de produção rejeita sandbox. A origem usada pelo adaptador vem da configuração administrativa atual, substituindo eventual variável antiga de CEP.
 
 ```dotenv
 SHIPPING_PROVIDER=melhorenvio
 MELHOR_ENVIO_ENABLED=true
-MELHOR_ENVIO_ENVIRONMENT=sandbox
+MELHOR_ENVIO_ENVIRONMENT=production
 MELHOR_ENVIO_TOKEN=
+MELHOR_ENVIO_USER_AGENT=Nome da aplicação (contato@dominio.com.br)
 MELHOR_ENVIO_ORIGIN_ZIP=
-MELHOR_ENVIO_USER_AGENT=
+# Opcional: limitar IDs de serviços, separados por vírgula.
+MELHOR_ENVIO_SERVICES=
 ```
 
-Obtenha credenciais autorizadas do sandbox pelo titular e guarde-as somente no ambiente privado. Uma variável que informe `production` não habilita o adaptador; ele permanece bloqueado. Um token real não deve ser enviado ao sandbox, nem credencial de sandbox ao ambiente real.
+O adaptador possui `quote({zip,volumes,services})` e `tracking({orderIds})`; também preserva a cotação por produtos unitários para consumidores internos. Volumes usam `insurance`, e produtos unitários `insurance_value`, conforme o contrato oficial. Gramas são convertidos para kg; centavos para BRL. Retornos usam `custom_price` e `custom_delivery_time`. Redirecionamentos são recusados, timeout inclui leitura, JSON tem limite de 1 MB e respostas inválidas não viram ofertas. Erros em pacotes de um serviço impedem sua oferta. Falhas do provedor não ativam tabela alternativa inventada.
 
-## Contrato de consulta preparado para homologação
+O acesso gratuito à API não elimina o custo da postagem, seguro, adicionais ou divergência de peso/medidas. Não foi contratado plano nem comprado crédito. J&T e qualquer outra transportadora só aparecem se retornarem para aquela conta, rota e embalagem; não há garantia de disponibilização universal. A permissão de rastreio consulta IDs de etiquetas existentes; não cria etiqueta nem marca pedido como entregue automaticamente. O administrador mantém o registro do código e a comunicação ao cliente.
 
-`quote({zip,items,services})` aceita produtos com identificador, quantidade, preço unitário em centavos, peso em gramas e medidas em centímetros. Alternativamente, `quote({zip,volumes,services})` recebe de 1 a 20 volumes já embalados com peso total, dimensões externas e valor segurado total em centavos. Os formatos não podem ser misturados. O servidor converte gramas para kg e centavos para BRL. A API oficial diferencia produtos unitários de volumes prontos e orienta usar `custom_price` / `custom_delivery_time` para refletir configurações da conta. [Cotação oficial](https://docs.melhorenvio.com.br/reference/calculo-de-fretes-por-produtos).
+## Estado operacional e embalagens sugeridas
 
-O destino do adaptador é fixo em `https://sandbox.melhorenvio.com.br`, limitado a `/api/v2/me/shipment/calculate` e `/api/v2/me/shipment/tracking`. Redirects são recusados; timeout abrange requisição e leitura; JSON tem limite de 1 MB. Respostas inválidas, moeda diferente de BRL, preços com precisão incorreta, prazos ausentes e serviços inesperados são rejeitados. A falta de opção válida retorna ausência de opções, sem inventar serviço substituto.
+O proprietário informou o CEP de origem **38408-136**, confirmado em Uberlândia/MG. Rua/bairro/cidade/UF foram preenchidos privadamente; falta informar o número da origem. Dois perfis foram preparados como **rascunhos não confirmados**:
 
-Cotação retorna preço/prazo/fonte/data, `sandbox:true` e `contracted:false`. `tracking({orderIds})` consulta UUIDs de etiquetas existentes e preserva o status recebido; um status da etiqueta não altera automaticamente o pedido para enviado/entregue. O rastreio real e a compra de etiquetas continuam fora desta integração.
+| Uso proposto | Medidas externas L × A × C | Peso usado somente na simulação | Capacidade proposta |
+|---|---|---|---|
+| Cartas protegidas | 15 × 4 × 20 cm | 300 g | Até 20 cartas, sujeito ao teste de encaixe com proteções |
+| Uma ETB/booster box padrão | 25 × 15 × 30 cm | 2.000 g | Uma unidade que efetivamente caiba com proteção |
 
-## O que falta para automatizar o frete nacional real
+São propostas de compra de caixas retangulares, não medições de mercadoria existente. Confira **medidas externas**, espaço interno e proteção antes de comprar um lote. Uma box de coleção maior, playmat, lote ou item fora desses limites precisa de perfil próprio. Não confirme peso/capacidade sem pesar um pacote completo. Os pesos simulados não provam que a operação está pronta, portanto o nacional permanece desligado e `packingProfilesValidated=false`.
 
-1. Fornecer os dados operacionais listados acima e escolher a conta/serviços autorizados.
-2. Homologar no sandbox autenticação, produtos/volumes, serviços, opções indisponíveis, reajustes, erros, rastreio e documentos exigidos.
-3. Implementar e homologar separadamente o ambiente de produção com credencial própria, cotações obtidas de produtos/embalagens do banco, validade da oferta e recálculo no servidor antes de confirmar o pedido.
-4. Persistir serviço, preço, prazo, volume e identificação da cotação por pedido. Definir tratamento de mudança de endereço, divergência de medidas, seguro e falha do provedor.
-5. Se desejado, implementar compra de etiquetas com autorização explícita, controle financeiro, idempotência e auditoria. Cotação e rastreio disponíveis não provam que uma etiqueta pode ser comprada/postada.
+A caixa pequena respeita a faixa dimensional publicada para Mini Envios (máximo 4 × 16 × 24 cm e 300 g), mas elegibilidade depende também de valor segurado, rota e retorno do serviço. Mini Envios tem rastreio parcial; não o apresente como rastreio de todas as etapas. A caixa maior não atende Mini Envios. [Regras oficiais de Mini Envios](https://centraldeajuda.melhorenvio.com.br/hc/pt-br/articles/31220431326356-Como-funciona-a-modalidade-Mini-Envios-dos-Correios), [limites por transportadora](https://centraldeajuda.melhorenvio.com.br/hc/pt-br/articles/31220431416852-Qual-formato-e-tamanho-o-meu-volume-pode-ter).
 
-## Testes executados nesta etapa
+Foram executadas quatro cotações **reais na API de produção**, saindo do CEP informado para CEPs públicos de São Paulo e Recife, com os dois pacotes simulados. Houve opções de Correios, Jadlog, Loggi e outras transportadoras; isso valida a conexão e o contrato técnico, não o peso físico nem um prazo universal por estado. Nenhum desses preços foi cadastrado como tarifa fixa.
 
-`node --require ./scripts/test-network.cjs --test tests/shipping-policy.test.cjs tests/shipping-provider.test.cjs tests/shipping-admin.test.cjs`
+## Para liberar o envio nacional
 
-**28 testes aprovados**, com rede externa bloqueada: cinco regiões, descontos antes do mínimo grátis, CEP/UF/IBGE autoritativos, retirada offline, entrega local, prazo local não prometido, alteração de destino, cache, falhas da API, CEPs inclusivos/sobrepostos/fora de cobertura, origem/embalagem/data/serviço inválidos, reconfirmação operacional, DTO/API públicos sem dados privados, gravação/leitura na API com SQLite isolado, fixture de homologação financeira por retirada sem tarifa nacional fictícia, parsers do painel, produtos/volumes sandbox, valores personalizados, moeda/resposta inválida, HTTP 401/403/422/429/503, redirects, limite de corpo, timeout e rastreio.
+1. Informar o número da origem (e complemento se necessário).
+2. Comprar/testar as embalagens e conferir peso total, medidas externas e capacidade com os itens e proteções reais. Ajustar perfis para produtos que não caibam.
+3. Conferir serviços disponíveis e local de postagem da transportadora escolhida, documentação e rotina de compra de etiquetas no painel Melhor Envio.
+4. Confirmar os perfis e data no painel, ativar nacional, cotar os produtos reais e conferir o primeiro envio. A seleção do cliente não compra postagem automaticamente.
+5. Se optar por tabela própria, fornecer e confirmar preços/prazos por UF/região e cobertura. A integração automática dispensa essa tabela.
 
-Esses testes não contratam frete nem validam uma tarifa comercial. A operação nacional permanece dependente dos dados e da conferência do proprietário.
+## Testes
+
+Suíte completa desta entrega: **443 testes aprovados**, incluindo SQLite/PostgreSQL, regras por estado/região e fronteiras de CEP, retirada/local, descontos e limiar, capacidades e carrinho misto, campos do cliente forjados, concorrência/cache, serviço selecionado/persistência/idempotência, falha/timeout/resposta inválida, sandbox em produção, CEP automático e respostas antigas, interface de opções e sucesso de cadastro. Há testes de navegador isolados; a compra comercial de R$ 10 continua sendo uma operação real do titular/comprador.
+
+Fontes técnicas: [introdução/API](https://docs.melhorenvio.com.br/reference/introducao-api-melhor-envio), [cotação](https://docs.melhorenvio.com.br/reference/calculo-de-fretes-por-produtos), [sandbox](https://docs.melhorenvio.com.br/docs/sandbox), [autenticação](https://docs.melhorenvio.com.br/docs/autenticacao).

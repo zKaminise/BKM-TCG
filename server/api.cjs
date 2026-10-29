@@ -10,7 +10,7 @@ const { PaymentError, paymentReadiness } = require("./payments.cjs");
 const { allowedOrigins, safeReturnPath } = require('./domain-policy.cjs');
 const { EMAIL_JOB_PATH, emailJobAuthorized, createEmailJob } = require('./email-job.cjs');
 const { COMMERCE_JOB_PATH, createCommerceJob } = require('./commerce-job.cjs');
-const {shippingSettings,validateShippingSettings,hasConfiguredShipping,createShippingPolicy,publicShippingSettings,REGION_STATES}=require('./shipping-policy.cjs');
+const {shippingSettings,validateShippingSettings,hasConfiguredShipping,createShippingPolicy,publicShippingSettings,operationalShippingReadiness,REGION_STATES}=require('./shipping-policy.cjs');
 const {normalizeVariantAttributes,attributesFromRow,variantIdentity}=require('./variant-attributes.cjs');
 const uid = () => crypto.randomUUID();
 const now = () => (/* @__PURE__ */ new Date()).toISOString();
@@ -91,7 +91,7 @@ function createApi(options = {}) {
   const effectiveEnv = { ...env, BKM_ENVIRONMENT: env.BKM_ENVIRONMENT || (env.VERCEL ? '' : 'demo'), PAYMENT_PROVIDER: env.PAYMENT_PROVIDER || 'mock' };
   const demo = effectiveEnv.BKM_ENVIRONMENT === 'demo';
   const demoPayments = demo && effectiveEnv.PAYMENT_PROVIDER === 'mock';
-  const shippingPolicy=createShippingPolicy({ApiError,fetchImpl:options.shippingFetch,production:effectiveEnv.BKM_ENVIRONMENT==='production'});
+  const shippingPolicy=createShippingPolicy({ApiError,fetchImpl:options.shippingFetch,carrierFetch:options.shippingProviderFetch,env:effectiveEnv,production:effectiveEnv.BKM_ENVIRONMENT==='production'});
   const db = openStore({ ...options, env });
   const customerProfile = require('./customer-profile.cjs').createCustomerProfile({db,ApiError,hashPassword,verifyPassword});
   const google = require('./google-auth.cjs').createGoogleAuth({db,env:{...effectiveEnv,BKM_PUBLIC_URL:publicUrl},fetchImpl:options.googleFetch});
@@ -135,7 +135,7 @@ function createApi(options = {}) {
     s.google=google.readiness();
     const payment = paymentReadiness(effectiveEnv);
     const available=payment.enabled && (demoPayments || !s.demoDataVersion);
-    return { ...s, shipping:publicShippingSettings(s.shipping), passwordPolicy:PASSWORD_POLICY, freeShippingThresholdCents: s.shipping.freeShippingEnabled ? s.shipping.freeShippingThresholdCents : null, environment: effectiveEnv.BKM_ENVIRONMENT || 'unconfigured',demo,paymentConfigured:available, shippingConfigured:hasConfiguredShipping(s.shipping,{production:effectiveEnv.BKM_ENVIRONMENT==='production'}), payments:{available,provider:payment.provider,environment:payment.environment,demo:payment.demo,canCharge:available && payment.canCharge,reason:!demo && s.demoDataVersion?'O banco demonstrativo não aceita cobranças externas.':payment.reason,...(available && payment.provider==='mercadopago'?{publicKey:effectiveEnv.MERCADO_PAGO_PUBLIC_KEY}:{})} };
+    return { ...s, shipping:publicShippingSettings(s.shipping), passwordPolicy:PASSWORD_POLICY, freeShippingThresholdCents: s.shipping.freeShippingEnabled ? s.shipping.freeShippingThresholdCents : null, environment: effectiveEnv.BKM_ENVIRONMENT || 'unconfigured',demo,paymentConfigured:available, shippingConfigured:hasConfiguredShipping(s.shipping,{production:effectiveEnv.BKM_ENVIRONMENT==='production',env:effectiveEnv}), payments:{available,provider:payment.provider,environment:payment.environment,demo:payment.demo,canCharge:available && payment.canCharge,reason:!demo && s.demoDataVersion?'O banco demonstrativo não aceita cobranças externas.':payment.reason,...(available && payment.provider==='mercadopago'?{publicKey:effectiveEnv.MERCADO_PAGO_PUBLIC_KEY}:{})} };
   }
   function limit(req, scope, max, windowMs = 15 * 60 * 1e3) {
     const key = `${req.socket?.remoteAddress || "serverless"}:${scope}`;
@@ -360,7 +360,7 @@ function createApi(options = {}) {
     const items = [];
     let subtotalCents = 0;
     for (const [variantId, quantity] of [...counts].sort(([a],[b])=>a.localeCompare(b))) {
-      const v = (await db.prepare("SELECT v.*,m.attributes_json,p.name,p.slug,p.sku,p.images_json,p.published,p.archived FROM variants v JOIN products p ON p.id=v.product_id LEFT JOIN variant_metadata m ON m.variant_id=v.id WHERE v.id=? AND v.active=1" + (lock && db.engine==='postgres'?' FOR UPDATE OF v':'')).get(variantId));
+      const v = (await db.prepare("SELECT v.*,m.attributes_json,p.kind,p.attributes_json product_attributes_json,p.name,p.slug,p.sku,p.images_json,p.published,p.archived FROM variants v JOIN products p ON p.id=v.product_id LEFT JOIN variant_metadata m ON m.variant_id=v.id WHERE v.id=? AND v.active=1" + (lock && db.engine==='postgres'?' FOR UPDATE OF v':'')).get(variantId));
       if (!v || !v.published || v.archived) throw new ApiError(409, "PRODUCT_UNAVAILABLE", "Um produto do carrinho não está mais disponível.", { variantId });
       const reserved = (await db.prepare("SELECT COALESCE(SUM(quantity),0) q FROM inventory_reservations WHERE variant_id=? AND status='ACTIVE' AND expires_at>?").get(variantId, Date.now())).q;
       const available = Math.max(0, v.stock - reserved);
@@ -368,7 +368,7 @@ function createApi(options = {}) {
       const totalCents = v.price_cents * quantity;
       subtotalCents += totalCents;
       if (!Number.isSafeInteger(subtotalCents) || subtotalCents > 1e9) fail("CART_LIMIT", "O valor do carrinho excede o limite.");
-      items.push({ variantId, productId: v.product_id, name: v.name, slug: v.slug, sku: v.sku, image: JSON.parse(v.images_json)[0] || null, language: v.language, condition: v.condition, finish: v.finish, attributes:attributesFromRow(v), quantity, priceCents: v.price_cents, unitPriceCents: v.price_cents, totalCents, availableStock: available });
+      items.push({ variantId, productId: v.product_id, kind:v.kind, productAttributes:JSON.parse(v.product_attributes_json||'{}'), name: v.name, slug: v.slug, sku: v.sku, image: JSON.parse(v.images_json)[0] || null, language: v.language, condition: v.condition, finish: v.finish, attributes:attributesFromRow(v), quantity, priceCents: v.price_cents, unitPriceCents: v.price_cents, totalCents, availableStock: available });
     }
     let discountCents = 0, coupon2 = null;
     if (data.coupon) {
@@ -381,10 +381,10 @@ function createApi(options = {}) {
     }
     const saved=await settings(),s=saved.shipping;
     const net = subtotalCents - discountCents;
-    const shipping=await shippingPolicy.quote({settings:s,netCents:net,cep:data.cep || data.address?.zip || data.address?.postalCode,deliveryMode:data.deliveryMode || data.shippingMethod || data.shipping?.deliveryMode || data.shipping?.method || 'delivery',address:data.address});
+    const shipping=await shippingPolicy.quote({settings:s,netCents:net,items,shippingOptionId:data.shippingOptionId||data.shipping?.optionId||null,cep:data.cep || data.address?.zip || data.address?.postalCode,deliveryMode:data.deliveryMode || data.shippingMethod || data.shipping?.deliveryMode || data.shipping?.method || 'delivery',address:data.address});
     const {shippingCents,reason}=shipping;
     const payment=paymentReadiness(effectiveEnv),paymentAvailable=payment.enabled && (demoPayments || !saved.demoDataVersion);
-    return { items, subtotalCents, discountCents, shippingCents, totalCents: shippingCents == null ? null : net + shippingCents, coupon: coupon2, errors: [], shipping: {...shipping,demo:demo || !!saved.demoDataVersion}, paymentAvailable, demo, environment:effectiveEnv.BKM_ENVIRONMENT || 'unconfigured', reason:reason || (paymentAvailable ? payment.reason : 'Pagamentos indisponíveis neste ambiente.') };
+    return { items, subtotalCents, discountCents, shippingCents, totalCents: shippingCents == null ? null : net + shippingCents, coupon: coupon2, errors: [], shipping: {...shipping,demo:shipping.demo===true || demo || !!saved.demoDataVersion}, paymentAvailable, demo, environment:effectiveEnv.BKM_ENVIRONMENT || 'unconfigured', reason:reason || (paymentAvailable ? payment.reason : 'Pagamentos indisponíveis neste ambiente.') };
   }
   async function saveSettings(data, user) {
     const current = await settings(), result = { ...current };
@@ -405,9 +405,9 @@ function createApi(options = {}) {
       });
     }
     if (data.shipping) {
-      result.shipping = validateShippingSettings(data.shipping,current.shipping,{fail,store:result});
+      result.shipping = validateShippingSettings(data.shipping,current.shipping,{fail,store:result,env:effectiveEnv});
     }
-    else if(['address','city','state','whatsapp'].some(key=>key in data))result.shipping=validateShippingSettings({},current.shipping,{fail,store:result});
+    else if(['address','city','state','whatsapp'].some(key=>key in data))result.shipping=validateShippingSettings({},current.shipping,{fail,store:result,env:effectiveEnv});
     await transaction(db, async () => {
       (await db.prepare("UPDATE settings SET value_json=?,updated_at=? WHERE id=1").run(JSON.stringify(result), now()));
       await audit(user.id, "SETTINGS_UPDATED", "store", { fields: Object.keys(data) });
@@ -510,6 +510,12 @@ function createApi(options = {}) {
         return respond(200, session ? { user: publicUser(session.user), csrfToken: session.csrf_token } : await newSession(res));
       }
       if (method === "GET" && pathname === "/api/config") return respond(200, await config());
+      if(method==='GET'&&pathname==='/api/shipping/address'){
+        limit(req,'shipping-address',60,60000);
+        const cep=query.get('cep');
+        if(query.getAll('cep').length!==1||!/^\d{8}$/.test(cep||'')||cep==='00000000')throw new ApiError(422,'INVALID_CEP','Informe um CEP com oito números.');
+        return respond(200,{address:await shippingPolicy.destination(cep)});
+      }
       if (method === 'GET' && pathname === '/api/collections') return respond(200,await collections.list(query));
       if (method === "GET" && pathname === "/api/products") return respond(200, await listProducts(query));
       if (method === "GET" && /^\/api\/products\/[^/]+$/.test(pathname)) {
@@ -582,7 +588,7 @@ function createApi(options = {}) {
         });
         return respond(200,{message:'Senha atualizada. Entre novamente com sua nova senha.'});
       }
-      if (method === "POST" && pathname === "/api/checkout/quote") { if(orders.expireDue)await orders.expireDue();return respond(200, await quote(await readJson(req))); }
+      if (method === "POST" && pathname === "/api/checkout/quote") { limit(req,'shipping-quote',60,60000);if(orders.expireDue)await orders.expireDue();return respond(200, await quote(await readJson(req))); }
       if (method === "POST" && pathname === "/api/checkout") {
         const user=auth(session),created=await orders.create(await readJson(req),user);
         await notifications.markCartConverted(user.id);await flushSafely();
@@ -678,8 +684,8 @@ function createApi(options = {}) {
         }
         if(pathname==='/api/admin/integrations' && method==='GET') {
           const counts=await db.prepare("SELECT COUNT(*) count FROM personal_wishlist WHERE enabled=1").get();
-          const storeSettings=await settings(),configured=hasConfiguredShipping(storeSettings.shipping,{production:effectiveEnv.BKM_ENVIRONMENT==='production'});
-          return respond(200,{google:google.readiness(),email:require('./email.cjs').emailReadiness(effectiveEnv),payments:paymentReadiness(effectiveEnv),publicUrl,prices:{provider:'admin_manual',automatic:false,automaticBrazilian:false,automaticInternational:true,international:{provider:'tcgdex',currencies:['EUR','USD'],conditionAdjusted:false},reason:'TCGdex automático em EUR/USD, sem ajuste por conservação ou idioma de mercado. Referências em BRL continuam manuais; integração brasileira automática pendente de fonte autorizada.'},wishlist:{subscriptions:counts.count},abandonedCart:{enabled:false},shipping:{provider:'store_regional',environment:effectiveEnv.BKM_ENVIRONMENT,configured,enabled:configured,mode:'regional_rates_manual_fulfillment',reason:configured?'Tarifas e modalidades definidas pela loja; postagem e rastreio registrados pela administração.':'Configure tarifas regionais, retirada ou entrega local antes de aceitar pedidos.',carrierIntegration:require('./shipping-provider.cjs').shippingReadiness(effectiveEnv)}});
+          const storeSettings=await settings(),configured=hasConfiguredShipping(storeSettings.shipping,{production:effectiveEnv.BKM_ENVIRONMENT==='production',env:effectiveEnv});
+          return respond(200,{google:google.readiness(),email:require('./email.cjs').emailReadiness(effectiveEnv),payments:paymentReadiness(effectiveEnv),publicUrl,prices:{provider:'admin_manual',automatic:false,automaticBrazilian:false,automaticInternational:true,international:{provider:'tcgdex',currencies:['EUR','USD'],conditionAdjusted:false},reason:'TCGdex automático em EUR/USD, sem ajuste por conservação ou idioma de mercado. Referências em BRL continuam manuais; integração brasileira automática pendente de fonte autorizada.'},wishlist:{subscriptions:counts.count},abandonedCart:{enabled:false},shipping:{provider:storeSettings.shipping.rateMode==='melhorenvio'?'melhorenvio':'store_validated_manual',environment:effectiveEnv.BKM_ENVIRONMENT,configured,enabled:configured,mode:storeSettings.shipping.rateMode,national:operationalShippingReadiness(storeSettings.shipping),reason:storeSettings.shipping.enabled?'Envio nacional habilitado conforme a configuração operacional; etiquetas e postagem são gerenciadas pela loja.':configured?'Envio nacional desligado. Retirada ou entrega local disponíveis conforme a configuração.':'Configure o frete, retirada ou entrega local antes de aceitar pedidos.',carrierIntegration:require('./shipping-provider.cjs').shippingReadiness({...effectiveEnv,MELHOR_ENVIO_ORIGIN_ZIP:storeSettings.shipping.origin.zip})}});
         }
         if(pathname==='/api/admin/collections' && method==='GET') return respond(200,await collections.list(query));
         if(pathname==='/api/admin/collections' && method==='POST') return respond(201,await collections.save(await readJson(req),user));

@@ -1,16 +1,16 @@
 # BKM TCG — inventário funcional do site
 
-Revisão de **28/10/2026**. Este inventário separa funcionalidades implementadas, configurações efetivas e provas que ainda dependem de operação real. Relatórios datados de fases anteriores são históricos; não descrevem sozinhos o estado atual.
+Revisão de **29/10/2026**. Este inventário separa funcionalidades implementadas, configurações efetivas e provas que ainda dependem de operação real. Relatórios datados de fases anteriores são históricos; não descrevem sozinhos o estado atual.
 
 ## Loja pública
 
 | Área | O que existe | Limite ou ação operacional |
 |---|---|---|
 | Identidade e início | Logo BKM, tema preto/vermelho/ciano/prata, navegação responsiva, animação 3D de abertura do booster e revelação da carta | Conteúdo e estoque comercial dependem dos cadastros reais do administrador |
-| Catálogo | Cartas avulsas e lacrados, busca, filtros, ordenação, páginas por coleção e aliases | Os 16 anúncios de demonstração foram arquivados; não representam mercadoria disponível |
+| Catálogo | Cartas avulsas e lacrados, busca, filtros, ordenação, páginas por coleção e aliases, conservação visível no card | Os 16 anúncios de demonstração foram arquivados; não representam mercadoria disponível |
 | Produto | Cartas, selados e personalizados; fotos próprias por upload/link e de referência identificadas, ampliação, descrição, variantes de idioma/condição/acabamento/atributos, preço e disponibilidade | Administrador deve conferir a unidade física e cadastrar sua quantidade real |
 | Carrinho e favoritos | Adicionar/remover/alterar quantidade, drawer, persistência por conta e reconciliação de favoritos arquivados | Carrinho não reserva o estoque |
-| Cupons e frete | Cupons, mínimo de frete grátis editável e barra de progresso; painel com origem privada, embalagens reais, faixas de CEP, transportadora/serviço, preço, prazo e confirmação por região | Envio nacional com `shipping.enabled=false`: não houve cotação operacional válida. Retirada e entrega local têm ativação independente e foram preservadas |
+| Cupons e frete | Cupons, mínimo de frete grátis editável e barra de progresso; painel com origem privada, embalagens reais, faixas de CEP, transportadora/serviço, preço, prazo e confirmação por região | Envio nacional com `shipping.enabled=false`: a origem foi iniciada pelo CEP informado e a API Melhor Envio foi validada em produção, mas os pesos/capacidades ainda não foram medidos. Retirada e entrega local têm ativação independente e foram preservadas |
 | Uberlândia | Retirada gratuita e entrega local gratuita quando habilitadas; CEP local conferido; contato por WhatsApp depois do pagamento | Ponto e horário são combinados pelo atendimento |
 | Conteúdo institucional | Atendimento, perguntas frequentes, envio, devoluções, privacidade e termos | Razão social/CNPJ e endereço/horários definitivos ainda não foram fornecidos |
 
@@ -74,9 +74,12 @@ O painel de logística informa o que falta antes de habilitar cada região. Alte
 ## Pendências reais por prioridade
 
 1. **Primeira compra real:** publicar o produto físico de R$ 10,00, testar com o amigo, conferir pagamento/valor líquido, os e-mails por etapa, aviso administrativo e retirada. Código e credenciais não substituem essa prova.
-2. **Logística nacional:** fornecer endereço completo da origem (CEP, rua, número, bairro, cidade/UF), nomes e peso total embalado/medidas externas das embalagens, embalagem padrão, transportadora/serviço operacional, regiões/faixas de CEP atendidas e preços/prazos conferidos; definir a promoção de frete grátis e ativar as regiões somente depois dessa conferência. O adaptador Melhor Envio consulta sandbox por API autorizada, não está ligado ao checkout, não cota produção nem compra etiquetas. Conta, credenciais e serviços reais ainda precisam ser configurados e validados para uma integração de produção.
+2. **Logística nacional:** fornecer endereço completo da origem (CEP, rua, número, bairro, cidade/UF), nomes e peso total embalado/medidas externas das embalagens, embalagem padrão, transportadora/serviço operacional, regiões/faixas de CEP atendidas e preços/prazos conferidos; definir a promoção de frete grátis e ativar as regiões somente depois dessa conferência. A integração Melhor Envio agora cota produção, permite escolha no checkout e preserva o serviço no pedido; credencial de cotação/rastreio validada e salva privadamente. Quatro cotações reais com embalagens simuladas comprovaram a conexão. A API não compra etiquetas. Faltam número da origem e conferência dos pesos/capacidades reais dos dois perfis sugeridos; nacional permanece desligado. Consulte LOGISTICA.md.
 3. **Preço brasileiro automático e por condição:** obter uma fonte/API autorizada com cobertura e identidade exatas. Não há integração licenciada configurada com a Liga Pokémon; referências manuais são identificadas e nunca viram cotação oficial. A integração TCGdex implementada fornece referências internacionais separadas em EUR/USD e não supre a ausência de preços brasileiros ou ajuste por conservação.
 4. **Dados comerciais e conteúdo final:** informar razão social/CNPJ e dados definitivos de retirada/atendimento quando existirem; revisar políticas e conteúdo conforme a operação real.
 5. **Aquisição e continuidade:** liberar/configurar SEO público, instituir backups/retencão/cópia separada, monitoramento e testar os caminhos externos restantes de Google/alertas/disputas/reembolso parcial antes de depender deles operacionalmente.
 
 Essas pendências não impedem o uso privado da coleção ou o teste de compra com retirada descrito no [guia operacional](OPERACAO-PRODUCAO.md). Não representam promessa de cotação nacional, liquidação financeira, prazo de transportadora ou SLA que não tenha sido comprovado.
+
+
+Ajustes desta entrega: tela de conclusão após cadastro/salvamento; códigos de conservação no catálogo; CEP automático na origem; perfis, tabela por UF com herança regional e Melhor Envio integrado ao simulador/checkout. 443 testes aprovados. Detalhes e tamanhos de embalagem propostos em [Logística](LOGISTICA.md).

@@ -39,3 +39,9 @@ Condição, idioma, acabamento e atributos seguem até a página do produto, o c
 - Produtos de QA não foram publicados no banco principal. Nenhuma cobrança real ou contratação de frete foi feita. O teste comercial de R$ 10 com o amigo continua sendo uma compra real a executar pelo titular.
 
 A migração 010 adiciona CUSTOM, sequência de SKU, metadados de variantes e autorizações de fallback. Preserva IDs e referências existentes, com RLS nas novas tabelas PostgreSQL. Um backup criptografado do banco principal foi gerado antes da mudança; a publicação deve conferir a preservação de produtos, variantes, pedidos, movimentos e reservas.
+
+## Ajustes de 29/10/2026
+
+Depois de cadastrar ou salvar, a administração vê uma tela de conclusão baseada na publicação real retornada pelo servidor: produto publicado ou rascunho salvo. Ela mostra SKU, preço e unidades e oferece Ver anúncio, Cadastrar outro, Ver todos e Editar. O formulário não reabre automaticamente. O catálogo público agora exibe os códigos de conservação das cartas, com nome acessível e indicação de versão esgotada, antes de abrir o produto.
+
+A suíte foi ampliada para 443 testes aprovados. O novo fluxo de frete, CEP automático e limites operacionais estão documentados em [Logística](LOGISTICA.md).

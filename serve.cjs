@@ -8,7 +8,7 @@ const mime = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=u
 function createServer(options = {}) {
   const root = options.root || __dirname;
   const api = createApi({ ...options, root });
-  const publicFiles = /* @__PURE__ */ new Set(["index.html", "styles.css", "app.js", "store.js", "personal-ui.js", "collection-ui.js", "collection-domain.js", "collection.css", "password-ui.js", "password-ui.css", "shipping-admin-ui.js", "shipping-admin.css", "admin-product-ui.js", "admin-product.css", "product-labels.js", "store.css", "ABRIR.html", "favicon.ico", "robots.txt", "sitemap.xml"]);
+  const publicFiles = /* @__PURE__ */ new Set(["index.html", "styles.css", "app.js", "store.js", "personal-ui.js", "collection-ui.js", "collection-domain.js", "collection.css", "password-ui.js", "password-ui.css", "shipping-ui.js", "shipping-admin-ui.js", "shipping-admin.css", "admin-product-ui.js", "admin-product.css", "product-labels.js", "store.css", "ABRIR.html", "favicon.ico", "robots.txt", "sitemap.xml"]);
   const server = http.createServer(async (req, res) => {
     if (!/^(?:127\.0\.0\.1|localhost)(?::\d{1,5})?$/.test(req.headers.host || "")) {
       res.writeHead(400);
