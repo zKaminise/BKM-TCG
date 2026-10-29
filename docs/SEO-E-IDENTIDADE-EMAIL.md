@@ -17,11 +17,11 @@ O mínimo necessário para o robô é entregue igualmente a usuários; não há 
 
 ## Verificação e descoberta no Google
 
-O site estará tecnicamente elegível após a publicação desses arquivos, mas a decisão e o tempo de rastreamento/indexação pertencem ao Google. Não há garantia de primeira posição ou de aparecer imediatamente ao pesquisar “cartas Pokémon”.
+O site está tecnicamente elegível após a publicação desses arquivos, mas a decisão e o tempo de rastreamento/indexação pertencem ao Google. Não há garantia de primeira posição ou de aparecer imediatamente ao pesquisar “cartas Pokémon”.
 
-O proprietário pode adicionar uma propriedade no [Google Search Console](https://search.google.com/search-console/), verificar o domínio ou o prefixo HTTPS e enviar `https://lojabkm.com.br/sitemap.xml`. O servidor aceita opcionalmente `GOOGLE_SITE_VERIFICATION` em Production para a verificação por meta tag; o valor vem do Search Console, não deve ser inventado. Foi preparado o prefixo https://lojabkm.com.br/ no Search Console do titular, com metatag pública no HTML. A confirmação final da propriedade ainda precisa ser concluída pelo titular; nenhuma delegação a outro usuário foi criada.
+O prefixo `https://lojabkm.com.br/` foi verificado pelo titular no [Google Search Console](https://search.google.com/search-console/), com metatag pública permanente no HTML. O sitemap `https://lojabkm.com.br/sitemap.xml` foi enviado e processado pelo Google, com 13 páginas encontradas. As solicitações individuais de indexação da home e do produto real `/produto/exeggcute` foram aceitas na fila de rastreamento prioritário. Nenhuma delegação a outro usuário foi criada. Isso não significa que as páginas já estejam indexadas. O servidor também aceita opcionalmente `GOOGLE_SITE_VERIFICATION` em Production; o valor deve vir do Search Console.
 
-Depois da verificação, use Inspeção de URL na home e em um produto real e confira o resultado renderizado. O desenvolvimento contínuo de páginas úteis, estoque real, descrições precisas e referências legítimas à loja contribui para a descoberta; isso não foi convertido em promessa de posicionamento.
+As inspeções da home e do produto foram concluídas, com aceitação das solicitações após o teste do URL publicado. Acompanhe os relatórios de indexação e desempenho sem repetir a solicitação da mesma página: isso não melhora sua prioridade. O desenvolvimento contínuo de páginas úteis, estoque real, descrições precisas e referências legítimas à loja contribui para a descoberta; isso não foi convertido em promessa de posicionamento.
 
 Fontes: [SEO e JavaScript — Google](https://developers.google.com/search/docs/crawling-indexing/javascript/javascript-seo-basics), [sitemaps — Google](https://developers.google.com/search/docs/crawling-indexing/sitemaps/overview), [regras de dados estruturados — Google](https://developers.google.com/search/docs/appearance/structured-data/sd-policies).
 
