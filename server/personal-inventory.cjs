@@ -5,6 +5,8 @@
 // separate native-currency metadata. Store products supply identity snapshots.
 const crypto = require('node:crypto');
 const {selectInternationalMarket,internationalTotals}=require('./tcgdex-market.cjs');
+const {selectMypReference}=require('./mypcards-market.cjs');
+const LOCAL_VALUATION=Symbol('localValuation');
 const LANGUAGES = ['pt','en','ja','zh-tw','zh-cn','ko','es','fr','de','it','th','id'];
 const CONDITIONS = ['M','NM','SP','MP','HP','D','LP','DMG','SEALED','OPENED','CUSTOM'];
 const VARIANTS = ['NORMAL','HOLO','REVERSE','PROMO','FIRST_EDITION','POKE_BALL','MASTER_BALL','OTHER'];
@@ -29,7 +31,7 @@ function safeImageUrl(value) {
 }
 
 function collectionMetrics(items) {
-  const result={quantity:0,uniqueCards:0,estimatedValueCents:0,knownValueQuantity:0,unpricedQuantity:0,paidCents:0,paidQuantity:0,unknownCostQuantity:0,staleQuantity:0,comparableQuantity:0,comparableCostCents:0,comparableValueCents:0,unrealizedGainCents:0,unrealizedGainPercent:null,coveragePercent:0,partial:false,currency:'BRL',byKind:[],sales:{quantity:0,knownAmountQuantity:0,unknownAmountQuantity:0,amountCents:0,comparableQuantity:0,costCents:0,realizedGainCents:0,realizedGainAvailable:false},archivedQuantity:0};
+  const result={quantity:0,uniqueCards:0,estimatedValueCents:0,knownValueQuantity:0,brazilianAggregateQuantity:0,estimateIncludesAggregates:false,unpricedQuantity:0,paidCents:0,paidQuantity:0,unknownCostQuantity:0,staleQuantity:0,comparableQuantity:0,comparableCostCents:0,comparableValueCents:0,unrealizedGainCents:0,unrealizedGainPercent:null,coveragePercent:0,partial:false,currency:'BRL',byKind:[],sales:{quantity:0,knownAmountQuantity:0,unknownAmountQuantity:0,amountCents:0,comparableQuantity:0,costCents:0,realizedGainCents:0,realizedGainAvailable:false},archivedQuantity:0};
   const identities=new Set(),kinds=new Map();
   for(const item of items){
     const quantity=item.quantity;
@@ -46,13 +48,15 @@ function collectionMetrics(items) {
     let category=kinds.get(item.kind);if(!category){category={kind:item.kind,quantity:0,paidCents:0,estimatedValueCents:0,knownValueQuantity:0};kinds.set(item.kind,category);}category.quantity+=quantity;
     if(item.paidCents!==null){result.paidCents+=item.paidCents*quantity;result.paidQuantity+=quantity;category.paidCents+=item.paidCents*quantity;}else result.unknownCostQuantity+=quantity;
     const quote=item.valuation;
-    if(quote?.stale)result.staleQuantity+=quantity;
-    if(quote&&!quote.stale&&quote.currency==='BRL'&&quote.match==='EXACT'){
+    const brazilian=item.brazilianMarket,staleBrazilian=!quote&&brazilian?.status==='MATCHED'&&brazilian.match==='PRINTING_EXACT'&&brazilian.stale&&Number.isSafeInteger(brazilian.avgPriceCents)&&brazilian.avgPriceCents>0&&['NORMAL','HOLO','REVERSE'].includes(item.variant)&&!item.attributes?.length;
+    if(quote?.stale||staleBrazilian)result.staleQuantity+=quantity;
+    if(quote&&!quote.stale&&quote.currency==='BRL'&&(quote.match==='EXACT'||quote.match==='PRINTING_EXACT'&&quote.aggregate===true&&quote.usableForBrlValuation===true)){
       result.knownValueQuantity+=quantity;result.estimatedValueCents+=quote.valueCents*quantity;category.estimatedValueCents+=quote.valueCents*quantity;category.knownValueQuantity+=quantity;
+      if(quote.source==='mypcards')result.brazilianAggregateQuantity+=quantity;
       if(item.paidCents!==null){result.comparableQuantity+=quantity;result.comparableCostCents+=item.paidCents*quantity;result.comparableValueCents+=quote.valueCents*quantity;}
     }
   }
-  result.uniqueCards=identities.size;result.byKind=[...kinds.values()];result.unpricedQuantity=result.quantity-result.knownValueQuantity;result.partial=result.unpricedQuantity>0;
+  result.uniqueCards=identities.size;result.byKind=[...kinds.values()];result.unpricedQuantity=result.quantity-result.knownValueQuantity;result.partial=result.unpricedQuantity>0;result.estimateIncludesAggregates=result.brazilianAggregateQuantity>0;
   result.coveragePercent=result.quantity?Math.round(result.knownValueQuantity/result.quantity*10000)/100:0;
   result.unrealizedGainCents=result.comparableValueCents-result.comparableCostCents;
   result.unrealizedGainPercent=result.comparableCostCents?Math.round(result.unrealizedGainCents/result.comparableCostCents*10000)/100:null;
@@ -72,7 +76,19 @@ function createPersonalInventory({db,ApiError,catalog,legacyPrices,preferences,n
   function rowBase(row){return {id:row.id,cardId:row.card_id,setId:row.set_id,language:row.language,referenceLanguage:row.reference_language||row.language,condition:row.condition,variant:row.variant,quantity:row.quantity,paidCents:row.paid_cents,acquiredAt:row.acquired_at,notes:row.notes,photoUrl:row.photo_url,card:parse(row.metadata_json),kind:row.kind||'CARD',itemType:row.item_type||'SINGLE',status:row.status||'IN_COLLECTION',attributes:parse(row.attributes_json,[]),manualValueCents:row.manual_value_cents??null,manualQuotedAt:row.manual_quoted_at||null,sale:parse(row.sale_json),archivedAt:row.archived_at||null,soldAt:row.sold_at||null,revision:row.revision||1,createdAt:row.created_at,updatedAt:row.updated_at};}
   async function owned(userId,id){if(typeof id!=='string'||!/^[-\w]{1,100}$/.test(id))fail('Item não encontrado.','NOT_FOUND',404);const row=await db.prepare('SELECT * FROM personal_lots WHERE id=? AND user_id=?').get(id,userId);if(!row)fail('Item não encontrado.','NOT_FOUND',404);return row;}
   async function lockOwner(userId){if(db.engine==='postgres')await db.prepare('SELECT id FROM users WHERE id=? FOR UPDATE').get(userId);}
-  async function prices(userId){const [map,prefs]=await Promise.all([legacyPrices(userId),preferences(userId)]);return {map,prefs};}
+  async function prices(userId){const [map,prefs]=await Promise.all([legacyPrices(userId),preferences(userId)]);return {map,prefs,brazilian:map.brazilian||new Map()};}
+  function applyBrazilian(item,reference){
+    const base=item[LOCAL_VALUATION]??null;
+    item.valuation=base;
+    item.brazilianMarket=item.kind==='CARD'?selectMypReference(reference||null,item,now()):null;
+    // A per-exemplar manual override remains authoritative even when old. A
+    // marketplace average is never relabelled as an exact physical condition.
+    if(item.manualValueCents===null&&(!base||base.stale)&&item.brazilianMarket?.usableForBrlValuation){
+      item.valuation={...item.brazilianMarket,source:'mypcards',valueCents:item.brazilianMarket.avgPriceCents,methodology:'advertised_weighted_mean',market:'BR',coverage:'aggregated_pt_en',manual:false,aggregate:true,conditionAdjusted:false,usableForBrlValuation:true,match:'PRINTING_EXACT'};
+    }
+    item.estimatedValueCents=item.valuation&&!item.valuation.stale?item.valuation.valueCents:null;
+    return item;
+  }
   function dto(row,priceContext){
     const item=rowBase(row),{map,prefs}=priceContext;let quote=null;
     if(item.manualValueCents!==null&&row.manual_identity===unitIdentity(item))quote={valueCents:item.manualValueCents,currency:'BRL',source:'user_manual',sourceLabel:'Informado por você',sourceUrl:'',methodology:'manual',market:'user_reference',language:item.language,condition:item.condition,variant:item.variant,attributes:item.attributes,quotedAt:item.manualQuotedAt,recordedAt:row.updated_at,manual:true,match:'EXACT',coverage:'user_reported',stale:!item.manualQuotedAt||now()-Date.parse(item.manualQuotedAt)>prefs.priceTtlDays*86400000};
@@ -80,7 +96,8 @@ function createPersonalInventory({db,ApiError,catalog,legacyPrices,preferences,n
       const rowQuote=map.get([item.cardId,item.language,item.condition,item.variant].join('|'));
       if(rowQuote&&rowQuote.set_id===item.setId&&Number.isSafeInteger(rowQuote.value_cents)&&rowQuote.value_cents>=0)quote={id:rowQuote.id,valueCents:rowQuote.value_cents,currency:'BRL',source:rowQuote.source,sourceLabel:rowQuote.source_label,sourceUrl:rowQuote.source_url,methodology:rowQuote.methodology,quotedAt:rowQuote.quoted_at,recordedAt:rowQuote.recorded_at,coverage:rowQuote.coverage,manual:rowQuote.methodology==='manual',market:rowQuote.methodology==='manual'?'manual_reference':'BR',language:item.language,condition:item.condition,variant:item.variant,attributes:[],match:'EXACT',stale:rowQuote.provider_stale===true||now()-Date.parse(rowQuote.quoted_at)>prefs.priceTtlDays*86400000};
     }
-    item.valuation=quote;item.estimatedValueCents=quote&&!quote.stale?quote.valueCents:null;
+    Object.defineProperty(item,LOCAL_VALUATION,{value:quote,writable:true});
+    applyBrazilian(item,parse(row.myp_payload,null)||priceContext.brazilian?.get(item.referenceLanguage+'|'+item.cardId)||item.card?.brazilianMarket);
     item.marketData=item.card?.marketData||null;
     item.internationalMarket=selectInternationalMarket(item.marketData,item,now());
     item.sale={...item.sale,realizedGainCents:item.sale.amountCents!=null&&item.sale.costCents!=null?item.sale.amountCents-item.sale.costCents:null};
@@ -93,6 +110,10 @@ function createPersonalInventory({db,ApiError,catalog,legacyPrices,preferences,n
     if(catalog.marketForItems){
       const latest=await catalog.marketForItems(items,{maxRefresh});
       for(const item of items){const data=latest.get(item.referenceLanguage+'|'+item.cardId)||item.marketData;if(data){item.marketData=data;item.internationalMarket=selectInternationalMarket(data,item,now());}}
+    }
+    if(catalog.brazilianForItems){
+      const latest=await catalog.brazilianForItems(items,{maxRefresh:Math.min(2,maxRefresh)});
+      for(const item of items)applyBrazilian(item,latest.get(item.referenceLanguage+'|'+item.cardId)||item.brazilianMarket);
     }
     return items;
   }
@@ -261,7 +282,14 @@ function createPersonalInventory({db,ApiError,catalog,legacyPrices,preferences,n
     // Latest references are joined in one query; no card-by-card HTTP/database
     // requests and no thousands of image/notes payloads for a paginated view.
     const eligible="l.kind='CARD' AND COALESCE(NULLIF(l.reference_language,''),l.language)=l.language AND l.attributes_json='[]'";
-    return {sql:`WITH private_rank AS(SELECT p.*,ROW_NUMBER() OVER(PARTITION BY card_id,set_id,language,condition,variant ORDER BY quoted_at DESC,recorded_at DESC,id DESC) AS n FROM personal_prices p WHERE user_id=?),global_rank AS(SELECT p.*,ROW_NUMBER() OVER(PARTITION BY card_id,set_id,language,condition,variant ORDER BY quoted_at DESC,recorded_at DESC,id DESC) AS n FROM market_quotes p WHERE currency='BRL' AND rights_confirmed=1 AND card_id IN(SELECT card_id FROM personal_lots WHERE user_id=?)),priced AS(SELECT l.*,CASE WHEN l.manual_value_cents IS NOT NULL AND l.manual_identity<>'' THEN CASE WHEN l.manual_quoted_at>=? THEN l.manual_value_cents ELSE NULL END WHEN ${eligible} THEN COALESCE(CASE WHEN p.quoted_at>=? THEN p.value_cents ELSE NULL END,CASE WHEN g.quoted_at>=? THEN g.value_cents ELSE NULL END) ELSE NULL END AS quote_value,CASE WHEN l.manual_value_cents IS NOT NULL AND l.manual_identity<>'' THEN CASE WHEN l.manual_quoted_at>=? THEN 0 ELSE 1 END WHEN ${eligible} AND (p.id IS NOT NULL OR g.id IS NOT NULL) AND COALESCE(p.quoted_at,'')<? AND COALESCE(g.quoted_at,'')<? THEN 1 ELSE 0 END AS quote_stale FROM personal_lots l LEFT JOIN private_rank p ON p.n=1 AND p.card_id=l.card_id AND p.set_id=l.set_id AND p.language=l.language AND p.condition=l.condition AND p.variant=l.variant LEFT JOIN global_rank g ON g.n=1 AND g.card_id=l.card_id AND g.set_id=l.set_id AND g.language=l.language AND g.condition=l.condition AND g.variant=l.variant WHERE l.user_id=?)`,args:[userId,userId,cutoff,cutoff,cutoff,cutoff,cutoff,cutoff,userId]};
+    const j=key=>db.engine==='postgres'?`(l.myp_payload::jsonb->>'${key}')`:`json_extract(l.myp_payload,'$.${key}')`;
+    const rawAverage=j('avgPriceCents'),average=db.engine==='postgres'?`CASE WHEN COALESCE(${rawAverage},'') ~ '^[0-9]{1,9}$' THEN CAST(${rawAverage} AS BIGINT) ELSE NULL END`:`CASE WHEN json_type(l.myp_payload,'$.avgPriceCents')='integer' THEN ${rawAverage} ELSE NULL END`;
+    const compatible=`${eligible} AND l.language IN('pt','en') AND l.variant IN('NORMAL','HOLO','REVERSE') AND ${j('source')}='mypcards' AND ${j('status')}='MATCHED' AND ${j('match')}='PRINTING_EXACT' AND ${j('currency')}='BRL' AND ${j('cardId')}=l.card_id AND ${j('setId')}=l.set_id AND ${j('referenceLanguage')}=COALESCE(NULLIF(l.reference_language,''),l.language) AND (${average})>0 AND (${average})<=100000000`;
+    // expires_at can be a retry cooldown after a failed refresh; original
+    // observation/expiry and stale flag must also be checked independently.
+    const fresh=`${compatible} AND l.myp_expires>l.tick AND ${j('expiresAt')}>l.snapshot AND ${j('fetchedAt')}>l.recent AND ${j('fetchedAt')}<=l.snapshot AND COALESCE(CAST(${j('stale')} AS TEXT),'false') NOT IN('true','1')`;
+    const manual="l.manual_value_cents IS NOT NULL AND l.manual_identity<>''",local=`COALESCE(CASE WHEN l.private_quoted>=l.cutoff THEN l.private_value ELSE NULL END,CASE WHEN l.global_quoted>=l.cutoff THEN l.global_value ELSE NULL END)`;
+    return {sql:`WITH clock AS(SELECT CAST(? AS TEXT) cutoff,CAST(? AS TEXT) snapshot,CAST(? AS TEXT) recent,CAST(? AS BIGINT) tick),private_rank AS(SELECT p.*,ROW_NUMBER() OVER(PARTITION BY card_id,set_id,language,condition,variant ORDER BY quoted_at DESC,recorded_at DESC,id DESC) AS n FROM personal_prices p WHERE user_id=?),global_rank AS(SELECT p.*,ROW_NUMBER() OVER(PARTITION BY card_id,set_id,language,condition,variant ORDER BY quoted_at DESC,recorded_at DESC,id DESC) AS n FROM market_quotes p WHERE currency='BRL' AND rights_confirmed=1 AND card_id IN(SELECT card_id FROM personal_lots WHERE user_id=?)),joined AS(SELECT l.*,c.*,p.id private_id,p.value_cents private_value,p.quoted_at private_quoted,g.id global_id,g.value_cents global_value,g.quoted_at global_quoted,m.payload_json myp_payload,m.expires_at myp_expires FROM personal_lots l CROSS JOIN clock c LEFT JOIN private_rank p ON p.n=1 AND p.card_id=l.card_id AND p.set_id=l.set_id AND p.language=l.language AND p.condition=l.condition AND p.variant=l.variant LEFT JOIN global_rank g ON g.n=1 AND g.card_id=l.card_id AND g.set_id=l.set_id AND g.language=l.language AND g.condition=l.condition AND g.variant=l.variant LEFT JOIN personal_reference_cache m ON m.cache_key='myp:price:v1:'||COALESCE(NULLIF(l.reference_language,''),l.language)||'|'||l.card_id AND m.kind='myp-price' WHERE l.user_id=?),priced AS(SELECT l.*,CASE WHEN ${manual} THEN CASE WHEN l.manual_quoted_at>=l.cutoff THEN l.manual_value_cents ELSE NULL END WHEN ${eligible} THEN COALESCE(${local},CASE WHEN ${fresh} THEN (${average}) ELSE NULL END) ELSE NULL END quote_value,CASE WHEN NOT(${manual}) AND ${local} IS NULL AND ${fresh} THEN 'mypcards' ELSE 'local' END quote_origin,CASE WHEN ${manual} THEN CASE WHEN l.manual_quoted_at>=l.cutoff THEN 0 ELSE 1 END WHEN ${local} IS NOT NULL OR ${fresh} THEN 0 WHEN ${eligible} AND (l.private_id IS NOT NULL OR l.global_id IS NOT NULL) OR ${compatible} THEN 1 ELSE 0 END quote_stale FROM joined l)`,args:[cutoff,stamp(),new Date(now()-86400000).toISOString(),now(),userId,userId,userId]};
   }
   function filterSql(query){
     const where=[],args=[],status=query.get('status')||'ACTIVE';
@@ -280,21 +308,28 @@ function createPersonalInventory({db,ApiError,catalog,legacyPrices,preferences,n
   async function aggregateStats(userId,prefs){
     const source=priced(userId,prefs),active="status IN('IN_COLLECTION','FOR_SALE')",comparable=`${active} AND quote_value IS NOT NULL AND paid_cents IS NOT NULL`,saleAmount=db.engine==='postgres'?"CAST(sale_json::jsonb->>'amountCents' AS BIGINT)":"json_extract(sale_json,'$.amountCents')",saleCost=db.engine==='postgres'?"CAST(sale_json::jsonb->>'costCents' AS BIGINT)":"json_extract(sale_json,'$.costCents')";
     const sum=(condition,value='quantity')=>`COALESCE(SUM(CASE WHEN ${condition} THEN ${value} ELSE 0 END),0)`;
-    const row=await db.prepare(source.sql+` SELECT ${sum(active)} quantity,COUNT(DISTINCT CASE WHEN ${active} THEN kind||'|'||card_id||'|'||COALESCE(NULLIF(reference_language,''),language) ELSE NULL END) unique_cards,${sum(`${active} AND quote_value IS NOT NULL`,'quote_value*quantity')} estimated_value,${sum(`${active} AND quote_value IS NOT NULL`)} valued_quantity,${sum(`${active} AND paid_cents IS NOT NULL`,'paid_cents*quantity')} paid,${sum(`${active} AND paid_cents IS NOT NULL`)} paid_quantity,${sum(`${active} AND quote_stale=1`)} stale,${sum(comparable)} comparable,${sum(comparable,'paid_cents*quantity')} comparable_cost,${sum(comparable,'quote_value*quantity')} comparable_value,${sum("status='ARCHIVED'")} archived,${sum("status='SOLD'")} sold,${sum(`status='SOLD' AND ${saleAmount} IS NOT NULL`)} sold_known,${sum(`status='SOLD' AND ${saleAmount} IS NOT NULL`,saleAmount+'*quantity')} sold_amount,${sum(`status='SOLD' AND ${saleAmount} IS NOT NULL AND ${saleCost} IS NOT NULL`)} sold_comparable,${sum(`status='SOLD' AND ${saleAmount} IS NOT NULL AND ${saleCost} IS NOT NULL`,saleCost+'*quantity')} sold_cost,${sum(`status='SOLD' AND ${saleAmount} IS NOT NULL AND ${saleCost} IS NOT NULL`,'('+saleAmount+'-'+saleCost+')*quantity')} sold_gain FROM priced`).get(...source.args);
+    const row=await db.prepare(source.sql+` SELECT ${sum(active)} quantity,COUNT(DISTINCT CASE WHEN ${active} THEN kind||'|'||card_id||'|'||COALESCE(NULLIF(reference_language,''),language) ELSE NULL END) unique_cards,${sum(`${active} AND quote_value IS NOT NULL`,'quote_value*quantity')} estimated_value,${sum(`${active} AND quote_value IS NOT NULL`)} valued_quantity,${sum(`${active} AND quote_value IS NOT NULL AND quote_origin='mypcards'`)} brazilian_quantity,${sum(`${active} AND paid_cents IS NOT NULL`,'paid_cents*quantity')} paid,${sum(`${active} AND paid_cents IS NOT NULL`)} paid_quantity,${sum(`${active} AND quote_stale=1`)} stale,${sum(comparable)} comparable,${sum(comparable,'paid_cents*quantity')} comparable_cost,${sum(comparable,'quote_value*quantity')} comparable_value,${sum("status='ARCHIVED'")} archived,${sum("status='SOLD'")} sold,${sum(`status='SOLD' AND ${saleAmount} IS NOT NULL`)} sold_known,${sum(`status='SOLD' AND ${saleAmount} IS NOT NULL`,saleAmount+'*quantity')} sold_amount,${sum(`status='SOLD' AND ${saleAmount} IS NOT NULL AND ${saleCost} IS NOT NULL`)} sold_comparable,${sum(`status='SOLD' AND ${saleAmount} IS NOT NULL AND ${saleCost} IS NOT NULL`,saleCost+'*quantity')} sold_cost,${sum(`status='SOLD' AND ${saleAmount} IS NOT NULL AND ${saleCost} IS NOT NULL`,'('+saleAmount+'-'+saleCost+')*quantity')} sold_gain FROM priced`).get(...source.args);
     const result=collectionMetrics([]),n=key=>Number(row[key]||0);
     Object.assign(result,{quantity:n('quantity'),uniqueCards:n('unique_cards'),estimatedValueCents:n('estimated_value'),knownValueQuantity:n('valued_quantity'),paidCents:n('paid'),paidQuantity:n('paid_quantity'),staleQuantity:n('stale'),comparableQuantity:n('comparable'),comparableCostCents:n('comparable_cost'),comparableValueCents:n('comparable_value'),archivedQuantity:n('archived')});
+    result.brazilianAggregateQuantity=n('brazilian_quantity');result.estimateIncludesAggregates=result.brazilianAggregateQuantity>0;
     result.unknownCostQuantity=result.quantity-result.paidQuantity;result.unpricedQuantity=result.quantity-result.knownValueQuantity;result.partial=result.unpricedQuantity>0;result.coveragePercent=result.quantity?Math.round(result.knownValueQuantity/result.quantity*10000)/100:0;result.unrealizedGainCents=result.comparableValueCents-result.comparableCostCents;result.unrealizedGainPercent=result.comparableCostCents?Math.round(result.unrealizedGainCents/result.comparableCostCents*10000)/100:null;
     result.sales={quantity:n('sold'),knownAmountQuantity:n('sold_known'),unknownAmountQuantity:n('sold')-n('sold_known'),amountCents:n('sold_amount'),comparableQuantity:n('sold_comparable'),costCents:n('sold_cost'),realizedGainCents:n('sold_gain'),realizedGainAvailable:n('sold_comparable')>0};
     result.byKind=(await db.prepare(source.sql+` SELECT kind,${sum(active)} quantity,${sum(`${active} AND paid_cents IS NOT NULL`,'paid_cents*quantity')} paid,${sum(`${active} AND quote_value IS NOT NULL`,'quote_value*quantity')} estimated,${sum(`${active} AND quote_value IS NOT NULL`)} valued FROM priced GROUP BY kind`).all(...source.args)).filter(row=>Number(row.quantity)>0).map(row=>({kind:row.kind,quantity:Number(row.quantity),paidCents:Number(row.paid),estimatedValueCents:Number(row.estimated),knownValueQuantity:Number(row.valued)}));
     return result;
   }
   async function list(userId,query){
-    const prefs=await preferences(userId),source=priced(userId,prefs),filter=filterSql(query),args=[...source.args,...filter.args],filtered=source.sql+',filtered AS(SELECT * FROM priced'+filter.sql+')';
+    const prefs=await preferences(userId),filter=filterSql(query);let source=priced(userId,prefs),args=[...source.args,...filter.args],filtered=source.sql+',filtered AS(SELECT * FROM priced'+filter.sql+')';
     const sort=choice(query.get('sort')||'default',['default','dex','number','set','rarity','name','acquired','cost','value','recent'],'Ordenação'),dir=choice(query.get('dir')||(['default','recent'].includes(sort)?'desc':'asc'),['asc','desc'],'Direção').toUpperCase();
     const sortField=({default:'created_at',recent:'created_at',dex:dexExpr('filtered'),number:numberExpr('filtered'),set:labelExpr('filtered','set_name','setName'),rarity:labelExpr('filtered','rarity','rarity'),name:labelExpr('filtered','title','name'),acquired:'acquired_at',cost:'paid_cents',value:'quote_value'})[sort];
     const page=Math.max(1,Math.min(10000,Number.parseInt(query.get('page')||'1',10)||1)),pageSize=Math.max(1,Math.min(60,Number.parseInt(query.get('pageSize')||'24',10)||24));
-    const counts=await db.prepare(filtered+' SELECT COUNT(*) count FROM filtered').get(...args),rows=await db.prepare(filtered+` SELECT * FROM filtered ORDER BY CASE WHEN ${sortField} IS NULL OR CAST(${sortField} AS TEXT)='' THEN 1 ELSE 0 END ASC,${sortField} ${dir},id ASC LIMIT ? OFFSET ?`).all(...args,pageSize,(page-1)*pageSize);
-    const context=await prices(userId),items=await enrichMarket(rows.map(row=>dto(row,context))),totals=await aggregateStats(userId,prefs);
+    const readRows=()=>db.prepare(filtered+` SELECT * FROM filtered ORDER BY CASE WHEN ${sortField} IS NULL OR CAST(${sortField} AS TEXT)='' THEN 1 ELSE 0 END ASC,${sortField} ${dir},id ASC LIMIT ? OFFSET ?`).all(...args,pageSize,(page-1)*pageSize);
+    let counts=await db.prepare(filtered+' SELECT COUNT(*) count FROM filtered').get(...args),rows=await readRows();
+    const context=await prices(userId);let items=await enrichMarket(rows.map(row=>dto(row,context)));
+    if(catalog.brazilianForItems){
+      source=priced(userId,prefs);args=[...source.args,...filter.args];filtered=source.sql+',filtered AS(SELECT * FROM priced'+filter.sql+')';
+      if(sort==='value'||query.get('price')||query.has('minValue')||query.has('maxValue')){counts=await db.prepare(filtered+' SELECT COUNT(*) count FROM filtered').get(...args);rows=await readRows();items=await enrichMarket(rows.map(row=>dto(row,context)),{maxRefresh:0});}
+    }
+    const totals=await aggregateStats(userId,prefs);
     const setLabel=labelExpr('personal_lots','set_name','setName');
     const facetRows=await db.prepare(`SELECT 'sets' facet,set_id value,MAX(${setLabel}) label FROM personal_lots WHERE user_id=? AND set_id<>'' GROUP BY set_id UNION ALL SELECT 'languages',language,language FROM personal_lots WHERE user_id=? GROUP BY language UNION ALL SELECT 'conditions',condition,condition FROM personal_lots WHERE user_id=? GROUP BY condition UNION ALL SELECT 'variants',variant,variant FROM personal_lots WHERE user_id=? GROUP BY variant UNION ALL SELECT 'rarities',${labelExpr('personal_lots','rarity','rarity')},${labelExpr('personal_lots','rarity','rarity')} FROM personal_lots WHERE user_id=? GROUP BY ${labelExpr('personal_lots','rarity','rarity')} UNION ALL SELECT 'kinds',kind,kind FROM personal_lots WHERE user_id=? GROUP BY kind`).all(userId,userId,userId,userId,userId,userId);
     const facets={sets:[],languages:[],conditions:[],variants:[],rarities:[],kinds:[]};for(const row of facetRows)if(row.value)facets[row.facet].push(row.facet==='sets'?{id:row.value,name:row.label||row.value}:row.value);
@@ -304,7 +339,7 @@ function createPersonalInventory({db,ApiError,catalog,legacyPrices,preferences,n
       const groupLabel=group==='set'?labelExpr('filtered','set_name','setName'):groupExpr;
       groups=(await db.prepare(filtered+` SELECT ${groupExpr} group_key,MAX(${groupLabel}) group_label,SUM(quantity) quantity,COALESCE(SUM(quote_value*quantity),0) estimated,SUM(CASE WHEN quote_value IS NOT NULL THEN quantity ELSE 0 END) valued FROM filtered GROUP BY ${groupExpr} ORDER BY ${groupExpr}`).all(...args)).map(row=>({key:group==='pokemon'&&/^\d+$/.test(row.group_key)?'dex-'+row.group_key:row.group_key||'unknown',label:group==='pokemon'&&/^\d+$/.test(row.group_key)?'Pokédex #'+row.group_key:group==='pokemon'&&row.group_key==='non-pokemon'?'Treinadores, energias e cartas sem Pokédex':row.group_label||'Sem informação',quantity:Number(row.quantity),estimatedValueCents:Number(row.estimated),knownValueQuantity:Number(row.valued)}));
     }
-    return {items,total:Number(counts.count),page,pageSize,totals,facets,groups,currency:'BRL',internationalTotals:internationalTotals(items),internationalScope:'page',priceProviders:{automaticBrazilian:false,automaticInternational:true,manual:true,message:'Referências internacionais automáticas da TCGdex em EUR/USD, sem ajuste por conservação ou idioma. Valores em BRL continuam separados e identificados; não há cotação automática brasileira.'}};
+    return {items,total:Number(counts.count),page,pageSize,totals,facets,groups,currency:'BRL',internationalTotals:internationalTotals(items),internationalScope:'page',priceProviders:{automaticBrazilian:catalog.brazilianEnabled===true,automaticInternational:true,manual:true,brazilianSource:'MYP Cards',brazilianMethodology:'advertised_weighted_mean',message:'Referências brasileiras MYP Cards em BRL quando há impressão e idioma compatíveis; valores agregam anúncios PT/EN, condições e acabamentos. Referências internacionais EUR/USD permanecem separadas. Ausência de acesso ou de correspondência não gera preço inventado.'}};
   }
   async function stats(userId){return aggregateStats(userId,await preferences(userId));}
   async function handle(userId,method,route,data,query){

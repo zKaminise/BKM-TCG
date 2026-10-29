@@ -6,7 +6,7 @@ const operatingSystemKeys = new Set([
 
 function testEnvironment(source = process.env, overrides = {}) {
   const clean = Object.fromEntries(Object.entries(source).filter(([key]) => operatingSystemKeys.has(key.toUpperCase())));
-  return { ...clean, NODE_ENV: 'test', BKM_SKIP_DOTENV: 'true', BKM_ENVIRONMENT: 'demo', HOSTING_DEMO_ONLY: 'true', PAYMENT_PROVIDER: 'disabled', EMAIL_PROVIDER: 'development', ...overrides };
+  return { ...clean, NODE_ENV: 'test', BKM_SKIP_DOTENV: 'true', BKM_ENVIRONMENT: 'demo', HOSTING_DEMO_ONLY: 'true', PAYMENT_PROVIDER: 'disabled', EMAIL_PROVIDER: 'development', MYP_CARDS_ENABLED: 'false', ...overrides };
 }
 
 module.exports = { testEnvironment };

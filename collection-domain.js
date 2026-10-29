@@ -30,7 +30,25 @@ export function collectionBatchPayload(queue,requestId) {
   return {requestId,items:queue.map(item=>({kind:item.kind,cardId:item.kind==='CARD'?item.cardId||undefined:undefined,setId:item.setId||undefined,setName:item.card?.setName||item.setName||"",sealedId:item.sealedId||item.card?.sealedId||undefined,referenceLanguage:item.referenceLanguage||item.card?.language||"pt",language:item.language||"pt",condition:item.condition,variant:item.variant||"NORMAL",attributes:item.attributes||[],quantity:item.quantity||1,paidCents:item.paidCents??null,acquiredAt:item.acquiredAt||null,notes:item.notes||"",photoUrl:item.photoUrl||"",manualValueCents:item.manualValueCents??null,title:item.title||item.card?.name||"",description:item.description||item.card?.description||"",itemType:item.itemType|| (item.kind==="CARD"?"SINGLE":item.kind==='SEALED'?'BOOSTER':"CUSTOM")}))};
 }
 export function collectionQueueTotals(queue) {
-  return queue.reduce((sum,item)=>{const quantity=item.quantity||1;sum.quantity+=quantity;if(item.paidCents==null)sum.unknownCost+=quantity;else sum.knownCost+=item.paidCents*quantity;if(item.manualValueCents==null&&!item.valuation)sum.unpriced+=quantity;return sum;},{quantity:0,knownCost:0,unknownCost:0,unpriced:0});
+  return queue.reduce((sum,item)=>{const quantity=item.quantity||1;sum.quantity+=quantity;if(item.paidCents==null)sum.unknownCost+=quantity;else sum.knownCost+=item.paidCents*quantity;const quote=item.valuation,manual=Number.isSafeInteger(item.manualValueCents)&&item.manualValueCents>=0,exact=quote&&!quote.stale&&quote.currency==='BRL'&&quote.source!=='mypcards'&&Number.isSafeInteger(quote.valueCents);if(!manual&&!exact&&!collectionBrazilian(item).usable)sum.unpriced+=quantity;return sum;},{quantity:0,knownCost:0,unknownCost:0,unpriced:0});
+}
+// MYP identifies a printing, while its public prices aggregate PT/EN offers,
+// conditions and finishes. Recheck a changed wizard language/finish locally.
+export function collectionBrazilian(item={},now=Date.now()) {
+  const reference=item.brazilianMarket||item.card?.brazilianMarket||null;
+  const cardId=item.cardId||item.providerId||item.card?.providerId||item.card?.id||item.id,setId=item.setId||item.card?.setId;
+  const language=item.language||item.referenceLanguage||item.card?.referenceLanguage||item.card?.language||'pt',referenceLanguage=item.referenceLanguage||item.card?.referenceLanguage||item.card?.language||language;
+  const result={reference:null,hasPrices:false,usable:false,stale:false,unavailableReason:'Sem referência brasileira disponível para esta carta.'};
+  if((item.kind&&item.kind!=='CARD')||!['pt','en'].includes(language)||language!==referenceLanguage)return {...result,unavailableReason:'Sem referência brasileira compatível com o idioma físico deste exemplar.'};
+  if(!reference||reference.source!=='mypcards'||reference.currency!=='BRL'||reference.match!=='PRINTING_EXACT'||reference.cardId!==cardId||reference.setId!==setId||reference.referenceLanguage!==referenceLanguage)return result;
+  const observed=Date.parse(reference.fetchedAt),expires=Date.parse(reference.expiresAt),positive=value=>Number.isSafeInteger(value)&&value>0&&value<=100000000;
+  if(!Number.isFinite(observed)||observed>now)return result;
+  const stale=!!reference.stale||!Number.isFinite(expires)||expires<=now||now-observed>=86400000,hasPrices=positive(reference.minPriceCents)||positive(reference.avgPriceCents),ordinary=!(item.attributes||[]).length&&['NORMAL','HOLO','REVERSE'].includes(item.variant||'NORMAL');
+  const usable=reference.status==='MATCHED'&&!stale&&hasPrices&&positive(reference.avgPriceCents)&&ordinary;
+  return {reference,hasPrices,usable,stale,unavailableReason:!ordinary?'Acabamento ou atributos especiais sem correspondência brasileira específica.':stale?'Referência brasileira desatualizada; não incluída no total estimado.':!hasPrices?'Sem anúncios com preço em PT/EN para esta impressão.':!positive(reference.avgPriceCents)?'Preço médio não disponível; referência fora do total estimado.':reference.status!=='MATCHED'?'Referência brasileira temporariamente indisponível.':null};
+}
+export function collectionQuoteDateTime(value) {
+  const time=Date.parse(value);return Number.isFinite(time)?new Intl.DateTimeFormat('pt-BR',{dateStyle:'short',timeStyle:'short',timeZone:'America/Sao_Paulo'}).format(time):'Data de consulta indisponível';
 }
 // International references remain in their native currency. Missing condition /
 // language coverage must never become an exact appraisal or a BRL profit input.

@@ -16,22 +16,28 @@ async function fixture(t,engine='sqlite') {
     {id:'spring1',name:'Jardim das Sombras 151',cardCount:{official:165,total:180},serie:{id:'spring',name:'Primavera'},abbreviation:{official:'SPR'}},
     {id:'night2',name:'Noite Iluminada',cardCount:{official:165,total:190},serie:{id:'night',name:'Noite'},abbreviation:{official:'NGT'}},
     {id:'rock3',name:'Montanhas',cardCount:{official:181,total:190},serie:{id:'rock',name:'Rochas'}},
-    {id:'A1',name:'Digital Pocket',cardCount:{official:165,total:200},serie:{id:'tcgp',name:'Pocket'}}
+    {id:'A1',name:'Digital Pocket',cardCount:{official:165,total:200},serie:{id:'tcgp',name:'Pocket'}},
+    {id:'detx',name:'Detetive Pikachu',cardCount:{official:18,total:18},serie:{id:'det',name:'Detetive'},abbreviation:{official:'DET'}},
+    {id:'bolt4',name:'Faíscas Elétricas',cardCount:{official:99,total:120},serie:{id:'bolt',name:'Elétricos'},abbreviation:{official:'BLT'}}
   ];
   const cards=[
     {id:'spring1-166',localId:'166',name:'Fleur',rarity:'Ilustração Rara',illustrator:'Artist A',dexId:[12],variants:{holo:true,normal:false,reverse:false},image:'https://assets.tcgdex.net/pt/spring/spring1/166',set:sets[0]},
     {id:'spring1-170',localId:'170',name:'Nageur',rarity:'Ilustração Rara',dexId:[25],image:'https://assets.tcgdex.net/pt/spring/spring1/170',set:sets[0]},
     {id:'night2-166',localId:'166',name:'Lune',rarity:'Rara',illustrator:'Artist B',dexId:[10],image:'https://assets.tcgdex.net/pt/night/night2/166',set:sets[1]},
     {id:'rock3-033',localId:'033',name:'Rochér',rarity:'Comum',image:'https://assets.tcgdex.net/pt/rock/rock3/033',set:sets[2]},
-    {id:'A1-166',localId:'166',name:'Digital Fleur',rarity:'Rara',image:'https://assets.tcgdex.net/en/tcgp/A1/166',set:sets[3]}
+    {id:'A1-166',localId:'166',name:'Digital Fleur',rarity:'Rara',image:'https://assets.tcgdex.net/en/tcgp/A1/166',set:sets[3]},
+    {id:'detx-001',localId:'001',name:'Bulbasaur',rarity:'Comum',image:'https://assets.tcgdex.net/pt/det/detx/001',set:sets[4]},
+    {id:'detx-002',localId:'002',name:'Ludicolo',rarity:'Rara',image:'https://assets.tcgdex.net/pt/det/detx/002',set:sets[4]},
+    {id:'detx-010',localId:'010',name:'Pikachu',rarity:'Rara',image:'https://assets.tcgdex.net/pt/det/detx/010',set:sets[4]},
+    {id:'bolt4-025',localId:'025',name:'Pikachu ex',rarity:'Rara',image:'https://assets.tcgdex.net/pt/bolt/bolt4/025',set:sets[5]}
   ];
   const fetchImpl=async input=>{
     const url=new URL(input);assert.equal(url.origin,'https://api.tcgdex.net');calls.push(url.href);
     if(!online)throw new Error('Offline');
     const [lang,type,id]=url.pathname.split('/').slice(2);
     let result=null;
-    if(type==='series')result=id==='tcgp'?{id,sets:[sets[3]]}:[{id:'spring',name:'Primavera'},{id:'night',name:'Noite'},{id:'rock',name:'Rochas'},{id:'tcgp',name:'Pocket'}];
-    if(type==='sets'&&!id){result=sets.map(set=>({...set,name:lang==='en'?({spring1:'Shadow Garden',night2:'Moon Light',rock3:'Mountains',A1:'Digital Pocket'})[set.id]:set.name}));const abbreviation=url.searchParams.get('abbreviation.official');if(abbreviation)result=result.filter(row=>row.abbreviation?.official===abbreviation);}
+    if(type==='series')result=id==='tcgp'?{id,sets:[sets[3]]}:[{id:'spring',name:'Primavera'},{id:'night',name:'Noite'},{id:'rock',name:'Rochas'},{id:'det',name:'Detetive'},{id:'bolt',name:'Elétricos'},{id:'tcgp',name:'Pocket'}];
+    if(type==='sets'&&!id){result=sets.map(set=>({...set,name:lang==='en'?({spring1:'Shadow Garden',night2:'Moon Light',rock3:'Mountains',A1:'Digital Pocket',detx:'Detective Pikachu',bolt4:'Electric Sparks'})[set.id]:set.name}));const abbreviation=url.searchParams.get('abbreviation.official');if(abbreviation)result=result.filter(row=>row.abbreviation?.official===abbreviation);}
     if(type==='sets'&&id){const set=sets.find(set=>set.id===id);if(set)result={...set,cards:cards.filter(card=>card.set.id===id).map(({id,name,localId,image})=>({id,name,localId,image}))};}
     if(type==='cards'&&!id){result=cards.map(({id,name,localId,image})=>({id,name,localId,image}));if(url.searchParams.get('rarity'))result=result.filter(row=>cards.find(card=>card.id===row.id).rarity.includes(url.searchParams.get('rarity')));}
     if(type==='cards'&&id){result=cards.find(card=>card.id===id)||null;if(lang==='ja')result=null;}
@@ -88,12 +94,80 @@ test('catálogo resolve colisões, aliases, ID, número local e Unicode com dado
   assert.ok(!(await f.q('q=Digital')).items.length,'Pocket must be excluded');
 });
 
+test('nome de Pokémon não expande uma coleção que apenas contém esse nome',async t=>{
+  const f=await fixture(t),ids=['detx-010','bolt4-025'];
+  for(const q of['Pikachu','pik','PIKÁCHU']){
+    const result=await f.service.search(new URLSearchParams({q,live:'1'}));
+    assert.deepEqual(new Set(result.items.map(row=>row.id)),new Set(ids),q);
+    assert.equal(result.total,2,q);
+    assert.ok(result.items.every(row=>row.name.toLowerCase().includes('pikachu')));
+  }
+  const selected=await f.service.search(new URLSearchParams({q:'Pikachu',setId:'detx'}));
+  assert.deepEqual(selected.items.map(row=>row.id),['detx-010']);
+  const partial=await f.service.search(new URLSearchParams({q:'Pikachu',pageSize:'1',page:'2'}));
+  assert.equal(partial.total,2);assert.equal(partial.items[0].id,'bolt4-025');assert.equal(partial.hasMore,false);
+  const byNumber=await f.service.search(new URLSearchParams({q:'Pikachu 025'}));
+  assert.deepEqual(byNumber.items.map(row=>row.id),['bolt4-025']);
+  assert.equal((await f.service.search(new URLSearchParams({q:'Pikachu 001',setId:'detx'}))).total,0,'number must not return another Pokémon');
+});
+
+test('termo presente apenas no título da coleção não fabrica resultados de cartas, nem no fallback de idioma',async t=>{
+  const f=await fixture(t);
+  for(const card of f.cards)if(card.name.startsWith('Pikachu'))card.name=card.name.replace('Pikachu','Raichu');
+  const result=await f.service.search(new URLSearchParams({q:'Pikachu',live:'1'}));
+  assert.equal(result.total,0);assert.deepEqual(result.items,[]);
+  assert.ok(f.calls.some(url=>new URL(url).pathname==='/v2/en/cards'),'English fallback must not reinterpret the name as an expansion either');
+});
+
+test('coleção explícita preserva nomes completos, alias, sigla, família e seletor mesmo com Pokémon no título',async t=>{
+  const f=await fixture(t),ids=['detx-001','detx-002','detx-010'];
+  for(const q of['Detetive Pikachu','Detective Pikachu','DET','detx','Detetive'])assert.deepEqual((await f.service.search(new URLSearchParams({q}))).items.map(row=>row.id),ids,q);
+  assert.deepEqual((await f.service.search(new URLSearchParams({setId:'detx'}))).items.map(row=>row.id),ids);
+  assert.deepEqual((await f.service.search(new URLSearchParams({q:'Pikachu 10/18'}))).items.map(row=>row.id),['detx-010']);
+  await f.service.search(new URLSearchParams({q:'Pikachu'}));f.advance(9*86400000);f.offline();
+  const stale=await f.service.search(new URLSearchParams({q:'Pikachu'}));
+  assert.deepEqual(stale.items.map(row=>row.id),['detx-010','bolt4-025']);assert.equal(stale.stale,true);
+});
+
+test('filtro de sigla ignorado pela fonte não transforma Pikachu em todas as cartas do índice',async t=>{
+  const f=await fixture(t),service=createCollectionCatalog({db:f.db,ApiError,fetchImpl:async(input,options)=>{
+    const url=new URL(input);if(url.pathname.endsWith('/sets')&&url.searchParams.has('abbreviation.official'))return {ok:true,status:200,text:async()=>JSON.stringify(f.sets)};
+    return f.fetchImpl(input,options);
+  }});
+  const result=await service.search(new URLSearchParams({q:'Pikachu',live:'1'}));
+  assert.equal(result.total,2);assert.deepEqual(new Set(result.items.map(row=>row.id)),new Set(['detx-010','bolt4-025']));
+  assert.ok(result.items.every(row=>row.name.includes('Pikachu')));
+});
+
+test('sigla legítima em resposta breve é confirmada pelo detalhe canônico antes de expandir a coleção',async t=>{
+  const f=await fixture(t),brief=set=>({id:set.id,name:set.name,cardCount:set.cardCount}),service=createCollectionCatalog({db:f.db,ApiError,fetchImpl:async(input,options)=>{
+    const url=new URL(input);if(url.pathname.endsWith('/sets')){const result=url.searchParams.has('abbreviation.official')?f.sets.filter(row=>row.abbreviation?.official===url.searchParams.get('abbreviation.official')):f.sets;return {ok:true,status:200,text:async()=>JSON.stringify(result.map(brief))};}
+    return f.fetchImpl(input,options);
+  }});
+  const result=await service.search(new URLSearchParams({q:'DET'}));
+  assert.deepEqual(result.items.map(row=>row.id),['detx-001','detx-002','detx-010']);
+  assert.equal(f.calls.filter(url=>new URL(url).pathname==='/v2/pt/sets/detx').length,1,'code verification and card hydration share the cached canonical set detail');
+});
+
+test('índice inteiro de respostas breves não provoca busca de detalhe em todas as coleções',async t=>{
+  const f=await fixture(t);for(let index=0;index<10;index++)f.sets.push({id:'extra'+index,name:'Coleção adicional '+index,cardCount:{official:10,total:10}});
+  const brief=set=>({id:set.id,name:set.name,cardCount:set.cardCount}),service=createCollectionCatalog({db:f.db,ApiError,fetchImpl:async(input,options)=>{
+    const url=new URL(input);if(url.pathname.endsWith('/sets'))return {ok:true,status:200,text:async()=>JSON.stringify(f.sets.map(brief))};
+    return f.fetchImpl(input,options);
+  }});
+  const result=await service.search(new URLSearchParams({q:'Pikachu'}));
+  assert.equal(result.total,2);assert.ok(result.items.every(row=>row.name.includes('Pikachu')));
+  const details=f.calls.filter(url=>/\/sets\//.test(new URL(url).pathname));
+  assert.equal(details.length,2,'only the two matching cards require set hydration, not the unverified full set index');
+});
+
 test('cache canônico e busca têm SQL compatível com PostgreSQL real via PGlite',async t=>{
   const f=await fixture(t,'postgres');
   const result=await f.q('q=166%2F165');assert.equal(result.total,2);
   f.service.clearMemoryCache();const calls=f.calls.length;
   const warm=await f.q('q=166%2F165');assert.equal(warm.total,2);assert.equal(f.calls.length,calls);
   assert.ok((await f.db.prepare('SELECT COUNT(*) count FROM personal_reference_cache').get()).count>=8);
+  const name=await f.q('q=Pikachu');assert.equal(name.total,2);assert.ok(name.items.every(row=>row.name.includes('Pikachu')));
 });
 
 test('primeira consulta fria recupera falha transitória sem disparar polling',async t=>{

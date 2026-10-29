@@ -51,7 +51,7 @@ Custos e avaliações brasileiras são armazenados como **centavos inteiros em B
 
 `null` não é zero: uma carta sem custo aparece **Não informado**; custo zero aparece **Gratuito / R$ 0,00**. Sem referência utilizável aparece **Sem cotação**. Vender ou arquivar tira o exemplar do acervo ativo e preserva o histórico. Troca/doação sem valor não gera venda fictícia de zero.
 
-**Não há cotação automática brasileira integrada.** Não foi fornecida/configurada uma API licenciada da Liga Pokémon ou outro provedor BRL com correspondência suficiente. A página oficial da Liga retornou 403 na consulta; o bloqueio não foi contornado. Isso não impede cadastrar, organizar ou registrar custos e saídas.
+**Atualização de 29/10/2026:** a integração oficial MYP Cards foi implementada, com correspondência de impressão, referências BRL agregadas PT/EN e cache persistente. A chamada externa inicial retornou HTTP 403 e o proprietário ainda não possui acesso aprovado; preços brasileiros reais não foram homologados a partir desse resultado. Fallback internacional e valores particulares continuam funcionais. Consulte [MYP Cards](MYP-CARDS.md) para configuração, testes e limites. Liga Pokémon continua sem integração licenciada; nenhum bloqueio foi contornado.
 
 As referências disponíveis são:
 

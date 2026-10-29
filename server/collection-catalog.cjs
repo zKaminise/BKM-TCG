@@ -174,10 +174,15 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     const tokenized=normalize(parsed.original),tokens=tokenized.split(' ').filter(Boolean),nameTokens=parsed.name.split(' ').filter(Boolean);
     for(const set of index.items){
       const family=index.series.find(row=>set.id.toLowerCase().startsWith(row.id.toLowerCase()));
-      const alias=aliasMap.get(set.id),haystack=normalize([set.id,set.name,alias?.name,family?.name,...(FAMILY_ALIASES[family?.id]||[])].join(' '));
+      const alias=aliasMap.get(set.id),familyNames=[family?.name,...(FAMILY_ALIASES[family?.id]||[])],haystack=normalize([set.id,set.name,alias?.name,...familyNames].join(' '));
       const exactCode=compactId(set.id)===compactId(parsed.original);
-      const setNameMatch=tokens.length&&tokens.every(token=>haystack.split(' ').includes(token));
-      if(exactCode||setNameMatch)matchingSets.add(set.id);
+      // A Pokémon name can also appear inside an expansion title (for
+      // example Pikachu / Detective Pikachu). Only a complete expansion name,
+      // verified code or exact series alias expresses expansion intent.
+      const setNames=[set.name,alias?.name].map(normalize).filter(Boolean);
+      const setNameMatch=tokens.length&&tokens.every(token=>haystack.split(' ').includes(token))&&setNames.some(name=>name.split(' ').every(token=>tokens.includes(token)));
+      const familyMatch=!!tokenized&&familyNames.some(name=>normalize(name)===tokenized);
+      if(exactCode||setNameMatch||familyMatch)matchingSets.add(set.id);
     }
     // Printed abbreviations are genuine provider metadata, not guessed set IDs.
     // A full expansion alias ending in digits ("Scarlet & Violet 151")
@@ -187,7 +192,24 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     if(/^[a-zA-Z]{2,8}$/.test(abbreviation)&&!matchingSets.size){
       const params=new URLSearchParams({'abbreviation.official':abbreviation.toUpperCase()});
       const found=await cached('set-query',lang,crypto.createHash('sha256').update(params.toString()).digest('hex').slice(0,32),'sets?'+params.toString());
-      if(Array.isArray(found.data))for(const raw of found.data)if(setMap.has(raw.id))matchingSets.add(raw.id);
+      const unverified=new Set(),wanted=abbreviation.toUpperCase();
+      if(Array.isArray(found.data))for(const raw of found.data){
+        if(!raw||!setMap.has(raw.id))continue;
+        const indexed=setMap.get(raw.id),recorded=text(raw.abbreviation?.official||raw.tcgOnline,80)||((indexed.setCode&&indexed.setCode!==indexed.id)?indexed.setCode:'');
+        if(recorded){if(recorded.toUpperCase()===wanted)matchingSets.add(raw.id);}
+        else unverified.add(raw.id);
+      }
+      // A provider may ignore an unsupported filter and return its whole
+      // index. Never trust that response as evidence of an official code.
+      // Legitimate code queries return brief records, so verify only a small
+      // candidate set using canonical detail metadata, with bounded fanout.
+      if(unverified.size<=8){
+        const verified=await limitedMap([...unverified],async id=>{
+          try{const detail=await setDetail(id,lang);return text(detail.data.abbreviation?.official||detail.data.tcgOnline,80).toUpperCase()===wanted?id:null;}
+          catch(error){if([404,422,503].includes(error.status))return null;throw error;}
+        });
+        for(const id of verified)if(id)matchingSets.add(id);
+      }
     }
     if(!parsed.original&&!selectedSet)return {items:[],total:0,page,pageSize,hasMore:false,source:'TCGdex',language:lang,stale:index.stale,fetchedAt:index.fetchedAt,warnings,sets:index.items,series:index.series};
     let briefs,briefCache;
