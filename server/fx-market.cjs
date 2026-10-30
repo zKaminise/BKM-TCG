@@ -79,7 +79,15 @@ function createFxProvider({db,fetchImpl=globalThis.fetch,now=Date.now,timeoutMs=
   if(!enabled||!allowFetch||cached&&Number(cached.row.expires_at)>now())return usable;
   if(flights.has(currency))return flights.get(currency);
   const flight=(async()=>{
-   if(!await acquire(currency)){for(let i=0;i<20;i++){await pause(25);const other=await read(key);if(other&&Number(other.row.expires_at)>now())return validRate(other.data?.rate,currency,now())?other.data.rate:null;}return usable;}
+   if(!await acquire(currency)){
+    // A second cold Vercel instance must wait for the request that owns the
+    // lease, including a normal network latency above 500 ms. Poll at most
+    // every 100/200 ms and bound the entire wait by the HTTP deadline plus a
+    // short allowance for the owner's persistent-cache write.
+    const deadline=Date.now()+Math.max(1,Math.min(15000,timeoutMs))+500;let delay=100;
+    while(Date.now()<deadline){await pause(Math.min(delay,Math.max(1,deadline-Date.now())));const other=await read(key);if(other&&Number(other.row.expires_at)>now())return validRate(other.data?.rate,currency,now())?other.data.rate:null;delay=200;}
+    return usable;
+   }
    try{const fresh=await read(key);if(fresh&&Number(fresh.row.expires_at)>now())return validRate(fresh.data?.rate,currency,now())?fresh.data.rate:null;
     try{const value=await request(currency);await write(key,'fx-rate',currency,{rate:value},Math.min(now()+TTL,Date.parse(value.expiresAt)));return value;}
     catch(error){await write(key,'fx-rate',currency,{rate:usable,lastError:'UNAVAILABLE',attemptedAt:new Date(now()).toISOString()},Math.max(now()+RETRY,error.retryAt||0));return usable;}

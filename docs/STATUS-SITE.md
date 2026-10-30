@@ -92,4 +92,4 @@ Entrega de endereços/fotos: CEP automático também na conta do cliente; bandei
 Entrega de busca/preços: pesquisa nominal sem expandir Detetive Pikachu; provider oficial MYP Cards, cache persistente diário e avaliação brasileira agregada com prioridades/limites explícitos. Acesso externo MYP ainda sem homologação após HTTP 403; nenhuma cotação foi inventada. Suíte completa atual: **530 testes aprovados**. Ver [relatório](MYP-CARDS.md).
 
 
-Entrega de estimativas em reais: conversão explícita EUR/USD para BRL pela PTAX oficial, cartões e totais coerentes, cache compartilhado e prioridades preservadas. **551 testes aprovados**, SQLite/PGlite, mais validação visual desktop/mobile e consulta real ao Banco Central. Ver [relatório](ESTIMATIVAS-REAIS.md).
+Entrega de estimativas em reais: conversão explícita EUR/USD para BRL pela PTAX oficial, cartões e totais coerentes, cache compartilhado e prioridades preservadas. **553 testes aprovados**, SQLite/PGlite, mais validação visual desktop/mobile e consulta real ao Banco Central. Ver [relatório](ESTIMATIVAS-REAIS.md).

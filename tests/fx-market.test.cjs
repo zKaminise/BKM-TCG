@@ -66,3 +66,9 @@ for(const engine of['sqlite','postgres'])test('concurrent instances share one le
  const f=await fixture(t,{engine,fetchImpl:async()=>{await new Promise(resolve=>setTimeout(resolve,30));return response(body());}}),other=createFxProvider({db:f.db,fetchImpl:f.fetchImpl,now:f.now});
  const results=await Promise.all([f.provider.getRates(),f.provider.getRates(),other.getRates()]);assert.equal(f.calls.length,2);assert.ok(results.every(result=>result.size===2));
 });
+
+for(const engine of['sqlite','postgres'])test('a second cold instance waits for a legitimate 650 ms PTAX response: '+engine,async t=>{
+ const f=await fixture(t,{engine,fetchImpl:async()=>{await new Promise(resolve=>setTimeout(resolve,650));return response(body());}}),other=createFxProvider({db:f.db,fetchImpl:f.fetchImpl,now:f.now});
+ const started=Date.now(),results=await Promise.all([f.provider.getRates(),other.getRates()]);
+ assert.equal(f.calls.length,2);assert.ok(results.every(result=>result.size===2));assert.ok(results.every(result=>result.get('EUR').rate===6&&result.get('USD').rate===6));assert.ok(Date.now()-started<2500);
+});

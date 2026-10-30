@@ -31,6 +31,11 @@ A integração MYP continua preparada. O acesso externo ainda depende da libera�
 
 ## Validação
 
-**551 testes aprovados** na suíte completa, incluindo SQLite e PostgreSQL/PGlite. Sintaxe e build passaram. A cobertura inclui arredondamento, moedas, impressão/idioma/acabamento incompatíveis, taxas e preços vencidos ou futuros, timeout, indisponibilidade, cache entre instâncias, prioridade manual/exata/MYP, totais, filtros, agrupamentos, fichários, checklist, CSV e preservação de custos.
+**553 testes aprovados** na suíte completa, incluindo SQLite e PostgreSQL/PGlite. Sintaxe e build passaram. A cobertura inclui arredondamento, moedas, impressão/idioma/acabamento incompatíveis, taxas e preços vencidos ou futuros, timeout, indisponibilidade, cache entre instâncias, prioridade manual/exata/MYP, totais, filtros, agrupamentos, fichários, checklist, CSV e preservação de custos.
 
 O serviço oficial do Banco Central respondeu HTTP 200 para EUR e USD, com o fechamento de 29/10/2026. No navegador isolado, a busca automática, inclusão de uma carta, revisão, salvamento e recarregamento mostraram a mesma estimativa unitária e total em BRL. O custo informado foi preservado. Também se verificou a tela mobile em 390 px, sem transbordamento horizontal. Os preços e a taxa desse teste de interface são **fixtures sintéticas**, não cotações reais da carta e não foram inseridos na conta comercial.
+
+
+Na versão publicada em lojabkm.com.br, a busca pela impressão cel25-5 mostrou **R$ 24,24**, calculados a partir de EUR 4,04 (Cardmarket via TCGdex, atualização de 28/10/2026) e PTAX venda EUR/BRL 6,0000 (fechamento de 29/10/2026). Esse é um registro da consulta, não um preço fixo nem uma avaliação SP/NM específica. A origem em EUR aparece somente ao expandir os detalhes. O ajuste inclui espera limitada para a primeira consulta de câmbio entre instâncias simultâneas, validada com respostas simuladas de 650 ms.
+
+A auditoria antes/depois confirmou os mesmos dados de produtos, variantes, pedidos, movimentações e reservas comerciais; não houve migração nem alteração nesses registros.
