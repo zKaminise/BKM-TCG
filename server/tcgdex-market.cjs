@@ -1,7 +1,8 @@
 'use strict';
 
 // TCGdex exposes international marketplace references, not Brazilian quotes or
-// conservation-specific appraisals. These values never enter BRL profit math.
+// conservation-specific appraisals. Native values never enter BRL math directly;
+// fx-market can produce a separately labelled, dated conversion estimate.
 const DAY=86400000;
 const FINISHES={normal:'NORMAL',holo:'HOLO',holofoil:'HOLO',reverse:'REVERSE','reverse-holofoil':'REVERSE'};
 function minorUnits(value){

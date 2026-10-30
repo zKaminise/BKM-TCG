@@ -18,7 +18,7 @@ Fontes oficiais consultadas: [documentação](https://mypcards.github.io/mypcard
 - Somente uma média atual compatível pode compor a estimativa em BRL. A origem continua `mypcards`, `match=PRINTING_EXACT`, `aggregate=true`, `conditionAdjusted=false`; isso identifica a impressão e **não** certifica a conservação ou o acabamento da unidade física.
 - O custo pago não é alterado. Valores pessoais manuais conservam prioridade, inclusive a decisão de não substituir silenciosamente um valor particular vencido. Referências administrativas exatas atuais também são preservadas.
 
-As telas mostram menor/média, fonte visível com link MYP Cards, link do produto e **Consultado em**. O endpoint de anúncios não fornece data de atualização da estatística; não foi inventada uma data de origem. Quando há BRL e referência internacional, a internacional fica acessível separadamente. EUR/USD não são convertidos nem somados ao total em reais.
+As telas mostram menor/média, fonte visível com link MYP Cards, link do produto e **Consultado em**. O endpoint de anúncios não fornece data de atualização da estatística; não foi inventada uma data de origem. Quando há BRL e referência internacional, a internacional fica acessível separadamente. **Atualização posterior:** a referência internacional pode compor uma estimativa em reais por conversão explícita com PTAX, conforme [ESTIMATIVAS-REAIS.md](ESTIMATIVAS-REAIS.md). Ela mantém sua procedência internacional e nunca é identificada como preço brasileiro do MYP.
 
 ## Persistência e limites
 

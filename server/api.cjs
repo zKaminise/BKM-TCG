@@ -101,7 +101,7 @@ function createApi(options = {}) {
   const emailStore = createEmailStore(db);
   const notifications=require('./email-notifications.cjs').createEmailNotifications({db,emailStore,env:effectiveEnv});
   const market=require('./market-price-provider.cjs').createMarketPriceService({db,ApiError});
-  const personal=require('./personal-collection.cjs').createPersonalCollection({db,ApiError,fetchImpl:options.catalogFetch,mypCardsFetch:options.mypCardsFetch,env:effectiveEnv,priceProvider:market.provider});
+  const personal=require('./personal-collection.cjs').createPersonalCollection({db,ApiError,fetchImpl:options.catalogFetch,mypCardsFetch:options.mypCardsFetch,fxFetch:options.fxFetch,env:effectiveEnv,priceProvider:market.provider});
   const productWorkflow=require('./product-workflow.cjs').createProductWorkflow({db,ApiError,fetchImpl:options.catalogFetch,audit});
   let emailDispatcher;
   async function enqueueEmail(message) { return emailStore.enqueue(message); }
