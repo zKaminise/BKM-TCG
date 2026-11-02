@@ -10,7 +10,7 @@ function createServer(options = {}) {
   const root = options.root || __dirname;
   const api = createApi({ ...options, root });
   const seo=createSeoHandler({db:api.asyncStore,env:options.env||process.env,root});
-  const publicFiles = /* @__PURE__ */ new Set(["index.html", "styles.css", "app.js", "store.js", "personal-ui.js", "collection-ui.js", "collection-domain.js", "collection.css", "password-ui.js", "password-ui.css", "shipping-ui.js", "seo-client.js", "hero-media.js", "hero-admin-ui.js", "order-ui.js", "order-ui.css", "shipping-admin-ui.js", "shipping-admin.css", "admin-product-ui.js", "admin-product.css", "product-labels.js", "store.css", "ABRIR.html", "favicon.ico", "robots.txt", "sitemap.xml"]);
+  const publicFiles = /* @__PURE__ */ new Set(["index.html", "styles.css", "home-mobile.css", "mobile-commerce.css", "home-layout.js", "mobile-catalog-ui.js", "app.js", "store.js", "personal-ui.js", "collection-ui.js", "collection-domain.js", "collection.css", "password-ui.js", "password-ui.css", "shipping-ui.js", "seo-client.js", "hero-media.js", "hero-admin-ui.js", "order-ui.js", "order-ui.css", "shipping-admin-ui.js", "shipping-admin.css", "admin-product-ui.js", "admin-product.css", "product-labels.js", "store.css", "ABRIR.html", "favicon.ico", "robots.txt", "sitemap.xml"]);
   const server = http.createServer(async (req, res) => {
     if (!/^(?:127\.0\.0\.1|localhost)(?::\d{1,5})?$/.test(req.headers.host || "")) {
       res.writeHead(400);

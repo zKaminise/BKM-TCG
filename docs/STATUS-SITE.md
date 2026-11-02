@@ -93,3 +93,5 @@ Entrega de busca/preços: pesquisa nominal sem expandir Detetive Pikachu; provid
 
 
 Entrega de estimativas em reais: conversão explícita EUR/USD para BRL pela PTAX oficial, cartões e totais coerentes, cache compartilhado e prioridades preservadas. **553 testes aprovados**, SQLite/PGlite, mais validação visual desktop/mobile e consulta real ao Banco Central. Ver [relatório](ESTIMATIVAS-REAIS.md).
+
+Entrega mobile de 02/11/2026: home sem emojis decorativos, botões com maior destaque, composição da animação por espaço disponível, menu simplificado, filtros recolhíveis e controles/textos maiores no catálogo, produto e compra. **560 testes aprovados**; sem alterações nas regras comerciais. Ver [relatório](MOBILE-E-BOTOES.md).

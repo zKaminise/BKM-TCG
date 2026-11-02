@@ -15,6 +15,7 @@ esbuild.build({stdin:{contents:source,resolveDir:root,sourcefile:'app.js'},bundl
   // only, so opening a local file never suggests a working offline checkout.
   html=html.replace(/<link[^>]*data-commerce[^>]*>/g,'').replace(/<script[^>]*data-commerce[^>]*>[\s\S]*?<\/script>/g,'').replace(/<(div|section)[^>]*data-commerce[^>]*><\/\1>/g,'');
   html=html.replace('<link rel="stylesheet" href="/styles.css">',()=>`<style>${fs.readFileSync(path.join(root,'styles.css'),'utf8')}</style>`);
+  html=html.replace('<link rel="stylesheet" href="/home-mobile.css">',()=>`<style>${fs.readFileSync(path.join(root,'home-mobile.css'),'utf8')}</style>`);
   html=html.replace('<script type="module" src="/app.js"></script>',()=>`<script>${result.outputFiles[0].text.replaceAll('</script','<\\/script')}</script>`);
   html=html.replace(/(src|href)="(\/?assets\/[^\"]+)"/g,(match,attr,p)=>assets[p.replace(/^\//,'')]?`${attr}="${assets[p.replace(/^\//,'')]}"`:match);
   html=html.replaceAll('href="/"','href="#inicio"');

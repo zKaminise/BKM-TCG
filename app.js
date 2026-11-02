@@ -1,5 +1,6 @@
 import * as THREE from './vendor/three.module.js';
 import {DEFAULT_HERO_PACK_IMAGE,normalizeHeroPackImage,heroPackImageFrame,createHeroPackImageController} from './hero-media.js';
+import {compactHomeViewport,homeSceneLayout} from './home-layout.js';
 
 const $ = s => document.querySelector(s);
 const clamp = (x, a=0, b=1) => Math.min(b, Math.max(a, x));
@@ -7,7 +8,7 @@ const mix = (a,b,t) => a+(b-a)*t;
 const smooth = (a,b,x) => { const t=clamp((x-a)/(b-a)); return t*t*(3-2*t); };
 const experience=$('.experience'), stage=$('.stage'), host=$('#scene');
 const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');
-let mobile=innerWidth<=760, progress=0, target=0, distance=1, sceneHeight=1;
+let mobile=compactHomeViewport(innerWidth,innerHeight), mobileLayout=null,progress=0, target=0, distance=1, sceneHeight=1;
 let lastTime=0, pointer={x:0,y:0}, tilt={x:0,y:0}, auto=null, travel=null, pendingFocus=null;
 let renderer, scene, camera, pack, body, cap, card, foil, dust, dustData;
 let routeActive=location.pathname==='/'||location.pathname.endsWith('/ABRIR.html');
@@ -31,10 +32,18 @@ reveal.inert=true; reveal.setAttribute('aria-hidden','true');
 
 function metrics(){
   if(experience.hidden)return;
-  mobile=innerWidth<=760;
+  mobile=compactHomeViewport(innerWidth,innerHeight);
   uiProgress=-1;
   distance=Math.max(1,experience.offsetHeight-stage.offsetHeight);
   sceneHeight=stage.clientHeight;
+  if(mobile){
+    const header=$('.header'),search=$('.shop-search'),base=experience.offsetTop;
+    const bottom=node=>node?node.getBoundingClientRect().bottom+scrollY-base:0;
+    const headerBottom=Math.max(bottom(header),bottom(search));
+    stage.style.setProperty('--home-copy-top',`${Math.round(headerBottom+20)}px`);
+    mobileLayout=homeSceneLayout({width:stage.clientWidth,height:sceneHeight,headerBottom,copyBottom:hero.offsetTop+hero.offsetHeight,revealTop:reveal.offsetTop,footerTop:$('.stage-bottom').offsetTop,packAspect:PH/PW,cardAspect:cardHeight/CARD_W});
+    stage.style.setProperty('--home-pack-label-top',`${Math.round(mobileLayout.initial.bottom+10)}px`);
+  }else mobileLayout=null;
   if(renderer){
     renderer.setSize(stage.clientWidth,sceneHeight,false);
     camera.aspect=stage.clientWidth/sceneHeight;
@@ -217,6 +226,7 @@ function replacePackImage(texture,url){
   geometries.forEach(geometry=>geometry.dispose());materials.forEach(material=>material.dispose());oldTexture?.dispose();
   $('#fallback-pack').src=url;
   uiProgress=-1;
+  metrics();
 }
 
 function makeDust(){
@@ -278,21 +288,26 @@ function updateUI(p){
   $('#scroll-label').textContent=p>.9?'Voltar ao início':'Role para revelar';
   if(failed){
     $('#fallback-pack').hidden=p>.34;$('#fallback-card').hidden=p<=.34;
-    const f=$('#fallback');f.style.top=mobile?(p>.34?'13%':'43%'):'18%';f.style.height=mobile?(p>.34?'36%':'36%'):'57%';
+    const f=$('#fallback'),composition=mobileLayout&&(p>.34?mobileLayout.final:mobileLayout.initial);
+    f.style.top=composition?`${composition.top}px`:'18%';f.style.height=composition?`${composition.height}px`:'57%';f.style.left=composition?`${composition.centerX}px`:'';
   }
 }
 
 function pose(p,t){
   const visibleH=2*Math.tan(THREE.MathUtils.degToRad(17))*camera.position.z, visibleW=visibleH*camera.aspect;
   const opening=smooth(.095,.245,p),emerging=smooth(.205,.44,p),fall=smooth(.455,.66,p),flip=smooth(.48,.69,p),settle=smooth(.445,.73,p),final=smooth(.75,.92,p);
-  const centered=smooth(.045,.18,p),initialX=mobile?0:visibleW*.22;
+  const centered=smooth(.045,.18,p),initialX=mobileLayout?(mobileLayout.initial.centerX/stage.clientWidth-.5)*visibleW:visibleW*.22;
+  const initialY=mobileLayout?(.5-mobileLayout.initial.centerY/sceneHeight)*visibleH:.24;
+  const finalX=mobileLayout?(mobileLayout.final.centerX/stage.clientWidth-.5)*visibleW:initialX;
+  const finalY=mobileLayout?(.5-mobileLayout.final.centerY/sceneHeight)*visibleH:.15;
+  const initialScale=mobileLayout?mobileLayout.initial.height/sceneHeight*visibleH/PH:1.02;
   const hover=reduced.matches?0:Math.sin(t*.9)*.025;
   // The card and wrapper share a single coordinate system throughout the pull.
   // Lowering the whole rig keeps the fully extracted card inside the viewport.
-  const baseY=mix(mobile?-visibleH*.135:.24,.05,centered);
+  const baseY=mix(initialY,.05,centered);
   const rigY=mix(baseY-.95*emerging,.05,settle);
-  pack.position.set(mix(mix(initialX,0,centered),initialX,final),mix(rigY,mobile?visibleH*.18:.15,final)+hover*(1-emerging+final),0);
-  pack.scale.setScalar(mix(mobile?mix(.94,1.03,centered):1.02,1,settle));
+  pack.position.set(mix(mix(initialX,0,centered),finalX,final),mix(rigY,finalY,final)+hover*(1-emerging+final),0);
+  pack.scale.setScalar(mix(mobile?mix(initialScale,1.03,centered):initialScale,1,settle));
   pack.rotation.set(mix(mix(-.025,.045,opening),0,settle),mix(.08+Math.sin(p*8)*.1,0,settle),mix(-.065+opening*.2,0,settle));
   body.position.set(fall*.22,-fall*5.8,0);body.rotation.set(fall*.26,fall*.4,-fall*.26);
   body.visible=p<.72;
@@ -304,7 +319,8 @@ function pose(p,t){
   const fullyOutY=CUT+cardHeight/2+.08;
   const localCardY=mix(mix(-.18,fullyOutY,emerging),.44,settle);
   card.position.set(0,mix(localCardY,0,final),0);
-  const cardScale=mobile?mix(mix(1,1.14,settle),sceneHeight<730?1.28:1.42,final):mix(1,1.66,final);
+  const finalCardScale=mobileLayout?mobileLayout.final.height/sceneHeight*visibleH/cardHeight:1.66;
+  const cardScale=mobile?mix(mix(1,1.14,settle),finalCardScale,final):mix(1,finalCardScale,final);
   card.scale.setScalar(cardScale);
   card.rotation.y=mix(Math.PI,0,flip)+tilt.x*.12*final;
   card.rotation.x=tilt.y*.09*final+Math.sin(t*.42)*.016*final;
@@ -332,4 +348,8 @@ function frame(now){
   if(isReady&&!failed){pose(progress,now/1000);renderer.render(scene,camera);}
 }
 function ensureScene(){if(initStarted)return;initStarted=true;init();}
+if(typeof ResizeObserver!=='undefined'){
+  const layoutObserver=new ResizeObserver(()=>metrics());
+  for(const node of [$('.header'),hero,reveal,stage])if(node)layoutObserver.observe(node);
+}
 metrics();if(routeActive)ensureScene();requestAnimationFrame(frame);
