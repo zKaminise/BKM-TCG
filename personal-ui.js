@@ -304,6 +304,7 @@ export function createPersonalUI(ctx) {
     input.addEventListener("input",schedule);
     input.addEventListener("compositionend",schedule);
     languageInput.addEventListener("change",schedule);
+    goals.addEventListener("change",()=>status.replaceChildren());
     modal=dialog("Criar fichário",form);
     modal.addEventListener("close",()=>{request?.abort();search.dispose();},{once:true});
     input.focus();
@@ -361,7 +362,7 @@ export function createPersonalUI(ctx) {
   }
   function editGoal(set){
     const status=statusRegion();let modal;
-    const form=el("form",{class:"personal-form",onSubmit:event=>{
+    const form=el("form",{class:"personal-form",onChange:()=>status.replaceChildren(),onSubmit:event=>{
       event.preventDefault();
       run(form.querySelector("[type=submit]"),status,async()=>{
         await api(`${root}/sets/${encodeURIComponent(set.id)}`,{method:"PUT",body:{goal:readGoal(form,set.goal)}});
