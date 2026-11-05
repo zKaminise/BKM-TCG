@@ -189,18 +189,46 @@ function createApi(options = {}) {
       if (req.headers.origin !== expected && !acceptedOrigins.includes(req.headers.origin)) throw new ApiError(403, "ORIGIN", "Origem da solicitação não permitida.");
     }
   }
+  async function hydrateProducts(rows, admin = false) {
+    if (!rows.length) return [];
+    const variantsByProduct = new Map(rows.map(row => [row.id, []]));
+    const productIds = [...variantsByProduct.keys()];
+    const cardIds = [...new Set(rows.map(row => row.card_id).filter(Boolean))];
+    const placeholders = ids => ids.map(() => "?").join(",");
+    const [variantRows, cardRows] = await Promise.all([
+      db.prepare(`SELECT v.*,m.attributes_json,
+        (SELECT COALESCE(SUM(r.quantity),0) FROM inventory_reservations r WHERE r.variant_id=v.id AND r.status='ACTIVE' AND r.expires_at>?) reserved
+        FROM variants v LEFT JOIN variant_metadata m ON m.variant_id=v.id
+        WHERE v.product_id IN (${placeholders(productIds)}) AND v.active=1
+        ORDER BY v.product_id,CASE v.language WHEN 'pt' THEN 0 WHEN 'en' THEN 1 ELSE 2 END,v.id`).all(Date.now(), ...productIds),
+      cardIds.length ? db.prepare(`SELECT id,metadata_json FROM card_metadata WHERE id IN (${placeholders(cardIds)})`).all(...cardIds) : []
+    ]);
+    const cards = new Map(cardRows.map(row => [row.id, JSON.parse(row.metadata_json)]));
+    for (const variant of variantRows) {
+      variantsByProduct.get(variant.product_id).push({
+        id: variant.id, language: variant.language, condition: variant.condition, finish: variant.finish,
+        attributes: attributesFromRow(variant), priceCents: variant.price_cents, compareAtCents: variant.compare_at_cents,
+        stock: admin ? variant.stock : Math.max(0, variant.stock - variant.reserved), reservedStock: variant.reserved
+      });
+    }
+    return rows.map(row => ({
+      id: row.id, slug: row.slug, kind: row.kind, name: row.name, description: row.description, sku: row.sku,
+      tcg: row.tcg, setId: row.set_id, setName: row.set_name, images: JSON.parse(row.images_json),
+      attributes: JSON.parse(row.attributes_json), card: cards.get(row.card_id) ?? null, featured: !!row.featured,
+      published: !!row.published, createdAt: row.created_at, updatedAt: row.updated_at,
+      variants: variantsByProduct.get(row.id), ...(admin ? { archived: !!row.archived } : {})
+    }));
+  }
   async function product(row, admin = false) {
-    if (!row) return null;
-    const variants = (await db.prepare("SELECT v.*,m.attributes_json,(SELECT COALESCE(SUM(r.quantity),0) FROM inventory_reservations r WHERE r.variant_id=v.id AND r.status='ACTIVE' AND r.expires_at>?) reserved FROM variants v LEFT JOIN variant_metadata m ON m.variant_id=v.id WHERE v.product_id=? AND v.active=1 ORDER BY CASE v.language WHEN 'pt' THEN 0 WHEN 'en' THEN 1 ELSE 2 END,v.id").all(Date.now(),row.id)).map((v) => ({ id: v.id, language: v.language, condition: v.condition, finish: v.finish, attributes:attributesFromRow(v), priceCents: v.price_cents, compareAtCents: v.compare_at_cents, stock: admin ? v.stock : Math.max(0,v.stock-v.reserved), reservedStock:v.reserved }));
-    const metadata = row.card_id ? JSON.parse((await db.prepare("SELECT metadata_json FROM card_metadata WHERE id=?").get(row.card_id)).metadata_json) : null;
-    return { id: row.id, slug: row.slug, kind: row.kind, name: row.name, description: row.description, sku: row.sku, tcg: row.tcg, setId: row.set_id, setName: row.set_name, images: JSON.parse(row.images_json), attributes: JSON.parse(row.attributes_json), card: metadata, featured: !!row.featured, published: !!row.published, createdAt: row.created_at, updatedAt: row.updated_at, variants, ...admin ? { archived: !!row.archived } : {} };
+    return row ? (await hydrateProducts([row], admin))[0] : null;
   }
   async function facets() {
-    const rows = (await db.prepare("SELECT DISTINCT set_id id,set_name name FROM products WHERE published=1 AND archived=0 AND set_id<>'' ORDER BY set_name").all());
-    const canonicalNames=new Map((await db.prepare('SELECT id,name FROM collections').all()).map(row=>[row.id,row.name]));
+    const [rows, vs] = await Promise.all([
+      db.prepare("SELECT DISTINCT p.set_id id,p.set_name name,c.name canonical_name FROM products p LEFT JOIN collections c ON c.id=p.set_id WHERE p.published=1 AND p.archived=0 AND p.set_id<>'' ORDER BY p.set_name").all(),
+      db.prepare("SELECT DISTINCT v.language,v.condition,v.finish FROM variants v JOIN products p ON p.id=v.product_id WHERE v.active=1 AND p.published=1 AND p.archived=0").all()
+    ]);
     const uniqueSets=new Map();
-    for(const row of rows) if(!uniqueSets.has(row.id)) uniqueSets.set(row.id,{id:row.id,name:canonicalNames.get(row.id) || row.name});
-    const vs = (await db.prepare("SELECT DISTINCT v.language,v.condition,v.finish FROM variants v JOIN products p ON p.id=v.product_id WHERE v.active=1 AND p.published=1 AND p.archived=0").all());
+    for(const row of rows) if(!uniqueSets.has(row.id)) uniqueSets.set(row.id,{id:row.id,name:row.canonical_name || row.name});
     return { sets: [...uniqueSets.values()].sort((a,b)=>a.name.localeCompare(b.name,'pt-BR')), languages: [...new Set(vs.map((x) => x.language))], conditions: [...new Set(vs.map((x) => x.condition))], finishes: [...new Set(vs.map((x) => x.finish))] };
   }
   async function listProducts(query, admin = false) {
@@ -250,9 +278,14 @@ function createApi(options = {}) {
     const order2 = sorts[query.get("sort")] || sorts.newest;
     const page = integer(Number(query.get("page") || 1), "page", 1, 1e6), pageSize = Math.min(48, Math.max(1, Number(query.get("pageSize") || 24)));
     if (!Number.isInteger(pageSize)) fail("VALIDATION", "Paginação inválida.");
-    const where = clauses.join(" AND "), total = (await db.prepare(`SELECT COUNT(*) count FROM products p WHERE ${where}`).get(...params)).count;
-    const rows = (await db.prepare(`SELECT p.* FROM products p WHERE ${where} ORDER BY ${order2},p.id LIMIT ? OFFSET ?`).all(...params, pageSize, (page - 1) * pageSize));
-    return { items: await Promise.all(rows.map((x) => product(x, admin))), pagination: { page, pageSize, total, pages: Math.ceil(total / pageSize) }, facets: await facets() };
+    const where = clauses.join(" AND ");
+    const [items, { count: total }, filtersAvailable] = await Promise.all([
+      db.prepare(`SELECT p.* FROM products p WHERE ${where} ORDER BY ${order2},p.id LIMIT ? OFFSET ?`)
+        .all(...params, pageSize, (page - 1) * pageSize).then(rows => hydrateProducts(rows, admin)),
+      db.prepare(`SELECT COUNT(*) count FROM products p WHERE ${where}`).get(...params),
+      facets()
+    ]);
+    return { items, pagination: { page, pageSize, total, pages: Math.ceil(total / pageSize) }, facets: filtersAvailable };
   }
   function validateProduct(data, existing) {
     const kind = text(data.kind, "kind", 10, true);
@@ -511,10 +544,6 @@ function createApi(options = {}) {
         }
         return respond(200,{received:true});
       }
-      let session = await getSession(req);
-      if (method === "GET" && pathname === "/api/session") {
-        return respond(200, session ? { user: publicUser(session.user), csrfToken: session.csrf_token } : await newSession(res));
-      }
       if (method === "GET" && pathname === "/api/config") return respond(200, await config());
       if(method==='GET'&&pathname==='/api/shipping/address'){
         limit(req,'shipping-address',60,60000);
@@ -527,7 +556,14 @@ function createApi(options = {}) {
       if (method === "GET" && /^\/api\/products\/[^/]+$/.test(pathname)) {
         const slug = pathname.split("/").at(-1), row = (await db.prepare("SELECT * FROM products WHERE slug=? AND published=1 AND archived=0").get(slug));
         if (!row) throw new ApiError(404, "PRODUCT_NOT_FOUND", "Produto não encontrado.");
-        return respond(200, { ...await product(row), related: (await listProducts(new URLSearchParams({ set: row.set_id, pageSize: "5" }))).items.filter((p) => p.id !== row.id).slice(0, 4) });
+        const related = await db.prepare(`SELECT * FROM products WHERE published=1 AND archived=0 AND id<>?
+          ${row.set_id ? "AND set_id=?" : ""} ORDER BY created_at DESC,id LIMIT 4`).all(row.id, ...(row.set_id ? [row.set_id] : []));
+        const [current, ...similar] = await hydrateProducts([row, ...related]);
+        return respond(200, { ...current, related: similar });
+      }
+      let session = await getSession(req);
+      if (method === "GET" && pathname === "/api/session") {
+        return respond(200, session ? { user: publicUser(session.user), csrfToken: session.csrf_token } : await newSession(res));
       }
       if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) csrf(req, session);
       if(method==='POST' && pathname==='/api/auth/google/start') {
@@ -641,7 +677,7 @@ function createApi(options = {}) {
         }
         if (["/api/account/cart", "/api/account/favorites"].includes(pathname) && ["GET", "PUT"].includes(method)) {
           const body = method === "PUT" ? await readJson(req) : null;
-          const result=await accountList(db,user,pathname,method,body,product);
+          const result=await accountList(db,user,pathname,method,body,hydrateProducts);
           if(method==='PUT' && pathname.endsWith('/cart'))await notifications.trackCart({userId:user.id,items:body.items});
           return respond(200,result);
         }

@@ -1,4 +1,4 @@
-async function accountList(db, user, pathname, method, data, serializeProduct) {
+async function accountList(db, user, pathname, method, data, hydrateProducts) {
   const kind = pathname.endsWith("/cart") ? "cart" : "favorites";
   async function hydrate(items) {
     const keys = kind === "cart" ? items.map((item) => item.variantId) : items;
@@ -7,7 +7,7 @@ async function accountList(db, user, pathname, method, data, serializeProduct) {
     const rows = kind === "cart"
       ? await db.prepare(`SELECT DISTINCT p.* FROM products p JOIN variants v ON v.product_id=p.id WHERE v.id IN(${marks}) AND v.active=1 AND p.published=1 AND p.archived=0`).all(...keys)
       : await db.prepare(`SELECT p.* FROM products p WHERE p.id IN(${marks}) AND p.published=1 AND p.archived=0`).all(...keys);
-    const products = await Promise.all(rows.map((row) => serializeProduct(row)));
+    const products = await hydrateProducts(rows);
     const validIds = new Set(kind === "cart" ? products.flatMap((p) => p.variants.map((v) => v.id)) : products.map((p) => p.id));
     return { items: items.filter((value) => validIds.has(kind === "cart" ? value.variantId : value)), products };
   }

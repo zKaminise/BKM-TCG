@@ -50,6 +50,47 @@ test('API integrada: sessões, RBAC, inventário, preços, cupons, frete e priva
     const duplicate=await admin.call('/api/admin/products',{method:'POST',body:baseProduct});assert.equal(duplicate.status,409);
     assert.equal(server.api.db.prepare('SELECT COUNT(*) n FROM products').get().n,2);
   });
+  await t.test('catálogo e detalhe leem metadados e estoque reservado em lotes limitados',async()=>{
+    const raw=server.api.db,store=server.api.asyncStore,prepare=store.prepare;
+    const orderId=crypto.randomUUID(),stamp=new Date().toISOString(),held=single.variants[0].id;
+    const buyerId=(await customer.call('/api/session')).data.user.id;
+    raw.prepare("INSERT INTO orders(id,user_id,status,payment_status,shipping_status,currency,subtotal_cents,discount_cents,shipping_cents,total_cents,coupon_id,address_json,payment_provider_id,idempotency_key,created_at,updated_at) VALUES(?,?,'PENDING','PENDING','UNFULFILLED','BRL',10000,0,0,10000,NULL,'{}',NULL,?,?,?)")
+      .run(orderId,buyerId,'batch-hydration-'+orderId,stamp,stamp);
+    const hold=raw.prepare("INSERT INTO inventory_reservations(id,variant_id,order_id,quantity,status,expires_at,created_at) VALUES(?,?,?,1,'ACTIVE',?,?)");
+    hold.run(crypto.randomUUID(),held,orderId,Date.now()+60000,stamp);
+    hold.run(crypto.randomUUID(),single.variants[1].id,orderId,Date.now()-60000,stamp);
+    const reads=[];
+    store.prepare=function(sql){reads.push(sql);return prepare.call(this,sql);};
+    try {
+      const list=await customer.call('/api/products?pageSize=12');
+      assert.equal(list.status,200);
+      assert.equal(reads.length,6,'consultas de itens, contagem, filtros, variantes e cartas');
+      assert.ok(!reads.some(sql=>/\bFROM sessions\b/i.test(sql)),'catálogo público não depende da sessão');
+      assert.deepEqual(list.data.pagination,{page:1,pageSize:12,total:2,pages:1});
+      const card=list.data.items.find(item=>item.id===single.id);
+      assert.equal(card.card.number,'025');
+      assert.deepEqual(card.variants.map(v=>[v.language,v.stock,v.reservedStock]),[['pt',0,1],['en',2,0]]);
+      assert.equal(list.data.items.find(item=>item.id===sealed.id).card,null);
+      assert.deepEqual(list.data.facets.sets,[{id:'test-set',name:'Coleção teste'}]);
+      reads.length=0;
+      const detail=await customer.call('/api/products/'+single.slug);
+      assert.equal(detail.status,200);
+      assert.equal(reads.length,4,'consulta de relacionados sem contagem nem filtros');
+      assert.deepEqual(detail.data,{...card,related:[list.data.items.find(item=>item.id===sealed.id)]});
+      const adminListing=await admin.call('/api/admin/products');
+      const adminCard=adminListing.data.items.find(item=>item.id===single.id);
+      assert.equal(adminCard.archived,false);
+      assert.deepEqual(adminCard.variants.map(v=>[v.stock,v.reservedStock]),[[1,1],[2,0]]);
+      const later=await anon.call('/api/products?page=2&pageSize=12');
+      assert.deepEqual(later.data.items,[]);
+      assert.equal(later.data.pagination.total,2);
+      assert.deepEqual(later.data.facets,list.data.facets);
+    } finally {
+      store.prepare=prepare;
+      raw.prepare('DELETE FROM inventory_reservations WHERE order_id=?').run(orderId);
+      raw.prepare('DELETE FROM orders WHERE id=?').run(orderId);
+    }
+  });
   await t.test('cotação ignora preço enviado e agrupa duplicados; estoque não negativo',async()=>{
     const variantId=single.variants[0].id;const q=await anon.call('/api/checkout/quote',{method:'POST',body:{items:[{variantId,quantity:1,priceCents:1}],cep:'01001000'}});assert.equal(q.status,200);assert.equal(q.data.subtotalCents,10000);assert.equal(q.data.totalCents,null);assert.equal(q.data.paymentAvailable,false);
     const excess=await anon.call('/api/checkout/quote',{method:'POST',body:{items:[{variantId,quantity:1},{variantId,quantity:1}]}});assert.equal(excess.status,409);assert.equal(excess.data.error.fields.available,1);
@@ -62,6 +103,7 @@ test('API integrada: sessões, RBAC, inventário, preços, cupons, frete e priva
   });
   await t.test('carrinho e favoritos persistem na conta e não vazam entre usuários',async()=>{
     const items=[{variantId:single.variants[0].id,quantity:1}];const response=await customer.call('/api/account/cart',{method:'PUT',body:{items}});assert.equal(response.status,200);assert.deepEqual((await customer.call('/api/account/cart')).data.items,items);assert.deepEqual((await outsider.call('/api/account/cart')).data.items,[]);
+    assert.equal(response.data.products[0].id,single.id);assert.equal(response.data.products[0].card.number,'025');assert.equal(response.data.products[0].variants[0].id,single.variants[0].id);
     assert.equal((await customer.call('/api/account/cart',{method:'PUT',body:{items:[{variantId:single.variants[0].id,quantity:2}]}})).status,422);assert.deepEqual((await customer.call('/api/account/cart')).data.items,items);
     assert.equal((await customer.call('/api/account/favorites',{method:'PUT',body:{items:[single.id,single.id]}})).status,200);assert.deepEqual((await customer.call('/api/account/favorites')).data.items,[single.id]);assert.deepEqual((await outsider.call('/api/account/favorites')).data.items,[]);assert.equal((await anon.call('/api/account/cart')).status,401);
   });

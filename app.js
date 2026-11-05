@@ -11,7 +11,7 @@ const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');
 let mobile=compactHomeViewport(innerWidth,innerHeight), mobileLayout=null,progress=0, target=0, distance=1, sceneHeight=1;
 let lastTime=0, pointer={x:0,y:0}, tilt={x:0,y:0}, auto=null, travel=null, pendingFocus=null;
 let renderer, scene, camera, pack, body, cap, card, foil, dust, dustData;
-let routeActive=location.pathname==='/'||location.pathname.endsWith('/ABRIR.html');
+let routeActive=['/','/index.html'].includes(location.pathname)||location.pathname.endsWith('/ABRIR.html');
 let initStarted=false;
 let isReady=false, failed=false, chapter=-1, isHidden=document.hidden, uiProgress=-1;
 let desiredPackImage=DEFAULT_HERO_PACK_IMAGE,packImageController=null,packTexture=null,packNormal=null,packRoughness=null,packContour=false;

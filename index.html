@@ -22,6 +22,7 @@
   <link rel="stylesheet" href="/store.css" data-commerce>
   <link rel="stylesheet" href="/home-mobile.css">
   <link rel="stylesheet" href="/mobile-commerce.css" data-commerce>
+  <link rel="modulepreload" href="/store.js" data-commerce>
   <script data-commerce>
     (() => {
       const path = location.pathname.replace(/\/$/, "") || "/";
@@ -50,8 +51,8 @@
           <p class="eyebrow">UM NOVO CAPÍTULO PARA SUA COLEÇÃO</p>
           <h1>O extraordinário<br>está <em>dentro.</em></h1>
           <p class="hero-description">Cartas para jogar. Descobertas para colecionar.<br>Encontre a próxima peça da sua coleção.</p>
-          <div class="shop-hero-actions"><a class="primary shop-hero-cta" href="/busca">Explorar produtos</a><button class="primary shop-experience-button" id="open-pack">Ver a abertura</button></div>
-          <nav class="hero-category-links" aria-label="Explore a loja"><a href="/cartas">Cartas avulsas</a><a href="/lacrados">Produtos lacrados</a><a href="/colecoes">Por coleção</a></nav>
+          <div class="shop-hero-actions"><a class="primary shop-hero-cta" href="/busca" data-route>Explorar produtos</a><button class="primary shop-experience-button" id="open-pack">Ver a abertura</button></div>
+          <nav class="hero-category-links" aria-label="Explore a loja"><a href="/cartas" data-route>Cartas avulsas</a><a href="/lacrados" data-route>Produtos lacrados</a><a href="/colecoes" data-route>Por coleção</a></nav>
           <p class="hero-promise">Confira idioma, condição e quantidade em cada anúncio.</p>
         </div>
 
@@ -65,7 +66,7 @@
           <div class="card-title"><h3>Pikachu <span>ex</span></h3><span class="energy" aria-label="Tipo elétrico"><svg viewBox="0 0 16 20" aria-hidden="true"><path d="M9 1 2 11h5l-1 8 8-11H9z"/></svg></span></div>
           <p class="reveal-description">Algumas cartas completam a coleção.<br>Outras fazem você se apaixonar por ela.</p>
           <div class="card-specs"><div><span>COLEÇÃO</span><strong>ASCR</strong></div><div><span>NÚMERO</span><strong>276 / 217</strong></div><div><span>IDIOMA</span><strong>Português</strong></div></div>
-          <div class="reveal-actions"><a class="primary" href="/busca">Encontrar minha próxima carta</a><button class="replay" id="inspect">Ver esta carta de perto</button><button class="replay" id="replay">Abrir de novo</button></div>
+          <div class="reveal-actions"><a class="primary" href="/busca" data-route>Encontrar minha próxima carta</a><button class="replay" id="inspect">Ver esta carta de perto</button><button class="replay" id="replay">Abrir de novo</button></div>
         </div>
 
         <div class="card-side-label" aria-hidden="true"><span>PIKACHU EX</span><span>276/217 · ASCR</span></div>
@@ -85,7 +86,7 @@
   <noscript><div class="noscript"><img src="/assets/pikachu.webp" alt="Carta Pikachu ex"><p>Ative o JavaScript para viver a abertura do pacote.</p></div></noscript>
   <div id="store-overlay" data-commerce></div>
   <div id="store-mobile-nav" data-commerce></div>
-  <script type="module" src="/app.js"></script>
+  <script type="module" src="/app.js" async></script>
   <script type="module" src="/store.js" data-commerce></script>
 </body>
 </html>
