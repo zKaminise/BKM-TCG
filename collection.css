@@ -230,6 +230,30 @@
 .collection-page .collection-inventory-advanced .collection-filter-grid,
 .collection-valuation-method { padding: 4px 13px 0; }
 .collection-section-filter > .personal-filters { margin: 0 10px; }
+.personal-goal-fields { gap: 14px; }
+.personal-goal-help { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.personal-goal-options { margin: 0; }
+.personal-goal-options > div { padding: 0 13px; }
+.personal-goal-options .personal-checks { margin-top: 10px; gap: 6px 18px; }
+.personal-binder-form { gap: 12px; }
+.personal-binder-language { padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; }
+.personal-binder-language > summary { min-height: 44px; padding: 13px 0; cursor: pointer; font-size: 13px; }
+.personal-binder-language[open] { padding-bottom: 12px; }
+.personal-binder-search-status { color: var(--muted); font-size: 13px; line-height: 1.45; margin: 0; }
+.personal-binder-form .personal-set-results { max-height: min(255px, 42svh); padding: 3px; }
+.personal-binder-form .personal-set-choice { min-height: 54px; gap: 12px; padding: 9px 12px; background: #132027; }
+.personal-binder-form .personal-set-choice.selected { background: #1e363d; }
+.personal-binder-form .personal-set-choice > :is(img, svg) { flex: 0 0 44px; width: 44px; height: 32px; margin: 0; }
+.personal-binder-form .personal-set-choice strong { font-size: 14px; overflow-wrap: anywhere; }
+.personal-binder-confirmation { display: grid; gap: 10px; }
+.personal-binder-confirmation > .shop-button { min-height: 46px; justify-content: center; }
+.personal-binder-choice-name { margin: 3px 0; font-size: 15px; font-weight: 600; }
+.personal-set h3 { margin-bottom: 4px; }
+.personal-set-language { margin: 0 0 12px; font-size: 13px; }
+@media (max-width: 760px) {
+  .personal-binder-heading { flex-wrap: wrap; align-items: center; }
+  .personal-binder-heading > .shop-button { min-height: 44px; font-size: 14px; }
+}
 .personal-collection-shell .collection-valuation-stats { grid-template-columns: repeat(2,minmax(0,1fr)); }
 .collection-valuation-method p { font-size: 13px; line-height: 1.6; margin: 0 0 8px; }
 .collection-valuation-method p a { color: var(--cyan); text-decoration: underline; }
@@ -356,7 +380,7 @@
 .collection-page .view-compact .collection-item-facts { font-size: 10px; }
 .collection-page .view-compact .collection-item-cost strong { font-size: 12px; }
 .collection-page .collection-selection {
-  bottom: max(8px,env(safe-area-inset-bottom));
+  bottom: max(8px,env(safe-area-inset-bottom),calc(var(--shop-mobile-nav-space, 0px) + 8px));
   z-index: 6;
 }
 .collection-page .collection-selection .shop-button { font-size: 12px; min-height: 44px; }

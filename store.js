@@ -10,6 +10,7 @@ import {createCatalogFiltersPanel} from './mobile-catalog-ui.js';
 import {productLanguages as languages,productConditions as conditions,productFinishes as finishes,productKindLabel,productKindPath,productVariantText,variantAttributeText,catalogCardConditions,createProductVariantChoice,setProductVariantChoiceSelected} from './product-labels.js';
 
 const navMount = document.querySelector("#store-nav");
+const mobileNavMount = document.querySelector("#store-mobile-nav");
 const mount = document.querySelector("#storefront");
 const overlay = document.querySelector("#store-overlay");
 const experience = document.querySelector(".experience");
@@ -292,15 +293,42 @@ function prepareCommerceShell() {
     footer.querySelector(".footer-small")?.before(links);
   }
 }
+function renderMobileNav(count) {
+  if(!mobileNavMount)return;
+  const path=location.pathname.replace(/\/$/,"")||"/";
+  const enabled=path!=="/admin"&&!path.startsWith("/admin/")&&path!=="/conta/colecao/adicionar";
+  document.body.classList.toggle("shop-mobile-nav-enabled",enabled);
+  if(!enabled){mobileNavMount.replaceChildren();return;}
+  const tabs=[
+    ["Início","/","home",["/","/index.html","/ABRIR.html"].includes(path)],
+    ["Avulsas","/cartas","cards",path==="/cartas"],
+    ["Selados","/lacrados","sealed",path==="/lacrados"],
+    ["Coleção","/conta/colecao","grid",path==="/conta/colecao"||path.startsWith("/conta/colecao/")],
+    ["Carrinho","/carrinho","bag",path==="/carrinho"||path==="/checkout"]
+  ];
+  const focused=mobileNavMount.contains(document.activeElement)?document.activeElement.getAttribute("href"):null;
+  const items=tabs.map(([label,href,icon,active])=>{
+    const cart=href==="/carrinho";
+    const item=link([el("span",{class:"shop-mobile-tab-icon"},svgIcon(icon),
+      cart&&count>0?el("span",{class:"shop-mobile-cart-badge","aria-hidden":"true"},count>99?"99+":count):null),
+      el("span",{},label)],href);
+    if(active)item.setAttribute("aria-current",path===href?"page":"location");
+    if(cart&&count>0)item.setAttribute("aria-label",`Carrinho, ${count} ${count===1?"item":"itens"}`);
+    return item;
+  });
+  mobileNavMount.replaceChildren(el("nav",{class:"shop-mobile-bottom-nav","aria-label":"Acesso rápido"},items));
+  if(focused)items.find(item=>item.getAttribute("href")===focused)?.focus({preventScroll:true});
+}
 function renderNav() {
   if (!navMount) return;
   prepareCommerceShell();
   const count = state.cart.reduce((n, item) => n + item.quantity, 0);
+  renderMobileNav(count);
   const form = el("form", { class: "shop-search", role: "search", onSubmit: (e) => {
     e.preventDefault();
     const q = new FormData(form).get("q").trim();
     navigate(`/busca${q ? `?q=${encodeURIComponent(q)}` : ""}`);
-  } }, el("label", { class: "sr-only", for: "shop-search-q" }, "Buscar produtos"), el("input", { id: "shop-search-q", name: "q", type: "search", placeholder: "Busque sua pr\xF3xima carta", autocomplete: "off", value: new URLSearchParams(location.search).get("q") || "" }), button(svgIcon("search"), () => form.requestSubmit(), "shop-icon", { "aria-label": "Buscar produtos" }));
+  } }, el("label", { class: "sr-only", for: "shop-search-q" }, "Buscar produtos"), el("input", { id: "shop-search-q", name: "q", type: "search", placeholder: "Buscar cartas e produtos", autocomplete: "off", value: new URLSearchParams(location.search).get("q") || "" }), button(svgIcon("search"), () => form.requestSubmit(), "shop-icon", { "aria-label": "Buscar produtos" }));
   const links = el("nav", { id: "shop-navigation", class: "shop-navigation", "aria-label": "Navegação da loja" },
     link("Loja", "/busca"), link("Cartas avulsas", "/cartas"), link("Lacrados", "/lacrados"), link("Coleções Pokémon", "/colecoes"),
     link("Minha coleção", "/conta/colecao", "shop-mobile-nav-only"),
@@ -313,7 +341,7 @@ function renderNav() {
     if(event.relatedTarget&&profileMenu.contains(event.relatedTarget))return;
     setTimeout(()=>{if(profileMenu.isConnected&&!profileMenu.contains(document.activeElement))profileMenu.open=false;},0);
   });
-  const actions = el("div", { class: "shop-nav-actions" }, link(svgIcon("heart"), state.user?"/conta/desejos":"/favoritos", "shop-icon shop-nav-favorites"), profileMenu, button([svgIcon("bag"), el("span", { class: "shop-cart-count" }, count)], () => openCart(), "shop-icon", { "aria-label": `Abrir carrinho, ${count} ${count === 1 ? "item" : "itens"}` }));
+  const actions = el("div", { class: "shop-nav-actions" }, link(svgIcon("heart"), state.user?"/conta/desejos":"/favoritos", "shop-icon shop-nav-favorites"), profileMenu, button([svgIcon("bag"), el("span", { class: "shop-cart-count" }, count)], () => openCart(), "shop-icon shop-header-cart", { "aria-label": `Abrir carrinho, ${count} ${count === 1 ? "item" : "itens"}` }));
   actions.children[0].setAttribute("aria-label", state.user ? "Minha lista de desejos" : "Meus favoritos");
   const menuToggle=button(svgIcon("menu"), () => {
     const open = links.classList.toggle("is-open");
@@ -350,13 +378,15 @@ function setupSearchSuggestions(form){
           item.setAttribute("role","option");item.id=`shop-suggestion-${index}`;item.setAttribute("aria-selected","false");return item;
         });
         setChildren(list,options.length?options:el("p",{role:"status"},"Nenhum anúncio encontrado."));list.hidden=false;input.setAttribute("aria-expanded","true");
-      }catch{hide();}
+      }catch{if(current===version)hide();}
     },280);
   });
   input.addEventListener("keydown",event=>{
-    if(event.key==="Escape"){hide();return;}
+    if(event.key==="Escape"){++version;clearTimeout(timer);hide();return;}
     if(!list.hidden&&options.length&&["ArrowDown","ArrowUp"].includes(event.key)){
-      event.preventDefault();active=(active+(event.key==="ArrowDown"?1:-1)+options.length)%options.length;
+      event.preventDefault();
+      const direction=event.key==="ArrowDown"?1:-1;
+      active=active<0?(direction>0?0:options.length-1):(active+direction+options.length)%options.length;
       options.forEach((node,index)=>node.setAttribute("aria-selected",String(index===active)));input.setAttribute("aria-activedescendant",options[active].id);
     }else if(event.key==="Enter"&&!list.hidden&&active>=0){event.preventDefault();navigate(options[active].getAttribute("href"));}
   });
@@ -426,12 +456,12 @@ async function renderRoute() {
 async function homePage() {
   const [featured,sealed,singles,collections] = await Promise.all([api("/products?featured=true&pageSize=4"),api("/products?kind=SEALED&pageSize=4"),api("/products?kind=SINGLE&pageSize=4"),api("/collections")]);
   const section=(title,kicker,products,href)=>el("section",{class:"shop-section","aria-label":title},el("div",{class:"shop-section-top"},el("div",{},el("p",{class:"shop-kicker"},kicker),el("h2",{},title)),link("Explorar todos",href,"shop-text-link")),products.length?productGrid(products):empty("A seleção está sendo preparada.","Os anúncios publicados aparecerão aqui.",link("Explorar catálogo",href,"shop-button secondary")));
-  return el("div",{class:"shop-shell shop-home-content"},demoNotice(),el("div",{class:"shop-section-top"},el("div",{},el("p",{class:"shop-kicker"},"BKM TCG / COLECIONE O EXTRAORDINÁRIO"),el("h2",{},"O próximo capítulo é seu.")),link("Explorar catálogo","/busca","shop-text-link")),el("div",{class:"shop-categories"},link([el("span",{class:"shop-category-no"},"01"),el("h3",{},"O começo da surpresa."),el("p",{},"Boosters, boxes e produtos lacrados."),el("span",{class:"shop-text-link"},"Explorar lacrados")],"/lacrados","shop-category"),link([el("span",{class:"shop-category-no"},"02"),el("h3",{},"A carta que faltava."),el("p",{},"Encontre o próximo destaque da sua coleção."),el("span",{class:"shop-text-link"},"Explorar cartas")],"/cartas","shop-category cyan")),section("Em destaque.","SELEÇÃO BKM",asArray(featured.items),"/busca"),section("Abra novas possibilidades.","PRODUTOS LACRADOS",asArray(sealed.items),"/lacrados"),section("Para a sua coleção.","CARTAS AVULSAS",asArray(singles.items),"/cartas"),el("section",{class:"shop-section"},el("div",{class:"shop-section-top"},el("div",{},el("p",{class:"shop-kicker"},"NOVOS UNIVERSOS"),el("h2",{},"Explore as coleções.")),link("Ver coleções","/colecoes","shop-text-link")),collectionGrid(asArray(collections.items).filter(item=>item.featured).slice(0,6))),...asArray(state.config.banners).filter(b=>b.active!==false).map(b=>{const content=el("div",{class:"shop-campaign"},b.image?image(b.image,b.title):null,el("div",{},el("p",{class:"shop-kicker"},"BKM TCG"),el("h2",{},b.title),el("p",{},b.subtitle)));return b.url?.startsWith("/")&&!b.url.startsWith("//")?link(content,b.url,"shop-campaign-link"):content;}),el("div",{class:"shop-editorial"},el("p",{class:"shop-kicker"},"CADA CARTA TEM UMA HISTÓRIA"),el("h2",{},"A sua coleção merece uma nova descoberta."),el("p",{},"Lacrados e cartas avulsas em um só lugar. A identidade BKM, do primeiro pacote ao próximo encontro.")));
+  return el("div",{class:"shop-shell shop-home-content"},demoNotice(),el("div",{class:"shop-section-top"},el("div",{},el("p",{class:"shop-kicker"},"BKM TCG"),el("h2",{},"Explore a loja")),link("Explorar catálogo","/busca","shop-text-link")),el("div",{class:"shop-categories"},link([el("span",{class:"shop-category-no"},"01"),el("h3",{},"Produtos lacrados"),el("p",{},"Boosters, caixas e outros produtos fechados."),el("span",{class:"shop-text-link"},"Ver lacrados")],"/lacrados","shop-category"),link([el("span",{class:"shop-category-no"},"02"),el("h3",{},"Cartas avulsas"),el("p",{},"Compre cartas individuais para jogar ou colecionar."),el("span",{class:"shop-text-link"},"Ver cartas")],"/cartas","shop-category cyan")),section("Em destaque.","SELEÇÃO BKM",asArray(featured.items),"/busca"),section("Produtos lacrados","POKÉMON TCG",asArray(sealed.items),"/lacrados"),section("Cartas avulsas","POKÉMON TCG",asArray(singles.items),"/cartas"),el("section",{class:"shop-section"},el("div",{class:"shop-section-top"},el("div",{},el("p",{class:"shop-kicker"},"NOVOS UNIVERSOS"),el("h2",{},"Explore as coleções.")),link("Ver coleções","/colecoes","shop-text-link")),collectionGrid(asArray(collections.items).filter(item=>item.featured).slice(0,6))),...asArray(state.config.banners).filter(b=>b.active!==false).map(b=>{const content=el("div",{class:"shop-campaign"},b.image?image(b.image,b.title):null,el("div",{},el("p",{class:"shop-kicker"},"BKM TCG"),el("h2",{},b.title),el("p",{},b.subtitle)));return b.url?.startsWith("/")&&!b.url.startsWith("//")?link(content,b.url,"shop-campaign-link"):content;}),el("div",{class:"shop-editorial"},el("p",{class:"shop-kicker"},"CADA CARTA TEM UMA HISTÓRIA"),el("h2",{},"A sua coleção merece uma nova descoberta."),el("p",{},"Lacrados e cartas avulsas em um só lugar. A identidade BKM, do primeiro pacote ao próximo encontro.")));
 }
 function collectionGrid(items){
   return items.length?el("div",{class:"shop-collections-grid"},items.map(item=>link([item.image?image(item.image,item.name):el("span",{class:"shop-collection-monogram","aria-hidden":true},"✦"),el("div",{},el("p",{class:"shop-kicker"},item.id),el("h3",{},item.name),el("p",{},item.description||"Descubra os produtos desta coleção."),el("span",{class:"shop-text-link"},"Explorar coleção"))],`/busca?set=${encodeURIComponent(item.id)}`,"shop-collection"))):message("As coleções publicadas serão exibidas aqui.");
 }
-async function collectionsPage(){const data=await api("/collections");return el("div",{class:"shop-shell"},heading("UNIVERSO POKÉMON TCG","Cada coleção, uma descoberta.","Escolha uma expansão para encontrar seus próximos destaques."),collectionGrid(asArray(data.items)));}
+async function collectionsPage(){const data=await api("/collections");return el("div",{class:"shop-shell"},heading("POKÉMON TCG","Comprar por coleção","Escolha uma coleção para ver as cartas e os produtos da loja."),collectionGrid(asArray(data.items)));}
 function productGrid(products) {
   return el("div", { class: "shop-grid" }, products.map(productCard));
 }
@@ -464,14 +494,14 @@ async function catalogPage(path) {
   if(path==="/lacrados")search.set("kind","SEALED");
   search.set("pageSize","12");
   const data=await api(`/products?${search}`);
-  const title=path==="/cartas"?"Cartas avulsas.":path==="/lacrados"?"Lacrados.":search.get("q")?`Resultados para “${search.get("q")}”.`:"Encontre sua próxima carta.";
+  const title=path==="/cartas"?"Cartas avulsas":path==="/lacrados"?"Produtos lacrados":search.get("q")?`Resultados para “${search.get("q")}”`:"Todos os produtos";
   const filters=el("form",{class:"shop-filters",onSubmit:event=>{event.preventDefault();applyFilters(filters,path);}},field("Buscar","q","search",search.get("q")||"",{placeholder:"Nome, número ou coleção"}),selectField("Coleção","set",[["","Todas as coleções"],...asArray(data.facets?.sets).map(set=>[set.id,set.name])],search.get("set")||""),path!=="/lacrados"?field("Número da carta","number","text",search.get("number")||"",{placeholder:"Ex.: 276 ou 276/217"}):null,selectField("Idioma","language",[["","Todos os idiomas"],...Object.entries(languages)],search.get("language")||""),selectField("Condição","condition",[["","Todas as condições"],...Object.entries(conditions).filter(([key])=>path!=="/cartas"||key!=="SEALED")],search.get("condition")||""),path!=="/lacrados"?selectField("Acabamento","finish",[["","Todos os acabamentos"],...Object.entries(finishes)],search.get("finish")||""):null,el("div",{class:"shop-filter-prices"},field("Preço mínimo (R$)","minPrice","number",search.has("minPrice")?(Number(search.get("minPrice"))/100).toFixed(2):"",{min:"0",step:".01"}),field("Preço máximo (R$)","maxPrice","number",search.has("maxPrice")?(Number(search.get("maxPrice"))/100).toFixed(2):"",{min:"0",step:".01"})),checkbox("Somente disponíveis","available",search.get("available")==="true"),button("Aplicar filtros",()=>filters.requestSubmit(),"shop-button secondary"),link("Limpar filtros",path,"shop-text-link"));
   const sort=selectField("Ordenar por","sort",[["newest","Mais recentes"],["price_asc","Menor preço"],["price_desc","Maior preço"],["name","Nome: A a Z"]],search.get("sort")||"newest");
   sort.querySelector("select").addEventListener("change",event=>{const params=new URLSearchParams(location.search);params.set("sort",event.target.value);params.delete("page");navigate(`${path}?${params}`);});
   const pagination=data.pagination||{},total=pagination.total??data.total??data.items.length,pages=pagination.pages??Math.ceil(total/12),current=Number(search.get("page"))||1;
   const filterPanel=createCatalogFiltersPanel({el,filters,search});
   if(version===pageVersion)routeCleanup=filterPanel.destroy;else filterPanel.destroy();
-  return el("div",{class:"shop-shell"},heading("CATÁLOGO POKÉMON TCG",title,"Escolha a coleção, o idioma e os detalhes da sua próxima descoberta."),el("div",{class:"shop-catalog-layout"},el("aside",{"aria-label":"Filtros do catálogo"},filterPanel.node),el("div",{},el("div",{class:"shop-results-bar"},el("p",{},`${total} ${total===1?"produto encontrado":"produtos encontrados"}`),sort),data.items.length?productGrid(data.items):empty("Nenhum produto encontrado.","Tente remover os filtros ou buscar por outro termo.",link("Ver catálogo completo",path,"shop-button secondary")),pages>1?el("nav",{class:"shop-pagination","aria-label":"Paginação"},button("← Anterior",()=>goPage(path,current-1),"shop-button secondary",{disabled:current<=1}),el("span",{},`Página ${current} de ${pages}`),button("Próxima →",()=>goPage(path,current+1),"shop-button secondary",{disabled:current>=pages})):null)));
+  return el("div",{class:"shop-shell"},heading("CATÁLOGO POKÉMON TCG",title,"Use os filtros para escolher coleção, idioma ou condição."),el("div",{class:"shop-catalog-layout"},el("aside",{"aria-label":"Filtros do catálogo"},filterPanel.node),el("div",{},el("div",{class:"shop-results-bar"},el("p",{},`${total} ${total===1?"produto encontrado":"produtos encontrados"}`),sort),data.items.length?productGrid(data.items):empty("Nenhum produto encontrado.","Tente remover os filtros ou buscar por outro termo.",link("Ver catálogo completo",path,"shop-button secondary")),pages>1?el("nav",{class:"shop-pagination","aria-label":"Paginação"},button("← Anterior",()=>goPage(path,current-1),"shop-button secondary",{disabled:current<=1}),el("span",{},`Página ${current} de ${pages}`),button("Próxima →",()=>goPage(path,current+1),"shop-button secondary",{disabled:current>=pages})):null)));
 }
 function applyFilters(form, path) {
   const params = new URLSearchParams();
@@ -531,7 +561,7 @@ async function productPage(slug) {
   shippingBox=shippingForm({product:true,getItems:()=>chosen?.stock>0?[{variantId:chosen.id,quantity}]:[]});
   const page=el("div", { class: "shop-shell" }, demoNotice(),el("nav", { class: "shop-breadcrumb", "aria-label": "Localiza\xE7\xE3o" }, link("In\xEDcio", "/"), el("span", {}, "/"), link(productKindLabel(product.kind,{plural:true}),productKindPath(product.kind)), el("span", {}, "/"), el("span", {}, product.name)), el("div", { class: "shop-detail-layout" }, el("div", { class: "shop-gallery" }, media, asArray(product.images).length > 1 ? el("div", { class: "shop-thumbnails" }, product.images.map((img, i) => button(image(img.url, `${product.name}, imagem ${i + 1}`), () => {
     activePhoto=img;setChildren(media,image(img.url,product.name),el("span",{class:"shop-zoom-hint"},"Ampliar imagem"));
-  }, "shop-thumbnail", { "aria-label": `Ver imagem ${i + 1}` }))) : null, imageNotes), el("div", { class: "shop-detail-info" }, el("p", { class: "shop-kicker" }, product.setName || "POK\xC9MON TCG"), el("h1", {}, product.name), product.kind === "SINGLE" && product.card ? el("p", { class: "shop-muted" }, [product.card.number, product.card.rarity].filter(Boolean).join(" \xB7 ")) : null, mainPrice, el("div", { class: "shop-variants" }, el("p", { class: "shop-label" }, "Selecione sua vers\xE3o"), variantButtons), stock, el("div", { class: "shop-quantity" }, button("\u2212", () => {
+  }, "shop-thumbnail", { "aria-label": `Ver imagem ${i + 1}` }))) : null, imageNotes), el("div", { class: "shop-detail-info" }, el("p", { class: "shop-kicker" }, product.setName || "POK\xC9MON TCG"), el("h1", {}, product.name), product.kind === "SINGLE" && product.card ? el("p", { class: "shop-muted" }, [product.card.number, product.card.rarity].filter(Boolean).join(" \xB7 ")) : null, mainPrice, el("div", { class: "shop-variants" }, el("p", { class: "shop-label" }, product.kind === "SINGLE" ? "Escolha a versão da carta" : "Escolha a versão do produto"), variantButtons), stock, el("div", { class: "shop-quantity" }, button("\u2212", () => {
     quantity = Math.max(1, quantity - 1);
     qtyInput.value = quantity;shippingBox.invalidate();
   }, "shop-quantity-button", { "aria-label": "Diminuir quantidade" }), qtyInput, button("+", () => {
@@ -545,7 +575,7 @@ async function productPage(slug) {
   const personalActions=personalUI.productActions(product,()=>chosen);
   if(personalActions)page.querySelector(".shop-purchase-actions").after(personalActions);
   const related=asArray(response.related).filter(item=>item.id!==product.id);
-  if(related.length)page.append(el("section",{class:"shop-section","aria-label":"Produtos relacionados"},el("div",{class:"shop-section-top"},el("div",{},el("p",{class:"shop-kicker"},"CONTINUE EXPLORANDO"),el("h2",{},"Outras descobertas."))),productGrid(related.slice(0,4))));
+  if(related.length)page.append(el("section",{class:"shop-section","aria-label":"Produtos relacionados"},el("div",{class:"shop-section-top"},el("div",{},el("p",{class:"shop-kicker"},"CONTINUE EXPLORANDO"),el("h2",{},"Produtos parecidos"))),productGrid(related.slice(0,4))));
   return page;
 }
 function addToCart(product, variant, quantity) {
@@ -568,7 +598,7 @@ function openImageZoom(url,name){
 }
 let overlayReturnFocus=null;
 function setOverlayBackgroundInert(value){
-  for(const node of document.querySelectorAll("main,.header,footer,#shop-demo-banner")){
+  for(const node of document.querySelectorAll("main,.header,footer,#shop-demo-banner,#store-mobile-nav")){
     if(value)node.setAttribute("inert","");else node.removeAttribute("inert");
   }
 }
@@ -658,7 +688,7 @@ async function updateQuantity(id, quantity, callback) {
   }
 }
 async function cartContent(drawer = false) {
-  if (!state.cart.length) return empty("Seu carrinho espera uma descoberta.", "Explore o cat\xE1logo e escolha o pr\xF3ximo destaque da sua cole\xE7\xE3o.", link("Explorar produtos", "/busca", "shop-button"));
+  if (!state.cart.length) return empty("Seu carrinho está vazio", "Escolha um produto da loja para continuar.", link("Explorar produtos", "/busca", "shop-button"));
   const content = el("div", { class: drawer ? "" : "shop-cart-layout" });
   const rerender = async () => {
     content.querySelectorAll('.bkm-shipping-preview').forEach(form=>form.destroy?.());
@@ -685,7 +715,7 @@ function freeShippingProgress(subtotal){
   const shipping=state.config.shipping||{},threshold=shipping.enabled&&shipping.freeShippingEnabled?Number(shipping.freeShippingThresholdCents||state.config.freeShippingThresholdCents):0;
   if(!Number.isSafeInteger(threshold)||threshold<=0)return null;
   const reached=subtotal>=threshold;
-  return el("div",{class:`shop-free-shipping${reached?" is-complete":""}`},el("p",{},el("strong",{},reached?"Frete grátis desbloqueado":`Faltam ${money(Math.max(0,threshold-subtotal))}`),el("span",{},reached?"Confira a cobertura para seu CEP no checkout.":` para ganhar frete grátis em compras de ${money(threshold)}.`)),el("progress",{max:threshold,value:Math.min(Math.max(0,subtotal),threshold),"aria-label":`Progresso para frete grátis: ${money(subtotal)} de ${money(threshold)}`}),el("small",{},"Valor dos produtos após descontos. Válido nas regiões atendidas. Na cotação com transportadoras, a opção econômica fica grátis e as demais cobram a diferença."));
+  return el("div",{class:`shop-free-shipping${reached?" is-complete":""}`},el("p",{},el("strong",{},reached?"Frete grátis desbloqueado":`Faltam ${money(Math.max(0,threshold-subtotal))}`),el("span",{},reached?"Confira se seu CEP é atendido ao finalizar a compra.":` para ganhar frete grátis em compras de ${money(threshold)}.`)),el("progress",{max:threshold,value:Math.min(Math.max(0,subtotal),threshold),"aria-label":`Progresso para frete grátis: ${money(subtotal)} de ${money(threshold)}`}),el("small",{},"Valor dos produtos após descontos. Válido nas regiões atendidas. Na cotação com transportadoras, a opção econômica fica grátis e as demais cobram a diferença."));
 }
 function shippingForm(options={}) {
   const form=createShippingPreview({el,button,api,message,money},{getItems:()=>state.cart.map(item=>({variantId:item.variantId,quantity:item.quantity})),initialCep:localStorage.getItem("bkm-cep")||"",saveCep:cep=>localStorage.setItem("bkm-cep",cep),...options});
@@ -736,7 +766,7 @@ function createMercadoPagoPaymentUi({getQuote,getEmail,config,reserveOnly=false,
   method.querySelector("select").addEventListener("change",()=>{const isCard=updateMethodFields();if(isCard&&!reserveOnly)renderCard();else{++mountVersion;unmount();status.replaceChildren();}});
   const element=el("section",{class:"shop-admin-section shop-real-payment"},el("h2",{},"Pagamento com Mercado Pago"),config.environment==="sandbox"?message("AMBIENTE SANDBOX — utilize somente dados de teste do Mercado Pago. Este ambiente não recebe pagamentos comerciais."):null,method,pix,card,status);
   return{element,start:renderCard,async updateAmount(value){if(destroyed||reserveOnly)return;if(controller&&value!==amountCents){amountCents=value;if(Number.isSafeInteger(value)&&value>0){const updated=await controller.update({amount:value/100});if(!updated)await renderCard();}else{++mountVersion;unmount();}}else if(!controller&&method.querySelector("select").value==="card"&&element.isConnected)await renderCard();},async getPayment(){
-    if(destroyed)throw new Error("Reabra o checkout para continuar.");
+    if(destroyed)throw new Error("Abra novamente a página de pagamento para continuar.");
     if(method.querySelector("select").value==="pix"){
       const input=identificationNumber.querySelector("input");if(!input.reportValidity())throw new Error("Informe o documento do pagador.");const type=identificationType.querySelector("select").value,number=input.value.replace(/\D/g,"");if(number.length!==(type==="CPF"?11:14))throw new Error("Confira o número do documento do pagador.");return{provider:"mercadopago",method:"pix",payer:{email:getEmail(),identification:{type,number}}};
     }
@@ -753,8 +783,8 @@ async function checkoutPage() {
   const routeVersion=pageVersion;
   await reconcileCart();
   if(routeVersion!==pageVersion)return loading();
-  if(!state.cart.length)return el("div",{class:"shop-shell"},heading("FINALIZAR PEDIDO","Checkout."),empty("Seu carrinho está vazio.","Escolha um produto para continuar.",link("Explorar o catálogo","/busca","shop-button")));
-  if(!state.user)return el("div",{class:"shop-shell shop-checkout-login"},demoNotice(),heading("SUA PRÓXIMA DESCOBERTA","Entre para continuar.","Sua conta guarda os pedidos e permite acompanhar o pagamento e a entrega."),el("div",{class:"shop-actions"},link("Entrar na minha conta","/entrar?next=%2Fcheckout","shop-button"),link("Criar uma conta","/cadastro?next=%2Fcheckout","shop-button secondary")));
+  if(!state.cart.length)return el("div",{class:"shop-shell"},heading("SUA COMPRA","Finalizar compra"),empty("Seu carrinho está vazio","Escolha um produto para continuar.",link("Explorar produtos","/busca","shop-button")));
+  if(!state.user)return el("div",{class:"shop-shell shop-checkout-login"},demoNotice(),heading("FINALIZAR COMPRA","Entre para continuar","Na sua conta, você acompanha o pagamento e a entrega do pedido."),el("div",{class:"shop-actions"},link("Entrar na minha conta","/entrar?next=%2Fcheckout","shop-button"),link("Criar uma conta","/cadastro?next=%2Fcheckout","shop-button secondary")));
   const status=el("div",{"aria-live":"polite"}),summary=el("aside",{class:"shop-summary"},loading("Calculando o pedido…"));
   const mobileAmount=el("strong"),mobileTotal=el("div",{class:"shop-summary-total shop-checkout-mobile-total",hidden:true,"aria-live":"polite"},el("span",{},"Total do pedido"),mobileAmount);
   let currentQuote=null,quoteVersion=0,submitting=false,disposed=false,lastVerifiedCep="",shippingOptionId="",quoteTimer=null;
@@ -790,7 +820,7 @@ async function checkoutPage() {
       const order=result.order||result;if(!order.id)throw new Error("O servidor não retornou a identificação do pedido.");
       showCreatedOrder(order.id,orderedItems,customerId);
     }catch(error){if(error.fields?.orderId){showCreatedOrder(error.fields.orderId,orderedItems,customerId,true);return;}if(disposed)return;status.replaceChildren(message(displayError(error),"error"));submitting=false;submit.textContent=isDemo()?"Confirmar pedido de teste":"Confirmar pedido e ir para pagamento";await quote();}
-  }},el("h2",{},"Contato e entrega"),el("p",{class:"shop-fine"},isDemo()?"Use dados de teste. O endereço será salvo neste ambiente para demonstrar o fluxo de entrega.":"Confirme a entrega para reservar seus itens e continuar para o pagamento."),el("div",{class:"shop-form-grid"},field("Nome completo","name","text",state.user.name||"",{required:true,minlength:"2",maxlength:"120",autocomplete:"name"}),field("E-mail","email","email",state.user.email||"",{required:true,maxlength:"254",autocomplete:"email"}),field("Celular","phone","tel","",{required:true,minlength:"10",maxlength:"20",autocomplete:"tel",placeholder:"(34) 99999-9999"})),el("fieldset",{class:"shop-checkout-choice"},el("legend",{},"Como deseja receber?"),modes.map(([mode,label],index)=>el("label",{class:"shop-check shop-delivery-option"},el("input",{type:"radio",name:"shippingMethod",value:mode,checked:index===0,required:true}),el("span",{},label))),!modes.length?message("As modalidades de entrega ainda não estão disponíveis."):null,el("p",{class:"shop-fine"},"Entrega gratuita em Uberlândia exige CEP da cidade. O ponto de retirada e os detalhes da entrega local são combinados pelo WhatsApp após a confirmação do pagamento."),shipping.pickup?.enabled&&storeLocation()?el("p",{class:"shop-fine"},`Localidade da retirada: ${storeLocation()}. O ponto de retirada será combinado pelo WhatsApp após o pagamento.`):null),addressFields,serviceOptions,el("div",{class:"shop-coupon-form"},field("Cupom de desconto","coupon","text","",{placeholder:"Informe seu cupom"}),button("Atualizar valores",()=>quote(),"shop-button secondary")),el("fieldset",{class:"shop-checkout-choice"},el("legend",{},"Pagamento"),demoPayments?el("div",{},selectField("Resultado do pagamento de teste","paymentOutcome",[["approved","Aprovado — simular baixa de estoque"],["pending","Pendente — simular reserva de estoque"],["rejected","Recusado — simular liberação"],["cancelled","Cancelado — simular liberação"],["expired","Expirado — simular liberação"]],"approved"),message("SIMULAÇÃO: este pagamento não utiliza Pix, cartão ou dinheiro. Nenhuma cobrança será feita.")):realPayments?el("p",{class:"shop-fine"},"Escolha Pix ou cartão abaixo. O prazo para pagar é de 15 minutos a partir da confirmação do pedido."):message(state.config.payments?.reason||"Pagamento indisponível no momento.")),status,submit,el("p",{class:"shop-fine"},"O carrinho não reserva estoque. Os itens são reservados ao confirmar o pedido e liberados se o prazo de pagamento terminar. A preparação começa após a confirmação do pagamento."));
+  }},el("h2",{},"Contato e entrega"),el("p",{class:"shop-fine"},isDemo()?"Use dados de teste. O endereço será salvo neste ambiente para demonstrar o fluxo de entrega.":"Confirme a entrega para reservar seus itens e continuar para o pagamento."),el("div",{class:"shop-form-grid"},field("Nome completo","name","text",state.user.name||"",{required:true,minlength:"2",maxlength:"120",autocomplete:"name"}),field("E-mail","email","email",state.user.email||"",{required:true,maxlength:"254",autocomplete:"email"}),field("Celular","phone","tel","",{required:true,minlength:"10",maxlength:"20",autocomplete:"tel",placeholder:"(34) 99999-9999"})),el("fieldset",{class:"shop-checkout-choice"},el("legend",{},"Como deseja receber?"),modes.map(([mode,label],index)=>el("label",{class:"shop-check shop-delivery-option"},el("input",{type:"radio",name:"shippingMethod",value:mode,checked:index===0,required:true}),el("span",{},label))),!modes.length?message("As modalidades de entrega ainda não estão disponíveis."):null,el("p",{class:"shop-fine"},"Entrega gratuita em Uberlândia exige CEP da cidade. O ponto de retirada e os detalhes da entrega local são combinados pelo WhatsApp após a confirmação do pagamento."),shipping.pickup?.enabled&&storeLocation()?el("p",{class:"shop-fine"},`Localidade da retirada: ${storeLocation()}. O ponto de retirada será combinado pelo WhatsApp após o pagamento.`):null),addressFields,serviceOptions,el("div",{class:"shop-coupon-form"},field("Cupom de desconto","coupon","text","",{placeholder:"Informe seu cupom"}),button("Aplicar cupom",()=>quote(),"shop-button secondary")),el("fieldset",{class:"shop-checkout-choice"},el("legend",{},"Pagamento"),demoPayments?el("div",{},selectField("Resultado do pagamento de teste","paymentOutcome",[["approved","Aprovado — simular baixa de estoque"],["pending","Pendente — simular reserva de estoque"],["rejected","Recusado — simular liberação"],["cancelled","Cancelado — simular liberação"],["expired","Expirado — simular liberação"]],"approved"),message("SIMULAÇÃO: este pagamento não utiliza Pix, cartão ou dinheiro. Nenhuma cobrança será feita.")):realPayments?el("p",{class:"shop-fine"},"Escolha Pix ou cartão abaixo. O prazo para pagar é de 15 minutos a partir da confirmação do pedido."):message(state.config.payments?.reason||"Pagamento indisponível no momento.")),status,submit,el("p",{class:"shop-fine"},"O carrinho não reserva estoque. Os itens são reservados ao confirmar o pedido e liberados se o prazo de pagamento terminar. A preparação começa após a confirmação do pagamento."));
   async function quote(){
     if(disposed)return;clearTimeout(quoteTimer);
     const version=++quoteVersion,data=new FormData(checkoutForm),cep=String(data.get("cep")||"").replace(/\D/g,""),deliveryMode=String(data.get("shippingMethod")||"delivery");submit.disabled=true;currentQuote=null;serviceOptions.replaceChildren();
@@ -823,14 +853,14 @@ async function checkoutPage() {
   submit.before(mobileTotal);
   routeCleanup=()=>{disposed=true;++quoteVersion;clearTimeout(quoteTimer);realUi?.destroy();};
   const pickup=checkoutForm.querySelector("[name=shippingMethod]:checked")?.value==="pickup";addressFields.hidden=pickup;addressFields.querySelectorAll("input,select").forEach(input=>input.disabled=pickup);
-  await quote();return el("div",{class:"shop-shell"},demoNotice(),heading("UMA NOVA HISTÓRIA PARA SUA COLEÇÃO",isDemo()?"Checkout de demonstração.":"Checkout."),el("ol",{class:"shop-checkout-steps","aria-label":"Etapas da compra"},el("li",{class:"active","aria-current":"step"},"1. Contato e entrega"),el("li",{},"2. Pagamento"),el("li",{},"3. Acompanhar pedido")),el("div",{class:"shop-checkout-layout"},checkoutFlow,summary));
+  await quote();return el("div",{class:"shop-shell"},demoNotice(),heading("SUA COMPRA",isDemo()?"Finalizar compra de teste":"Finalizar compra"),el("ol",{class:"shop-checkout-steps","aria-label":"Etapas da compra"},el("li",{class:"active","aria-current":"step"},"1. Contato e entrega"),el("li",{},"2. Pagamento"),el("li",{},"3. Acompanhar pedido")),el("div",{class:"shop-checkout-layout"},checkoutFlow,summary));
 }
 function summaryRow(label, value) {
   return el("div", { class: "shop-summary-row" }, el("span", {}, label), el("span", {}, money(value)));
 }
 function authPage(path) {
   const register = path === "/cadastro";
-  if (state.user) return el("div", { class: "shop-shell shop-auth" }, heading("SUA CONTA", "Voc\xEA j\xE1 est\xE1 por aqui."), link("Ir para minha conta", "/conta", "shop-button"));
+  if (state.user) return el("div", { class: "shop-shell shop-auth" }, heading("SUA CONTA", "Você já está na sua conta"), link("Ir para minha conta", "/conta", "shop-button"));
   const authParams = new URLSearchParams(location.search);
   const googleReason = authParams.get("google");
   const googleMessages = new Map([
@@ -868,7 +898,7 @@ function authPage(path) {
     const google=button(register?"Cadastrar com Google":"Continuar com Google",async event=>{const trigger=event.currentTarget;trigger.disabled=true;status.replaceChildren();try{const requested=new URLSearchParams(location.search).get("next"),next=requested?.startsWith("/")&&!requested.startsWith("//")?requested:"/conta",result=await api("/auth/google/start",{method:"POST",body:{intent:"login",next}});if(!result.url)throw new Error("O provedor não forneceu uma URL de autenticação.");location.assign(result.url);}catch(error){status.replaceChildren(message(displayError(error),"error"));trigger.disabled=false;}},"shop-button secondary shop-google-button");
     form.prepend(google,el("p",{class:"personal-auth-separator"},"ou continue com e-mail"));
   }
-  return el("div", { class: "shop-shell shop-auth" }, heading("BEM-VINDO \xC0 BKM", register ? "Sua cole\xE7\xE3o.\nSua conta." : "Bom ter voc\xEA\npor aqui."), form);
+  return el("div", { class: "shop-shell shop-auth" }, heading("CONTA BKM", register ? "Criar conta" : "Entrar na conta"), form);
 }
 function recoveryPage(){
   const token=new URLSearchParams(location.search).get("token")||"",status=el("div",{"aria-live":"polite"});
@@ -888,7 +918,7 @@ function recoveryPage(){
       }
     }catch(error){status.replaceChildren(message(displayError(error),"error"));}finally{submit.disabled=false;}
   }},token?passwordControl:field("E-mail da conta","email","email","",{required:true,autocomplete:"email"}),confirmationControl,isDemo()&&!token?message("No ambiente de demonstração, os e-mails geram prévias seguras na administração. O envio externo depende da configuração do provedor."):null,status,el("button",{type:"submit",class:"shop-button"},token?"Salvar nova senha":"Solicitar recuperação"),link("Voltar para entrar","/entrar","shop-text-link"));
-  return el("div",{class:"shop-shell shop-auth"},heading("SUA CONTA BKM",token?"Crie uma nova senha.":"Recupere seu acesso."),form);
+  return el("div",{class:"shop-shell shop-auth"},heading("CONTA BKM",token?"Criar nova senha":"Recuperar senha"),form);
 }
 async function legacyAccountPage() {
   if (!state.user) {

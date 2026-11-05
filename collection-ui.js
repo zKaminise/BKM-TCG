@@ -293,7 +293,7 @@ export function createCollectionUI(ctx) {
             button("Editar",()=>{dialog.close();edit(record,load);},"shop-button"),
             button("Duplicar exemplar",()=>{dialog.close();startDuplicate(record);},"shop-button secondary"),
             closed
-              ?button("Restaurar",()=>{dialog.close();confirm("Restaurar item","Restaurar este registro para o acervo ativo?",()=>mutate({action:"restore",ids:[record.id]}));},"shop-button secondary")
+              ?button("Restaurar",()=>{dialog.close();confirm("Restaurar item","Colocar este item de volta na sua coleção?",()=>mutate({action:"restore",ids:[record.id]}));},"shop-button secondary")
               :button("Registrar saída",()=>{dialog.close();sell([record]);},"shop-button secondary")),
           el("details",{class:"collection-inventory-advanced"},el("summary",{},"Histórico e outras ações"),
             eventsNode(result.events),

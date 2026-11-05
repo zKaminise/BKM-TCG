@@ -2,6 +2,79 @@
 .shop-navigation > .shop-mobile-nav-only { display: none; }
 .shop-catalog-filter-panel > .shop-catalog-filter-toggle { display: none; }
 .shop-checkout-mobile-total { display: none; }
+.shop-mobile-bottom-nav { display: none; }
+
+@media (max-width: 760px), (max-width: 950px) and (max-height: 540px) and (orientation: landscape) {
+  body.shop-mobile-nav-enabled {
+    --shop-mobile-nav-row: 58px;
+    --shop-mobile-nav-space: calc(var(--shop-mobile-nav-row) + env(safe-area-inset-bottom, 0px));
+    padding-bottom: var(--shop-mobile-nav-space);
+  }
+  .shop-mobile-bottom-nav {
+    position: fixed;
+    z-index: 40;
+    inset: auto 0 0;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    padding: 0 max(5px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(5px, env(safe-area-inset-left));
+    box-shadow: inset 0 1px #353b42, 0 -5px 22px #0007;
+    background: #101215;
+  }
+  .shop-mobile-bottom-nav > a {
+    min-height: var(--shop-mobile-nav-row);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    color: #bdc7cf;
+    font-size: clamp(10px, 3vw, 12px);
+    font-weight: 600;
+    line-height: 1.15;
+    text-align: center;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .shop-mobile-bottom-nav > a[aria-current] { color: #fff; background: #ff4a560b; }
+  .shop-mobile-bottom-nav > a[aria-current] .shop-mobile-tab-icon { color: #ff4a56; }
+  .shop-mobile-bottom-nav > a:focus-visible { outline: 2px solid var(--cyan); outline-offset: -3px; border-radius: 5px; }
+  .shop-mobile-tab-icon { position: relative; display: flex; }
+  .shop-mobile-tab-icon svg { width: 21px; height: 21px; }
+  .shop-mobile-cart-badge {
+    position: absolute;
+    top: -5px;
+    left: 67%;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 3px;
+    border: 1px solid #101215;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    background: #d92332;
+    color: #fff;
+    font-size: 9px;
+  }
+  .shop-overlay-open .shop-mobile-bottom-nav,
+  .shop-mobile-nav-enabled .shop-header-cart { display: none; }
+  .shop-mobile-nav-enabled .experience .stage-bottom { bottom: calc(var(--shop-mobile-nav-space) + 8px); }
+  .shop-mobile-nav-enabled .shop-toast { bottom: calc(var(--shop-mobile-nav-space) + 12px); }
+}
+@media (max-width: 760px) and (orientation: portrait) {
+  .shop-mobile-nav-enabled .experience .stage { min-height: 0; }
+  .shop-mobile-nav-enabled .experience .hero-copy .hero-category-links { display: none; }
+  .shop-mobile-nav-enabled .experience .reveal-copy { bottom: calc(var(--shop-mobile-nav-space) + 72px); }
+}
+@media (max-width: 950px) and (max-height: 540px) and (orientation: landscape) {
+  body.shop-mobile-nav-enabled { --shop-mobile-nav-row: 49px; }
+  .shop-mobile-nav-enabled .experience .stage { min-height: 0; }
+  .shop-mobile-nav-enabled .experience .reveal-copy { bottom: calc(var(--shop-mobile-nav-space) + 54px); }
+}
+@media (max-width: 950px) and (hover: none) and (pointer: coarse) {
+  body:has(input:is([type="search"],[type="text"],[type="email"],[type="password"],[type="tel"],[type="number"],[type="url"]):focus,textarea:focus) .shop-mobile-bottom-nav {
+    visibility: hidden;
+  }
+}
 
 @media (max-width: 760px) {
   .shop-route-page .shop-shell { padding: 32px 5% 64px; }
@@ -46,10 +119,10 @@
   .shop-navigation > .shop-mobile-nav-only { display: flex; }
   .shop-route-collection .header { margin-bottom: 8px; }
   .shop-route-collection .shop-nav-content > .shop-search { display: none; }
-  .shop-navigation.is-open { max-height: calc(100svh - 131px); overflow-y: auto; overscroll-behavior: contain; gap: 4px; padding: 16px 5% 20px; }
+  .shop-navigation.is-open { max-height: calc(100svh - 131px - var(--shop-mobile-nav-space, 0px)); overflow-y: auto; overscroll-behavior: contain; gap: 4px; padding: 16px 5% 20px; }
   .shop-navigation.is-open > a { display: flex; align-items: center; width: 100%; min-height: 44px; font-size: 16px; padding: 9px 4px; }
   .shop-search .shop-icon, .shop-close { width: 44px; min-width: 44px; height: 44px; }
-  .shop-profile-dropdown { max-height: calc(100svh - 120px); overflow-y: auto; overscroll-behavior: contain; }
+  .shop-profile-dropdown { max-height: calc(100svh - 120px - var(--shop-mobile-nav-space, 0px)); overflow-y: auto; overscroll-behavior: contain; }
   .shop-profile-dropdown > a:not(.shop-button), .shop-profile-dropdown > .shop-text-link {
     min-height: 44px;
     display: flex;

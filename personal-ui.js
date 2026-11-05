@@ -1,4 +1,5 @@
 import { createCollectionUI } from "./collection-ui.js";
+import { createCollectionSearchScheduler } from "./collection-domain.js";
 import {createPasswordField} from './password-ui.js';
 import {createShippingOriginLookup} from './shipping-admin-ui.js';
 // Private collector workspace. All data and mutations go through the authenticated API.
@@ -10,6 +11,9 @@ const ICON_PATHS = {
   menu: ["M4 6h16M4 12h16M4 18h16"], search: ["M21 21l-5-5", "M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0"],
   collection: ["M8 3h12v16H8z", "M4 7v14h12", "M11 7h6M11 11h6M11 15h3"],
   grid: ["M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"],
+  home: ["m3 10 9-7 9 7", "M5 9v11h14V9", "M10 20v-6h4v6"],
+  cards: ["M9 3h10a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z", "M6 6 3.5 7a2 2 0 0 0-1 2.5L6 21"],
+  sealed: ["m12 3 9 5v8l-9 5-9-5V8l9-5Z", "m3 8 9 5 9-5", "M12 13v8"],
   orders: ["M5 3h14v18l-3-2-4 2-4-2-3 2V3Z", "M9 7h6M9 11h6M9 15h3"],
   pin: ["M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0Z", "M15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0"],
   settings: ["M4 6h16M4 12h16M4 18h16", "M8 3v6M16 9v6M10 15v6"],
@@ -82,7 +86,7 @@ export function createPersonalUI(ctx) {
     // modal trapping focus over the destination route.
     for(const open of document.querySelectorAll("dialog.personal-dialog[open]"))open.close();
   });
-  function title(kicker, text, description) {return el("div",{class:"personal-heading"},el("p",{class:"shop-kicker"},kicker),el("h1",{},text),description?el("p",{class:"shop-lead"},description):null);}
+  function title(kicker, text, description) {return el("div",{class:"personal-heading"},kicker?el("p",{class:"shop-kicker"},kicker):null,el("h1",{},text),description?el("p",{class:"shop-lead"},description):null);}
   function panel(text, ...children) {return el("section",{class:"personal-panel"},el("h2",{},text),...children);}
   function stat(label, value, note, icon="collection") {return el("div",{class:"personal-stat"},svgIcon(icon),el("span",{},label),el("strong",{},value??"—"),note?el("small",{},note):null);}
   function rowTable(labels,rows) {return el("div",{class:"shop-table-wrap"},el("table",{class:"shop-table"},el("thead",{},el("tr",{},labels.map(text=>el("th",{},text)))),el("tbody",{},rows.map(row=>el("tr",{},row.map(cell=>el("td",{},cell)))))));}
@@ -109,8 +113,8 @@ export function createPersonalUI(ctx) {
   }
   function collectionNav(path) {
     const section="/conta/colecao";
-    const tabs=[["Acervo",section],["Fichários",`${section}/colecoes`],["Faltantes",`${section}/faltantes`]];
-    const more=[["Avaliação",`${section}/valores`],["Importar / exportar",`${section}/importar`]];
+    const tabs=[["Meus itens",section],["Fichários",`${section}/colecoes`],["Cartas que faltam",`${section}/faltantes`]];
+    const more=[["Valores da coleção",`${section}/valores`],["Importar ou exportar",`${section}/importar`]];
     const active=href=>path===href||href.endsWith("/colecoes")&&path.startsWith(`${href}/`)||href===section&&path===`${section}/cartas`;
     const tab=([text,href])=>{
       const node=link(text,href,active(href)?"active":"");
@@ -128,9 +132,22 @@ export function createPersonalUI(ctx) {
   const collectionUI=createCollectionUI({...ctx,svgIcon,collectionNav});
   function progress(set) {
     const percent=Math.max(0,Math.min(100,Number(set.completionPercent)||0));
-    return el("div",{class:"personal-progress"},el("div",{},el("span",{},`${set.ownedCards??0} de ${set.totalCards??0} cartas`),el("strong",{},`${percent.toLocaleString("pt-BR",{maximumFractionDigits:1})}%`)),el("progress",{max:"100",value:String(percent),"aria-label":`Conclusão de ${set.name||"coleção"}: ${percent}%`}),el("small",{},set.missingCards?`Faltam ${set.missingCards} cartas para seu objetivo.`:set.totalCards?"Objetivo concluído!":"Checklist aguardando catálogo de referência."));
+    const versions=arr(set.goal?.variants).length>0,remaining=set.missingCards||0;
+    const total=versions?`${set.ownedTargets??0} de ${set.requiredTargets??0} versões`:`${set.ownedCards??0} de ${set.totalCards??0} cartas`;
+    const pending=versions?(remaining===1?"Há versões faltando em 1 carta.":`Faltam versões em ${remaining} cartas.`)
+      :(remaining===1?"Falta 1 carta.":`Faltam ${remaining} cartas.`);
+    return el("div",{class:"personal-progress"},el("div",{},el("span",{},total),
+      el("strong",{},`${percent.toLocaleString("pt-BR",{maximumFractionDigits:1})}%`)),
+      el("progress",{max:"100",value:String(percent),"aria-label":`Progresso de ${set.name||"fichário"}`}),
+      el("small",{},remaining?pending:set.totalCards?"Meta completa!":"Lista de cartas indisponível no momento."));
   }
-  function setCards(sets) {return el("div",{class:"personal-sets"},sets.map(set=>link([el("div",{class:"personal-set-art"},set.image?image(set.image,set.name):svgIcon("collection")),el("div",{},el("p",{class:"shop-kicker"},`${set.setId||set.id} · ${friendly(languages,set.language)}`),el("h3",{},set.name),progress(set),el("span",{class:"shop-text-link"},"Abrir fichário ↗"))],`/conta/colecao/colecoes/${encodeURIComponent(set.id)}`,"personal-set")));}
+  function setCards(sets,{missingOnly=false}={}) {
+    return el("div",{class:"personal-sets"},sets.map(set=>link([
+      el("div",{class:"personal-set-art"},set.image?image(set.image,""):svgIcon("collection")),
+      el("div",{},el("h3",{},set.name),el("p",{class:"shop-muted personal-set-language"},friendly(languages,set.language)),progress(set),
+        el("span",{class:"shop-text-link"},missingOnly?"Ver cartas que faltam":"Abrir fichário"))
+    ],`/conta/colecao/colecoes/${encodeURIComponent(set.id)}${missingOnly?"?state=missing":""}`,"personal-set")));
+  }
   async function overview() {
     const [summary,orders]=await Promise.all([api(`${root}/summary`),api("/account/orders")]);
     const totals=summary.totals||{};
@@ -145,29 +162,168 @@ export function createPersonalUI(ctx) {
         stat("Valor gasto",money(totals.paidCents||0),null,"bag")),
       panel("Pedidos recentes",arr(orders.items).length?ordersList(orders.items.slice(0,4)):el("p",{class:"shop-muted"},"Seus próximos pedidos aparecerão aqui.")),
       el("div",{class:"personal-section-heading"},el("h2",{},"Meus fichários"),link("Ver todos","/conta/colecao/colecoes","shop-text-link")),
-      arr(summary.sets).length?setCards(summary.sets.slice(0,4)):empty("Monte um fichário","Escolha uma expansão e acompanhe as cartas que você tem.",button([svgIcon("plus"),"Adicionar coleção"],addSet,"shop-button secondary")));
+      arr(summary.sets).length?setCards(summary.sets.slice(0,4)):empty("Monte um fichário","Escolha uma expansão e acompanhe as cartas que você tem.",button([svgIcon("plus"),"Criar fichário"],addSet,"shop-button secondary")));
   }
   async function setsPage() {
-    const data=await api(`${root}/sets`);
-    return el("div",{},title("FICHÁRIOS PESSOAIS","Uma história em cada coleção.","Catálogos de referência independentes do estoque da BKM."),collectionNav("/conta/colecao/colecoes"),el("div",{class:"personal-section-heading"},el("h2",{},`${arr(data.items).length} coleções acompanhadas`),button([svgIcon("plus"),"Adicionar coleção"],()=>addSet(),"shop-button")),arr(data.items).length?setCards(data.items):empty("Comece pelo seu universo favorito.","Escolha uma expansão Pokémon. Nenhuma carta será marcada como possuída automaticamente.",button("Escolher coleção",()=>addSet(),"shop-button secondary")));
+    const sets=arr((await api(`${root}/sets`)).items);
+    return el("div",{},title("","Fichários","Acompanhe as cartas que você tem e as que faltam em cada expansão Pokémon. Cartas já cadastradas no idioma escolhido entram no progresso."),
+      collectionNav("/conta/colecao/colecoes"),
+      el("div",{class:"personal-section-heading personal-binder-heading"},el("h2",{},sets.length===1?"1 fichário":`${sets.length} fichários`),
+        button([svgIcon("plus"),"Criar fichário"],addSet,"shop-button")),
+      sets.length?setCards(sets):empty("Seu primeiro fichário","Escolha uma expansão para acompanhar a numeração principal ou montar um Master Set."));
   }
-  function goalFields(goal={}) {return el("fieldset",{class:"personal-fieldset"},el("legend",{},"Objetivo de completude"),selectField("Modo","goalMode",[["basic","Coleção básica: numeração principal"],["custom","Coleção personalizada"]],goal.mode||"basic"),checkbox("Incluir cartas secretas","includeSecrets",!!goal.includeSecrets),el("p",{class:"shop-fine"},"No objetivo personalizado, selecione os acabamentos. Cartas promocionais só entram quando associadas ao catálogo de referência."),el("div",{class:"personal-checks"},variants.map(([id,label])=>checkbox(label,`goal-${id}`,arr(goal.variants).includes(id)))));}
-  function readGoal(form) {const values=new FormData(form);return{mode:values.get("goalMode")||"basic",includeSecrets:values.get("includeSecrets")==="on",variants:variants.filter(([id])=>values.get(`goal-${id}`)==="on").map(([id])=>id)};}
+  const goalVariants=[
+    ["NORMAL","Normal (sem efeito holográfico)"],
+    ["HOLO","Holo (brilho na ilustração)"],
+    ["REVERSE","Reverse holo (brilho ao redor da ilustração)"],
+    ["PROMO","Promocional"],
+    ["FIRST_EDITION","Primeira edição"],
+    ["POKE_BALL","Padrão Poké Ball"],
+    ["MASTER_BALL","Padrão Master Ball"],
+    ["OTHER","Outra versão"]
+  ];
+  function goalFields(goal={}) {
+    const selected=arr(goal.variants);
+    const choices=goalVariants.map(([id,label])=>checkbox(label,`goal-${id}`,selected.includes(id)));
+    return el("fieldset",{class:"personal-fieldset personal-goal-fields"},
+      el("legend",{},"Meta do fichário"),
+      selectField("Cartas que entram na meta","goalNumbering",[
+        ["basic","Numeração principal (Base Set)"],
+        ["complete","Coleção completa / Master Set"]
+      ],goal.includeSecrets?"complete":"basic"),
+      el("p",{class:"personal-goal-help"},"O Base Set vai até o último número principal, como 217/217. A coleção completa inclui também as cartas secretas, que têm um número acima do total impresso, como 218/217."),
+      el("details",{class:"collection-section-filter personal-goal-options",open:selected.length>0},
+        el("summary",{},"Exigir versões específicas (opcional)"),
+        el("div",{},
+          el("p",{class:"personal-goal-help"},"Deixe as opções em branco para contar uma carta de qualquer versão por número. Se você escolher até seis versões, cada uma passa a ser exigida em todos os números. Algumas cartas podem não ter a versão escolhida."),
+          el("div",{class:"personal-checks"},choices))));
+  }
+  function readGoal(form,previous={}) {
+    const values=new FormData(form),includeSecrets=values.get("goalNumbering")==="complete";
+    const versions=goalVariants.filter(([id])=>values.get(`goal-${id}`)==="on").map(([id])=>id);
+    if(versions.length>6)throw new Error("Escolha até seis versões para a meta do fichário.");
+    return {mode:includeSecrets||versions.length||previous.mode==="custom"?"custom":"basic",includeSecrets,variants:versions};
+  }
   function addSet() {
-    const status=statusRegion(),results=el("div",{class:"personal-set-results"}),language=selectField("Idioma do catálogo","language",languages,"pt"),query=field("Pesquisar coleção","q","search","",{placeholder:"Ex.: Heróis Excelsos"});
-    let selected=null,modal;
-    const choose=el("div"),form=el("form",{class:"personal-form",onSubmit:event=>{event.preventDefault();const trigger=form.querySelector("[type=submit]");run(trigger,status,async()=>{selected=null;choose.replaceChildren();const data=await api(`${root}/catalog/sets?language=${encodeURIComponent(language.querySelector("select").value)}&q=${encodeURIComponent(query.querySelector("input").value.trim())}`);results.replaceChildren(...arr(data.items).map(set=>button([set.image?image(set.image,set.name):svgIcon("collection"),el("span",{},el("strong",{},set.name),el("small",{},`${set.id} · ${set.totalCards??"—"} cartas`))],event=>{selected=set;results.querySelectorAll("button").forEach(node=>node.classList.remove("selected"));event.currentTarget.classList.add("selected");choose.replaceChildren(el("p",{class:"shop-message success"},`Selecionada: ${set.name}`));},"personal-set-choice")));if(!arr(data.items).length)results.append(message("Nenhuma coleção encontrada. Tente outro idioma ou termo."));});}},el("div",{class:"shop-form-grid"},query,language),el("button",{type:"submit",class:"shop-button secondary"},"Pesquisar catálogo"),results,choose,goalFields(),status,button("Confirmar coleção",event=>run(event.currentTarget,status,async()=>{if(!selected)throw new Error("Pesquise e selecione uma coleção primeiro.");const response=await api(`${root}/sets`,{method:"POST",body:{setId:selected.id,language:language.querySelector("select").value,goal:readGoal(form)}});modal.close();toast("Coleção adicionada. Agora marque suas cartas.");const set=response.collection||response.item||response;navigate(set.id?`/conta/colecao/colecoes/${encodeURIComponent(set.id)}`:"/conta/colecao/colecoes");}),"shop-button"));
-    modal=dialog("Adicionar coleção",form);
+    const status=statusRegion(),hint=el("p",{class:"personal-binder-search-status",role:"status",id:"binder-search-status"}),
+      results=el("div",{class:"personal-set-results",id:"binder-search-results"}),
+      language=selectField("Idioma das cartas","language",languages,"pt"),
+      query=field("Buscar expansão","q","search","",{placeholder:"Ex. Heróis Excelsos",maxlength:100,autocomplete:"off",
+        enterkeyhint:"search","aria-controls":results.id,"aria-describedby":hint.id});
+    const input=query.querySelector("input"),languageInput=language.querySelector("select"),goals=goalFields();
+    let selected=null,modal,request=null,searched="",saving=false;
+    const chosenTitle=el("p",{class:"personal-binder-choice-name"});
+    const confirmation=el("div",{class:"personal-binder-confirmation",hidden:true},chosenTitle,goals,status,
+      button("Criar fichário",save,"shop-button"));
+    const form=el("form",{class:"personal-form personal-binder-form",onSubmit:event=>{
+      event.preventDefault();
+      if(input.value.trim()!==searched)search.flush();
+    }},query,el("details",{class:"personal-binder-language"},el("summary",{},"Mudar idioma das cartas"),language),
+      hint,results,confirmation);
+
+    function schedule(event) {
+      if(event?.isComposing||saving)return;
+      request?.abort();
+      search.cancel();
+      searched="";
+      selected=null;
+      confirmation.hidden=true;
+      status.replaceChildren();
+      results.replaceChildren();
+      results.removeAttribute("aria-busy");
+      if(input.value.trim().length<2){
+        hint.textContent="Digite pelo menos 2 letras ou números.";
+        return;
+      }
+      hint.textContent="Buscando expansões…";
+      search.schedule();
+    }
+
+    async function suggest() {
+      const term=input.value.trim();
+      if(term.length<2||!modal?.open)return;
+      request?.abort();
+      const current=new AbortController();
+      request=current;
+      searched=term;
+      const query=new URLSearchParams({q:term,language:languageInput.value,pageSize:"12"});
+      const active=()=>modal.open&&!current.signal.aborted&&request===current;
+      results.setAttribute("aria-busy","true");
+      try {
+        const data=await api(`${root}/catalog/sets?${query}`,{signal:current.signal});
+        if(!active())return;
+        const matches=arr(data.items);
+        hint.textContent=matches.length
+          ?data.total>matches.length?"Digite mais para refinar a busca.":"Escolha uma expansão."
+          :"Nenhuma expansão encontrada. Tente outro nome ou idioma.";
+        results.replaceChildren(...matches.map(set=>button([
+          set.image?image(set.image,""):svgIcon("collection"),
+          el("span",{},el("strong",{},set.name),Number.isInteger(set.totalCards)?el("small",{},`${set.totalCards} cartas`):null)
+        ],event=>{
+          if(saving)return;
+          selected=set;
+          for(const option of results.querySelectorAll("button")){
+            const chosen=option===event.currentTarget;
+            option.classList.toggle("selected",chosen);
+            option.setAttribute("aria-pressed",String(chosen));
+          }
+          chosenTitle.textContent=set.name;
+          confirmation.hidden=false;
+        },"personal-set-choice",{"aria-pressed":"false"})));
+      }catch(error){
+        if(!active()||error.name==="AbortError")return;
+        hint.textContent="Não foi possível buscar as expansões.";
+        results.replaceChildren(button("Tentar novamente",()=>search.flush(),"shop-button secondary"));
+      }finally{
+        if(active())results.removeAttribute("aria-busy");
+      }
+    }
+
+    async function save(event) {
+      if(!selected||saving)return;
+      saving=true;
+      form.inert=true;
+      const setId=selected.id,language=selected.language||languageInput.value;
+      try{
+        await run(event.currentTarget,status,async()=>{
+          const goal=readGoal(form);
+          const response=await api(`${root}/sets`,{method:"POST",body:{setId,language,goal}});
+          if(!modal.open)return;
+          modal.close();
+          toast("Fichário pronto. Agora você pode registrar suas cartas.");
+          const set=response.collection||response.item||response;
+          navigate(set.id?`/conta/colecao/colecoes/${encodeURIComponent(set.id)}`:"/conta/colecao/colecoes");
+        });
+      }finally{
+        form.inert=false;
+        saving=false;
+      }
+    }
+
+    const search=createCollectionSearchScheduler(suggest,{delay:200});
+    input.addEventListener("input",schedule);
+    input.addEventListener("compositionend",schedule);
+    languageInput.addEventListener("change",schedule);
+    modal=dialog("Criar fichário",form);
+    modal.addEventListener("close",()=>{request?.abort();search.dispose();},{once:true});
+    input.focus();
+    schedule();
   }
   function filterForm(path, fields) {
     const query=new URLSearchParams(location.search),form=el("form",{class:"personal-filters",onSubmit:event=>{event.preventDefault();const search=new URLSearchParams();for(const [key,value]of new FormData(form))if(value)search.set(key,value);navigate(`${path}${search.size?`?${search}`:""}`);}},...fields(query),el("div",{class:"shop-actions"},el("button",{type:"submit",class:"shop-button secondary"},"Aplicar filtros"),link("Limpar",path,"shop-text-link")));
     return form;
   }
   function pager(data,path) {const page=Number(data.page||data.pagination?.page)||1,total=Number(data.total??data.pagination?.total)||0,size=Number(data.pageSize||data.pagination?.pageSize)||48,pages=Math.max(1,Math.ceil(total/size));const go=p=>{const query=new URLSearchParams(location.search);query.set("page",p);navigate(`${path}?${query}`);};return pages>1?el("nav",{class:"shop-pagination","aria-label":"Paginação da coleção"},button("← Anterior",()=>go(page-1),"shop-button secondary",{disabled:page<=1}),el("span",{},`Página ${page} de ${pages}`),button("Próxima →",()=>go(page+1),"shop-button secondary",{disabled:page>=pages})):null;}
-  async function checklistPage(id, missingOnly=false) {
+  async function checklistPage(id) {
     const path=id?`/conta/colecao/colecoes/${encodeURIComponent(id)}`:"/conta/colecao/faltantes";
-    if(!id){const sets=await api(`${root}/sets`);return el("div",{},title("CADA ESPAÇO, UMA PRÓXIMA DESCOBERTA","As cartas que faltam.","Abra um fichário para consultar suas faltantes e os anúncios compatíveis."),collectionNav(path),arr(sets.items).length?setCards(sets.items.filter(item=>item.missingCards>0)):empty("Nenhum objetivo em acompanhamento.","Adicione uma coleção para descobrir quais cartas faltam.",button("Adicionar coleção",()=>addSet(),"shop-button")));}
-    const query=new URLSearchParams(location.search);query.set("pageSize","48");if(missingOnly)query.set("state","missing");
+    if(!id){
+      const sets=arr((await api(`${root}/sets`)).items),incomplete=sets.filter(set=>set.missingCards>0);
+      return el("div",{},title("","Cartas que faltam","Escolha um fichário para ver só as cartas que ainda precisa encontrar."),
+        collectionNav(path),incomplete.length?setCards(incomplete,{missingOnly:true}):sets.length
+          ?empty("Seus fichários estão em dia.","Você pode abrir um fichário para conferir as cartas.",link("Ver fichários","/conta/colecao/colecoes","shop-button secondary"))
+          :empty("Você ainda não tem um fichário.","Escolha uma expansão para começar.",button("Criar fichário",addSet,"shop-button")));
+    }
+    const query=new URLSearchParams(location.search);query.set("pageSize","48");
     const data=await api(`${root}/sets/${encodeURIComponent(id)}?${query}`),set=data.collection||{},items=arr(data.items),selected=new Set(),selectionText=el("span",{"aria-live":"polite"},"Nenhuma carta selecionada");let lastChecked=-1;
     const selectedInputs=[],batchRequests=new Map();
     const drawCard=(card,index)=>{
@@ -194,13 +350,26 @@ export function createPersonalUI(ctx) {
       field("Raridade","rarity","text",q.get("rarity")||""),
       selectField("Acabamento","variant",[["","Todos"],...variants],q.get("variant")||""),
       selectField("Ordenar por","sort",[["number","Número"],["name","Nome"],["price_asc","Menor referência"],["price_desc","Maior referência"],["rarity","Raridade"],["added","Data de adição"]],q.get("sort")||"number")]);
-    return el("div",{},title("MEU FICHÁRIO",set.name||"Coleção",`${set.setId||""} · ${friendly(languages,set.language)}`),collectionNav(path),
-      el("div",{class:"personal-set-overview"},progress(set),el("div",{class:"shop-actions"},button("Ajustar objetivo",()=>editGoal(set),"shop-button secondary"),link("Ver anúncios desta coleção",`/busca?set=${encodeURIComponent(set.setId||"")}`,"shop-text-link"))),
-      el("details",{class:"collection-section-filter",open:["q","state","rarity","variant","sort"].some(key=>query.has(key))},el("summary",{},"Buscar e filtrar"),filters),
+    const showingMissing=query.get("state")==="missing";
+    const meta=[friendly(languages,set.language),set.goal?.includeSecrets?"Coleção completa / Master Set":"Numeração principal (Base Set)"];
+    return el("div",{},title("MEU FICHÁRIO",set.name||"Coleção",meta.join(" · ")),collectionNav(path),
+      el("div",{class:"personal-set-overview"},progress(set),el("div",{class:"shop-actions"},button("Alterar meta",()=>editGoal(set),"shop-button secondary"),link("Ver anúncios desta coleção",`/busca?set=${encodeURIComponent(set.setId||"")}`,"shop-text-link"))),
+      showingMissing?el("p",{class:"shop-muted personal-binder-search-status"},"Mostrando só as cartas que faltam. ",link("Ver todas",path,"shop-text-link")):null,
+      el("details",{class:"collection-section-filter",open:["q","rarity","variant","sort"].some(key=>query.has(key))||(query.has("state")&&!showingMissing)},el("summary",{},"Buscar e filtrar"),filters),
       items.length?el("div",{class:"personal-card-grid"},items.map(drawCard)):empty("Nenhuma carta encontrada.","Experimente outro filtro."),
       pager(data,path),items.length?batch:null);
   }
-  function editGoal(set){const status=statusRegion();let modal;const form=el("form",{class:"personal-form",onSubmit:event=>{event.preventDefault();run(form.querySelector("[type=submit]"),status,async()=>{await api(`${root}/sets/${encodeURIComponent(set.id)}`,{method:"PUT",body:{goal:readGoal(form)}});modal.close();toast("Objetivo atualizado.");await refresh();});}},goalFields(set.goal),status,el("button",{type:"submit",class:"shop-button"},"Salvar objetivo"));modal=dialog("Objetivo da coleção",form);}
+  function editGoal(set){
+    const status=statusRegion();let modal;
+    const form=el("form",{class:"personal-form",onSubmit:event=>{
+      event.preventDefault();
+      run(form.querySelector("[type=submit]"),status,async()=>{
+        await api(`${root}/sets/${encodeURIComponent(set.id)}`,{method:"PUT",body:{goal:readGoal(form,set.goal)}});
+        modal.close();toast("Meta do fichário atualizada.");await refresh();
+      });
+    }},goalFields(set.goal),status,el("button",{type:"submit",class:"shop-button"},"Salvar meta"));
+    modal=dialog("Editar meta do fichário",form);
+  }
   function cardDetails(card,set={}){
     const offers=arr(card.offers);
     dialog(card.name,el("div",{class:"personal-card-detail"},
@@ -266,7 +435,7 @@ export function createPersonalUI(ctx) {
       return snapshot?{...snapshot,observedAt:point.observedAt}:null;
     }).filter(point=>point&&Number.isFinite(Date.parse(point.observedAt||point.createdAt||point.quotedAt||point.date))&&Number.isFinite(point.valueCents??point.estimatedValueCents));
     const sales=totals.sales||{};
-    return el("div",{},title("","Avaliação da coleção"),collectionNav(path),
+    return el("div",{},title("","Valores da coleção"),collectionNav(path),
       el("div",{class:"personal-stats collection-valuation-stats"},
         stat("Valor estimado",known?money(totals.estimatedValueCents):"—",known>0&&known<totals.quantity?"Parcial":null,"chart"),
         stat("Valor gasto",money(totals.paidCents||0),null,"bag")),
@@ -299,7 +468,23 @@ export function createPersonalUI(ctx) {
     function invalidatePreview(){previewGeneration++;validatedCsv=null;preview.replaceChildren();}
     const status=statusRegion(),preview=el("div"),csv=field("Conteúdo CSV","csv","textarea","",{rows:"8",placeholder:"tcg,setId,number,language,condition,variant,quantity,paidCents,acquiredAt"}),file=el("input",{type:"file",accept:".csv,text/csv","aria-label":"Arquivo CSV",onChange:async event=>{const chosen=event.target.files?.[0];invalidatePreview();if(!chosen)return;const readGeneration=previewGeneration;if(chosen.size>1024*1024){status.replaceChildren(message("Escolha um CSV com até 1 MB.","error"));return;}const contents=await chosen.text();if(readGeneration===previewGeneration&&file.isConnected)csv.querySelector("textarea").value=contents;}});
     const form=el("form",{class:"personal-form",onInput:()=>{invalidatePreview();status.replaceChildren();},onSubmit:event=>{event.preventDefault();const requestedGeneration=++previewGeneration,submittedCsv=csv.querySelector("textarea").value;validatedCsv=null;preview.replaceChildren();run(form.querySelector("[type=submit]"),status,async()=>{const result=await api(`${root}/import/preview`,{method:"POST",body:{csv:submittedCsv}});if(requestedGeneration!==previewGeneration||!form.isConnected)return;validatedCsv=submittedCsv;const rows=arr(result.rows),errors=arr(result.errors);const confirm=button("Confirmar importação validada",event=>run(event.currentTarget,status,async()=>{if(requestedGeneration!==previewGeneration||validatedCsv!==csv.querySelector("textarea").value){invalidatePreview();throw new Error("O CSV foi alterado. Valide novamente antes de importar.");}await api(`${root}/import/confirm`,{method:"POST",body:{token:result.token,consolidate:!!preview.querySelector("[name=consolidate]")?.checked}});toast("Importação concluída sem alterar o estoque da loja.");navigate("/conta/colecao/cartas");}),"shop-button",{disabled:!result.token||result.canConfirm===false||errors.length>0});preview.replaceChildren(el("h3",{},"Prévia da importação"),checkbox("Consolidar quantidades de lotes equivalentes identificados","consolidate",false),el("p",{class:"shop-muted"},`${result.validCount??rows.filter(row=>row.valid!==false).length} linhas válidas · ${errors.length} erros · ${result.duplicateCount??arr(result.duplicates).length} duplicatas identificadas`),errors.length?message(errors.map(error=>typeof error==="string"?error:`Linha ${error.line??error.row??""}: ${error.message||error.error}`).join("\n"),"error"):null,rows.length?rowTable(["Linha","Carta / coleção","Quantidade","Resultado"],rows.slice(0,100).map((row,index)=>[row.line||row.row||index+2,row.card?.name||row.cardId||row.setId||"—",row.quantity??row.item?.quantity??"—",row.error||row.message||(row.valid===false?"Inválida":"Válida")])):null,el("p",{class:"shop-fine"},"Confira a identificação e as quantidades antes de confirmar. A importação utiliza somente a prévia validada no servidor; nenhuma linha ambígua é vinculada automaticamente."),confirm);});}},file,csv,el("button",{type:"submit",class:"shop-button secondary"},"Validar e ver prévia"));
-    return el("div",{},title("SUAS CARTAS, SEM RECOMEÇAR","Importar e exportar.","Revise o CSV antes da confirmação. Seus registros existentes serão preservados."),collectionNav("/conta/colecao/importar"),panel("Importar coleção pessoal",el("p",{class:"shop-fine"},"Até 500 linhas e 1 MB. Identifique cartas por TCG, código da coleção e número. Idioma, condição e acabamento distinguem cada lote. paidCents é o custo por unidade em centavos (R$ 10,00 = 1000)."),form,status,preview),panel("Exportar meus registros",el("p",{class:"shop-muted"},"O arquivo contém seus lotes, quantidades, versões, custos informados e referências disponíveis."),button([svgIcon("download"),"Baixar CSV"],event=>run(event.currentTarget,status,async()=>{const result=await api(`${root}/export`);if(typeof result.csv!=="string")throw new Error("O servidor não forneceu o CSV.");const href=URL.createObjectURL(new Blob([result.csv],{type:"text/csv;charset=utf-8"})),anchor=el("a",{href,download:"bkm-minha-colecao.csv"});document.body.append(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(href),1000);}),"shop-button secondary")));
+    const downloadStatus=statusRegion();
+    const download=button([svgIcon("download"),"Baixar planilha (CSV)"],event=>run(event.currentTarget,downloadStatus,async()=>{
+      const result=await api(`${root}/export`);
+      if(typeof result.csv!=="string")throw new Error("Não foi possível gerar a planilha. Tente novamente.");
+      const href=URL.createObjectURL(new Blob([result.csv],{type:"text/csv;charset=utf-8"}));
+      const anchor=el("a",{href,download:"bkm-minha-colecao.csv"});
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(()=>URL.revokeObjectURL(href),1000);
+    }),"shop-button");
+    return el("div",{},title("","Importar ou exportar"),collectionNav("/conta/colecao/importar"),
+      panel("Exportar minhas cartas",el("p",{class:"shop-muted"},"Baixe as cartas que você cadastrou, com quantidades, versões e valores pagos quando informados."),download,downloadStatus),
+      el("details",{class:"collection-section-filter"},el("summary",{},"Importar cartas de uma planilha"),
+        el("div",{class:"collection-valuation-method"},
+          el("p",{},"Use um CSV de até 500 linhas e 1 MB, com o código da expansão e o número ou identificador da carta. Se preencher paidCents, informe o valor por unidade em centavos."),
+          form,status,preview)));
   }
   async function profilePage(){const data=await api("/account/profile"),user=data.user||getState().user,profile=data.profile||{},status=statusRegion();const form=el("form",{class:"personal-form",onSubmit:event=>{event.preventDefault();run(form.querySelector("[type=submit]"),status,async()=>{const values=Object.fromEntries(new FormData(form)),result=await api("/account/profile",{method:"PUT",body:{name:values.name,phone:values.phone}});if(result.user)getState().user=result.user;toast("Seus dados foram atualizados.");await refresh();});}},field("Nome completo","name","text",user.name,{required:true,minlength:"2",maxlength:"100",autocomplete:"name"}),field("E-mail da conta","email","email",user.email,{readonly:true,autocomplete:"email"}),field("Telefone","phone","tel",profile.phone||"",{maxlength:"30",autocomplete:"tel"}),el("p",{class:"shop-fine"},"O e-mail identifica sua conta e suas identidades de acesso. Ele não é alterado por este formulário."),status,el("button",{type:"submit",class:"shop-button"},"Salvar meus dados"));return el("div",{},title("SUA IDENTIDADE BKM","Meus dados."),panel("Informações da conta",form));}
   async function addressesPage(){const data=await api("/account/addresses");return el("div",{},title("PRONTO PARA A PRÓXIMA ENTREGA","Seus endereços."),el("div",{class:"personal-section-heading"},el("h2",{},`${arr(data.items).length} endereços salvos`),button("Adicionar endereço",()=>editAddress(),"shop-button")),arr(data.items).length?el("div",{class:"personal-addresses"},data.items.map(address=>panel(address.label||"Endereço",address.default?el("span",{class:"shop-badge"},"Padrão"):null,el("p",{},address.recipient),el("p",{class:"shop-muted"},`${address.street}, ${address.number}${address.complement?` · ${address.complement}`:""}`),el("p",{class:"shop-muted"},`${address.district} · ${address.city} / ${address.state}`),el("p",{class:"shop-fine"},`CEP ${address.zip}`),el("div",{class:"shop-actions"},button("Editar",()=>editAddress(address),"shop-text-link"),button("Remover",()=>confirmDelete("Remover este endereço da sua conta?",()=>api(`/account/addresses/${encodeURIComponent(address.id)}`,{method:"DELETE"})),"shop-text-link"))))):empty("Um destino para novas descobertas.","Salve seus endereços para consultá-los na sua conta.",button("Adicionar endereço",()=>editAddress(),"shop-button secondary")));}
