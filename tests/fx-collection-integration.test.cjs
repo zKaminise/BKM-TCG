@@ -45,6 +45,15 @@ for(const engine of['sqlite','postgres'])test('BRL international fallback reache
  const costs=await f.db.prepare('SELECT paid_cents FROM personal_lots WHERE user_id=? ORDER BY paid_cents').all(f.user.id);assert.deepEqual(costs.map(row=>row.paid_cents),[200,300,400,500,1000,1000]);
 });
 
+test('quick catalogue and selected-card details skip both external price providers',async t=>{
+ const f=await fixture(t),search=await f.call('GET','/catalog/search',{},'q=Pikachu&live=1&view=quick');
+ assert.equal(search.total,3);assert.ok(search.items.some(card=>card.id==='cel25-5'&&card.displayNumber==='5/25'));
+ const details=await f.call('GET','/catalog/card',{},'cardId=cel25-5&setId=cel25&language=pt&view=quick');
+ assert.deepEqual(details.availableVariants,['HOLO']);assert.ok(details.image);
+ for(const card of [...search.items,details])for(const field of ['valuation','marketData','brazilianMarket','convertedInternational','convertedInternationalByVariant'])assert.equal(field in card,false);
+ assert.equal(f.fxCalls.length,0);assert.equal(f.mypCalls(),0);
+});
+
 test('the first filtered inventory request warms cached source conversions before SQL price filtering',async t=>{
  const f=await fixture(t);await f.call('POST','/inventory/batch',{requestId:rid(),items:[f.card(undefined,{paidCents:1234})]});
  await f.db.prepare("DELETE FROM personal_reference_cache WHERE kind='fx-price'").run();

@@ -4,6 +4,7 @@
 // Financial estimates use integer BRL cents. International conversions retain
 // their original price/FX provenance and never claim a Brazilian market price.
 const crypto = require('node:crypto');
+const {photoPath}=require('./collection-photos.cjs');
 const {selectInternationalMarket,internationalTotals}=require('./tcgdex-market.cjs');
 const {selectMypReference}=require('./mypcards-market.cjs');
 const LOCAL_VALUATION=Symbol('localValuation');
@@ -21,6 +22,7 @@ const unitIdentity = value => hash([value.kind,value.cardId,value.setId,value.re
 function safeImageUrl(value) {
   if(value==null||value==='')return '';
   if(typeof value!=='string'||value.length>2000)throw new Error('Use uma URL HTTPS de imagem válida.');
+  if(photoPath.test(value))return value;
   if(/^\/(?:assets|uploads)\/[a-zA-Z0-9._/%-]+$/.test(value)&&!/%2e|%2f|%5c|\.\./i.test(value))return value;
   let url;try{url=new URL(value);}catch{throw new Error('Use uma URL HTTPS de imagem válida.');}
   const host=url.hostname.toLowerCase().replace(/^\[|\]$/g,'');
@@ -132,7 +134,7 @@ function createPersonalInventory({db,ApiError,catalog,legacyPrices,preferences,n
   }
   async function validate(data,previous=null){
     if(!data||typeof data!=='object'||Array.isArray(data))fail('Item inválido.');
-    const existing=previous?rowBase(previous):{},merged={...existing,...data};
+    const existing=previous?rowBase(previous):{},merged={...existing,...data},photoUrl=url(merged.photoUrl);
     const kind=choice(merged.kind||'CARD',['CARD','SEALED','CUSTOM'],'Tipo de item');
     if(previous&&kind!==existing.kind)fail('Para mudar a categoria, escolha novamente o item no catálogo.');
     const physicalLanguage=choice(merged.language||'pt',LANGUAGES,'Idioma'),referenceLanguage=choice(merged.referenceLanguage||physicalLanguage,LANGUAGES,'Idioma de referência');
@@ -161,8 +163,11 @@ function createPersonalInventory({db,ApiError,catalog,legacyPrices,preferences,n
       const title=text(merged.title||existing.card?.name,200);if(!title)fail('Informe o nome do item.');
       if(merged.cardId&&!(previous&&merged.cardId===existing.cardId))fail('Itens manuais não podem assumir uma carta do catálogo.');
       cardId=previous?.card_id||'manual-'+crypto.randomUUID();setId=text(merged.setId||'',80);
-      card={id:cardId,name:title,provider:'user',setId,setName:text(merged.setName||existing.card?.setName,200),description:text(merged.description??existing.card?.description,4000),image:url(merged.photoUrl||existing.card?.image),language:physicalLanguage,referenceLanguage:physicalLanguage,rarity:'',illustrator:'',dexNumbers:[],sku:text(merged.sku||existing.card?.sku,100)};
+      card={id:cardId,name:title,provider:'user',setId,setName:text(merged.setName||existing.card?.setName,200),description:text(merged.description??existing.card?.description,4000),image:url(existing.card?.image),language:physicalLanguage,referenceLanguage:physicalLanguage,rarity:'',illustrator:'',dexNumbers:[],sku:text(merged.sku||existing.card?.sku,100)};
     }
+    // The personal photo lives in photo_url. Older manual items mirrored it
+    // in their metadata; clear that mirror when replacing or removing it.
+    if(card.provider==='user'&&existing.photoUrl&&card.image===existing.photoUrl)card={...card,image:''};
     if(!previous&&kind==='CARD'&&!data.condition)fail('Selecione a condição deste exemplar.');
     const condition=choice(merged.condition||(kind==='SEALED'?'SEALED':kind==='CUSTOM'?'CUSTOM':'NM'),CONDITIONS,'Condição');
     if(kind==='CARD'&&['SEALED','OPENED','CUSTOM'].includes(condition)||kind==='SEALED'&&!['SEALED','OPENED'].includes(condition))fail('Condição incompatível com o tipo do item.');
@@ -173,7 +178,7 @@ function createPersonalInventory({db,ApiError,catalog,legacyPrices,preferences,n
       const known=card.availableVariants||[],flags=card.variants||{},flag={NORMAL:'normal',HOLO:'holo',REVERSE:'reverse',FIRST_EDITION:'firstEdition'}[variant];
       card.variantInformed=attributes.length>0||!(known.some(value=>(typeof value==='string'?value:value.id)===variant)||flag&&flags[flag]===true);
     }
-    const value={kind,itemType,cardId,setId,card,language:physicalLanguage,referenceLanguage,condition,variant,attributes,quantity:integer(merged.quantity??1,'quantidade',1,9999),paidCents:nullableMoney(merged.paidCents,'custo unitário em centavos'),acquiredAt:date(merged.acquiredAt,'Data de aquisição'),notes:text(merged.notes),photoUrl:url(merged.photoUrl),manualValueCents:nullableMoney(merged.manualValueCents,'valor de referência em centavos'),manualQuotedAt:previous?.manual_quoted_at||null};
+    const value={kind,itemType,cardId,setId,card,language:physicalLanguage,referenceLanguage,condition,variant,attributes,quantity:integer(merged.quantity??1,'quantidade',1,9999),paidCents:nullableMoney(merged.paidCents,'custo unitário em centavos'),acquiredAt:date(merged.acquiredAt,'Data de aquisição'),notes:text(merged.notes),photoUrl,manualValueCents:nullableMoney(merged.manualValueCents,'valor de referência em centavos'),manualQuotedAt:previous?.manual_quoted_at||null};
     if(previous?.status==='SOLD'&&value.quantity!==previous.quantity)fail('Restaure o item antes de alterar a quantidade. O histórico da saída deve permanecer íntegro.');
     if(previous?.title&&previous.quantity===1&&value.quantity!==1)fail('Use “Duplicar exemplar” para adicionar outra unidade com seus próprios dados.');
     if(merged.currency&&merged.currency!=='BRL')fail('Os campos financeiros aceitam somente BRL, sem conversão automática.');

@@ -55,7 +55,7 @@ function createPersonalCollection({db,ApiError,fetchImpl=globalThis.fetch,mypCar
   }
   async function decorateCards(cards,options){const [references,conversions]=await Promise.all([brazilianForItems(cards,options),convertedForItems(cards)]);return cards.map(card=>{const identity=(card.referenceLanguage||card.language)+'|'+(card.providerId||card.id),convertedInternationalByVariant=Object.fromEntries(['NORMAL','HOLO','REVERSE'].map(variant=>[variant,conversions.get(identity+'|'+variant)||null]));return {...card,brazilianMarket:references.get(identity)||null,convertedInternationalByVariant,convertedInternational:convertedInternationalByVariant[card.defaultVariant||card.marketData?.knownFinishes?.[0]||'NORMAL']||null};});}
   const enhancedCatalog={...canonicalCatalog,brazilianForItems,convertedForItems,brazilianEnabled:brazilianProvider.enabled,conversionEnabled,
-    async search(query){const result=await canonicalCatalog.search(query);return {...result,items:await decorateCards(result.items,{maxRefresh:2})};},
+    async search(query){const quick=query.get('view')==='quick',result=await canonicalCatalog.search(query,{quick});return quick?result:{...result,items:await decorateCards(result.items,{maxRefresh:2})};},
     async card(...args){const card=await canonicalCatalog.card(...args);return (await decorateCards([card],{maxRefresh:0}))[0];}
   };
   const inventory=require('./personal-inventory.cjs').createPersonalInventory({db,ApiError,catalog:enhancedCatalog,legacyPrices:priceMap,preferences,now});
@@ -328,7 +328,10 @@ function createPersonalCollection({db,ApiError,fetchImpl=globalThis.fetch,mypCar
     if(method==='GET'&&route==='/catalog/sealed')return result(await enhancedCatalog.sealed(query));
     if(method==='GET'&&route==='/summary')return result(await summary(userId));
     if(method==='GET'&&route==='/catalog/sets')return result(await catalogSets(query));
-    if(method==='GET'&&route==='/catalog/card'){const card=await canonicalCatalog.card(query.get('cardId'),query.get('setId'),language(query.get('language')||'pt'));return result((await decorateCards([card],{maxRefresh:1}))[0]);}
+    if(method==='GET'&&route==='/catalog/card'){
+      const quick=query.get('view')==='quick',card=await canonicalCatalog.card(query.get('cardId'),query.get('setId'),language(query.get('language')||'pt'),{includeMarket:!quick});
+      return result(quick?card:(await decorateCards([card],{maxRefresh:1}))[0]);
+    }
     if(method==='GET'&&route==='/sets')return result(await listSets(userId));
     if(method==='POST'&&route==='/sets')return result(await addSet(userId,data),201);
     let match=route.match(/^\/sets\/([a-zA-Z0-9-]+)$/);

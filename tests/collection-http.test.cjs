@@ -60,3 +60,34 @@ test('Minha Coleção: módulos públicos empacotados sem expor código servidor
   assert.equal((await client.call('/server/collection-inventory.cjs')).status,404);
   assert.equal((await client.call('/.env')).status,404);
 });
+test('foto da coleção exige sessão e CSRF, permanece privada e pode ser desvinculada',async t=>{
+  const f=await fixture(t),anon=await new f.Client().init();
+  const a=await new f.Client().register('collection-photo-a@example.invalid'),b=await new f.Client().register('collection-photo-b@example.invalid');
+  const endpoint='/api/account/collection/photos';
+  const data='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X2Z0AAAAASUVORK5CYII=';
+  const photo={data,mime:'image/png'};
+  assert.equal((await anon.call(endpoint,'POST',photo)).status,401);
+  assert.equal((await a.call(endpoint,'POST',photo,{'X-CSRF-Token':'invalid'})).status,403);
+  assert.equal((await a.call(endpoint,'POST',{data:Buffer.from('<svg/>').toString('base64'),mime:'image/png'})).status,422);
+  const uploaded=await a.call(endpoint,'POST',photo);
+  assert.equal(uploaded.status,201);
+  const {url}=uploaded.body;
+  assert.ok(url.startsWith(endpoint+'/'));
+  assert.equal((await a.call(endpoint,'POST',photo)).body.url,url);
+  const ownImage=await fetch(f.base+url,{headers:{Cookie:a.cookie}});
+  assert.equal(ownImage.status,200);
+  assert.equal(ownImage.headers.get('cache-control'),'private, no-store');
+  assert.equal(ownImage.headers.get('content-type'),'image/png');
+  assert.deepEqual(Buffer.from(await ownImage.arrayBuffer()),Buffer.from(data,'base64'));
+  assert.equal((await b.call(url)).status,404);
+  assert.equal((await anon.call(url)).status,401);
+  const batch=await a.call(baseRoute+'/batch','POST',{requestId:'http-collection-photo',items:[
+    {kind:'CUSTOM',itemType:'CUSTOM',title:'Playmat com foto',condition:'CUSTOM',language:'pt',photoUrl:url}
+  ]});
+  assert.equal(batch.status,201);
+  const item=(await a.call(baseRoute)).body.items[0];
+  assert.equal(item.photoUrl,url);
+  const updated=await a.call(baseRoute+'/'+item.id,'PUT',{photoUrl:''});
+  assert.equal(updated.status,200);
+  assert.equal((await a.call(baseRoute)).body.items[0].photoUrl,'');
+});

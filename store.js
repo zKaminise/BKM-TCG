@@ -301,7 +301,11 @@ function renderNav() {
     const q = new FormData(form).get("q").trim();
     navigate(`/busca${q ? `?q=${encodeURIComponent(q)}` : ""}`);
   } }, el("label", { class: "sr-only", for: "shop-search-q" }, "Buscar produtos"), el("input", { id: "shop-search-q", name: "q", type: "search", placeholder: "Busque sua pr\xF3xima carta", autocomplete: "off", value: new URLSearchParams(location.search).get("q") || "" }), button(svgIcon("search"), () => form.requestSubmit(), "shop-icon", { "aria-label": "Buscar produtos" }));
-  const links = el("nav", { id: "shop-navigation", class: "shop-navigation", "aria-label": "Navega\xE7\xE3o da loja" }, link("Loja", "/busca"), link("Lacrados", "/lacrados"), link("Cartas avulsas", "/cartas"), link("Coleções", "/colecoes"), link(state.user?"Minha lista de desejos":"Meus favoritos",state.user?"/conta/desejos":"/favoritos","shop-mobile-nav-only"), state.user?.role === "ADMIN" ? link("Administrar", "/admin") : link("Sobre a BKM", "/sobre"));
+  const links = el("nav", { id: "shop-navigation", class: "shop-navigation", "aria-label": "Navegação da loja" },
+    link("Loja", "/busca"), link("Cartas avulsas", "/cartas"), link("Lacrados", "/lacrados"), link("Coleções Pokémon", "/colecoes"),
+    link("Minha coleção", "/conta/colecao", "shop-mobile-nav-only"),
+    link(state.user ? "Lista de desejos" : "Meus favoritos", state.user ? "/conta/desejos" : "/favoritos", "shop-mobile-nav-only"),
+    state.user?.role === "ADMIN" ? link("Administrar", "/admin") : link("Sobre a BKM", "/sobre"));
   const profileMenu=el("details",{class:"shop-profile-menu"}),profileSummary=el("summary",{class:"shop-icon","aria-label":state.user?"Abrir menu da minha conta":"Entrar ou criar conta"},svgIcon("user"),el("span",{class:"sr-only"},state.user?"Minha conta":"Entrar ou cadastrar"));
   profileMenu.append(profileSummary,el("nav",{class:"shop-profile-dropdown","aria-label":"Acesso à conta"},state.user?[el("strong",{},state.user.name),link("Minha conta","/conta"),link("Minha coleção","/conta/colecao"),link("Lista de desejos","/conta/desejos"),link("Meus pedidos","/conta/pedidos"),link("Produtos favoritos","/favoritos"),link("Configurações","/conta/preferencias"),button([svgIcon("logout"),"Sair"],()=>logout(),"shop-text-link")]:[link("Entrar","/entrar","shop-button"),link("Criar uma conta","/cadastro","shop-button secondary")]));
   profileMenu.addEventListener("keydown",event=>{if(event.key==="Escape"){profileMenu.open=false;profileSummary.focus();}});
@@ -371,6 +375,7 @@ async function renderRoute() {
   const version = ++pageVersion;
   const path = location.pathname.replace(/\/$/, "") || "/";
   const home = path === "/" || path === "/index.html" || path === "/ABRIR.html";
+  document.body.classList.toggle("shop-route-collection", path === "/conta/colecao" || path.startsWith("/conta/colecao/"));
   setHome(home);
   renderNav();
   if (!mount) return;
@@ -663,7 +668,12 @@ async function cartContent(drawer = false) {
   };
   const subtotal = state.cart.reduce((n, item) => n + item.priceCents * item.quantity, 0);
   const progress = freeShippingProgress(subtotal);
-  const summary = el("aside", { class: "shop-summary" }, el("h2", {}, "Resumo do pedido"),isDemo()?el("p",{class:"shop-fine"},"DEMONSTRAÇÃO — preços ilustrativos, sem cobranças reais."):null, el("div", { class: "shop-summary-row" }, el("span", {}, "Subtotal dos produtos"), el("strong", {}, money(subtotal))), progress, shippingForm(), el("p", { class: "shop-fine" }, "Pre\xE7o, estoque, cupom e frete ser\xE3o conferidos pelo servidor antes da finaliza\xE7\xE3o."), link("Continuar para checkout", "/checkout", "shop-button"), drawer ? link("Ver carrinho completo", "/carrinho", "shop-text-link") : link("Continuar comprando", "/busca", "shop-text-link"));
+  const summary = el("aside", { class: "shop-summary" }, el("h2", {}, "Resumo do pedido"),
+    isDemo()?el("p",{class:"shop-fine"},"DEMONSTRAÇÃO — preços ilustrativos, sem cobranças reais."):null,
+    el("div", { class: "shop-summary-row" }, el("span", {}, "Subtotal dos produtos"), el("strong", {}, money(subtotal))),
+    link("Finalizar compra", "/checkout", "shop-button"),
+    progress, shippingForm(),
+    drawer ? link("Ver carrinho completo", "/carrinho", "shop-text-link") : link("Continuar comprando", "/busca", "shop-text-link"));
   content.append(cartItems(rerender), summary);
   return content;
 }
@@ -746,6 +756,7 @@ async function checkoutPage() {
   if(!state.cart.length)return el("div",{class:"shop-shell"},heading("FINALIZAR PEDIDO","Checkout."),empty("Seu carrinho está vazio.","Escolha um produto para continuar.",link("Explorar o catálogo","/busca","shop-button")));
   if(!state.user)return el("div",{class:"shop-shell shop-checkout-login"},demoNotice(),heading("SUA PRÓXIMA DESCOBERTA","Entre para continuar.","Sua conta guarda os pedidos e permite acompanhar o pagamento e a entrega."),el("div",{class:"shop-actions"},link("Entrar na minha conta","/entrar?next=%2Fcheckout","shop-button"),link("Criar uma conta","/cadastro?next=%2Fcheckout","shop-button secondary")));
   const status=el("div",{"aria-live":"polite"}),summary=el("aside",{class:"shop-summary"},loading("Calculando o pedido…"));
+  const mobileAmount=el("strong"),mobileTotal=el("div",{class:"shop-summary-total shop-checkout-mobile-total",hidden:true,"aria-live":"polite"},el("span",{},"Total do pedido"),mobileAmount);
   let currentQuote=null,quoteVersion=0,submitting=false,disposed=false,lastVerifiedCep="",shippingOptionId="",quoteTimer=null;
   const serviceOptions=el("div",{class:"shop-checkout-services","aria-live":"polite"});
   const idempotencyKey=crypto.randomUUID();
@@ -783,6 +794,7 @@ async function checkoutPage() {
   async function quote(){
     if(disposed)return;clearTimeout(quoteTimer);
     const version=++quoteVersion,data=new FormData(checkoutForm),cep=String(data.get("cep")||"").replace(/\D/g,""),deliveryMode=String(data.get("shippingMethod")||"delivery");submit.disabled=true;currentQuote=null;serviceOptions.replaceChildren();
+    mobileTotal.hidden=true;
     setChildren(summary,loading("Conferindo valores…"));
     try{
       const result=await api("/checkout/quote",{method:"POST",body:{items:state.cart.map(item=>({variantId:item.variantId,quantity:item.quantity})),coupon:String(data.get("coupon")||"").trim()||null,cep,deliveryMode,shippingOptionId:shippingOptionId||undefined}});if(disposed||version!==quoteVersion)return;currentQuote=result;shippingOptionId=result.shipping?.selectedOptionId||"";
@@ -793,19 +805,22 @@ async function checkoutPage() {
       const localDays=result.shipping?.estimatedDays;
       const deliveryLabel=mode==="pickup"?"Retirada na loja — grátis. Prazo e ponto de retirada a combinar pelo WhatsApp após o pagamento.":mode==="local"?`Entrega gratuita em Uberlândia/MG. ${Number.isInteger(localDays)&&localDays>0?`Estimativa de ${localDays} dias úteis.`:"Prazo a combinar pelo WhatsApp após o pagamento."}`:result.shipping?.free?"Frete grátis para seu CEP.":`${isDemo()?"Estimativa ilustrativa de entrega":"Estimativa de entrega"}: ${Number.isSafeInteger(result.shipping?.estimatedDays)&&result.shipping.estimatedDays>0?`${result.shipping.estimatedDays} dias úteis.`:"Prazo de entrega indisponível."}`;
       setChildren(summary,el("p",{class:"shop-kicker"},isDemo()?"PEDIDO DE DEMONSTRAÇÃO":"RESUMO"),el("h2",{},"Seu pedido"),state.cart.map(item=>el("div",{class:"shop-summary-row"},el("span",{},`${item.quantity} × ${item.name}`,el("small",{class:"shop-fine shop-summary-variant"},productVariantText(item))),el("span",{},money(item.priceCents*item.quantity)))),el("hr"),summaryRow("Subtotal",result.subtotalCents),result.discountCents?summaryRow("Desconto",-result.discountCents):null,mode==="delivery"?freeShippingProgress(Math.max(0,(result.subtotalCents||0)-(result.discountCents||0))):null,summaryRow(mode==="pickup"?"Retirada":isDemo()?"Frete de demonstração":"Frete",result.shipping?.available?result.shippingCents:null),el("div",{class:"shop-summary-total"},el("span",{},"Total"),el("strong",{},money(result.totalCents))),result.shipping?.available?message(deliveryLabel):message(result.shipping?.reason||"Informe um CEP atendido para conferir a entrega."),...asArray(result.errors).map(error=>message(typeof error==="string"?error:error.message,"error")));
+      mobileTotal.hidden=!result.shipping?.available||!Number.isSafeInteger(result.totalCents);
+      mobileAmount.textContent=mobileTotal.hidden?"":money(result.totalCents);
       submit.disabled=submitting||!(demoPayments||realPayments)||!result.paymentAvailable||!result.shipping?.available;
       if(realUi)await realUi.updateAmount(result.totalCents);
       if(!result.paymentAvailable)summary.append(message(result.reason||state.config.payments?.reason||"Pagamento indisponível."));
-    }catch(error){if(disposed||version!==quoteVersion)return;currentQuote=null;if(error.code==="SHIPPING_OPTION_CHANGED")shippingOptionId="";setChildren(summary,message(displayError(error),"error"),error.code==="SHIPPING_OPTION_CHANGED"?button("Consultar novas opções de frete",()=>quote(),"shop-button secondary"):null,["INSUFFICIENT_STOCK","PRODUCT_UNAVAILABLE","VARIANT_UNAVAILABLE"].includes(error.code)?link("Revisar carrinho","/carrinho","shop-button secondary"):null);submit.disabled=true;}
+    }catch(error){if(disposed||version!==quoteVersion)return;currentQuote=null;mobileTotal.hidden=true;if(error.code==="SHIPPING_OPTION_CHANGED")shippingOptionId="";setChildren(summary,message(displayError(error),"error"),error.code==="SHIPPING_OPTION_CHANGED"?button("Consultar novas opções de frete",()=>quote(),"shop-button secondary"):null,["INSUFFICIENT_STOCK","PRODUCT_UNAVAILABLE","VARIANT_UNAVAILABLE"].includes(error.code)?link("Revisar carrinho","/carrinho","shop-button secondary"):null);submit.disabled=true;}
   }
   function updateDelivery(){shippingOptionId="";const pickup=checkoutForm.querySelector("[name=shippingMethod]:checked")?.value==="pickup";addressFields.hidden=pickup;addressFields.querySelectorAll("input,select").forEach(input=>input.disabled=pickup);quote();}
-  function invalidateShipping(){shippingOptionId="";currentQuote=null;++quoteVersion;submit.disabled=true;serviceOptions.replaceChildren();clearTimeout(quoteTimer);setChildren(summary,message("Atualizando o frete e os valores…"));quoteTimer=setTimeout(quote,350);}
+  function invalidateShipping(){shippingOptionId="";currentQuote=null;++quoteVersion;submit.disabled=true;mobileTotal.hidden=true;serviceOptions.replaceChildren();clearTimeout(quoteTimer);setChildren(summary,message("Atualizando o frete e os valores…"));quoteTimer=setTimeout(quote,350);}
   for(const name of["cep","coupon"])checkoutForm.querySelector("[name="+name+"]").addEventListener("input",invalidateShipping);
   checkoutForm.querySelector("[name=cep]").addEventListener("change",()=>{shippingOptionId="";quote();});
   checkoutForm.querySelector("[name=coupon]").addEventListener("change",()=>{shippingOptionId="";quote();});
   checkoutForm.querySelectorAll("[name=shippingMethod]").forEach(input=>input.addEventListener("change",updateDelivery));
   const checkoutFlow=el("div",{class:"shop-checkout-flow"},checkoutForm);
   if(realPayments){realUi=createMercadoPagoPaymentUi({getQuote:()=>currentQuote,getEmail:()=>checkoutForm.querySelector("[name=email]").value.trim(),config:state.config.payments,reserveOnly:true});submit.remove();submit.setAttribute("form",checkoutForm.id);checkoutFlow.append(realUi.element,submit);}
+  submit.before(mobileTotal);
   routeCleanup=()=>{disposed=true;++quoteVersion;clearTimeout(quoteTimer);realUi?.destroy();};
   const pickup=checkoutForm.querySelector("[name=shippingMethod]:checked")?.value==="pickup";addressFields.hidden=pickup;addressFields.querySelectorAll("input,select").forEach(input=>input.disabled=pickup);
   await quote();return el("div",{class:"shop-shell"},demoNotice(),heading("UMA NOVA HISTÓRIA PARA SUA COLEÇÃO",isDemo()?"Checkout de demonstração.":"Checkout."),el("ol",{class:"shop-checkout-steps","aria-label":"Etapas da compra"},el("li",{class:"active","aria-current":"step"},"1. Contato e entrega"),el("li",{},"2. Pagamento"),el("li",{},"3. Acompanhar pedido")),el("div",{class:"shop-checkout-layout"},checkoutFlow,summary));

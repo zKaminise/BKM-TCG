@@ -12,6 +12,7 @@ const { EMAIL_JOB_PATH, emailJobAuthorized, createEmailJob } = require('./email-
 const { COMMERCE_JOB_PATH, createCommerceJob } = require('./commerce-job.cjs');
 const {shippingSettings,validateShippingSettings,hasConfiguredShipping,createShippingPolicy,publicShippingSettings,operationalShippingReadiness,REGION_STATES}=require('./shipping-policy.cjs');
 const {normalizeVariantAttributes,attributesFromRow,variantIdentity}=require('./variant-attributes.cjs');
+const {createCollectionPhotos,photoRoute,photoPath,photoBodyLimit,photoBackupFolder}=require('./collection-photos.cjs');
 const uid = () => crypto.randomUUID();
 const now = () => (/* @__PURE__ */ new Date()).toISOString();
 const normalized = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\b0+(?=\d)/g, "");
@@ -102,6 +103,10 @@ function createApi(options = {}) {
   const notifications=require('./email-notifications.cjs').createEmailNotifications({db,emailStore,env:effectiveEnv});
   const market=require('./market-price-provider.cjs').createMarketPriceService({db,ApiError});
   const personal=require('./personal-collection.cjs').createPersonalCollection({db,ApiError,fetchImpl:options.catalogFetch,mypCardsFetch:options.mypCardsFetch,fxFetch:options.fxFetch,env:effectiveEnv,priceProvider:market.provider});
+  const localDbPath=options.dbPath || env.BKM_DB_PATH || path.join(root,'data','bkm.sqlite');
+  const collectionPhotos=createCollectionPhotos({
+    env:effectiveEnv,folder:localDbPath===':memory:'?null:path.join(localDbPath+'.objects',photoBackupFolder)
+  });
   const productWorkflow=require('./product-workflow.cjs').createProductWorkflow({db,ApiError,fetchImpl:options.catalogFetch,audit});
   let emailDispatcher;
   async function enqueueEmail(message) { return emailStore.enqueue(message); }
@@ -597,6 +602,18 @@ function createApi(options = {}) {
       }
       if (pathname.startsWith("/api/account")) {
         const user = auth(session);
+        if(pathname===photoRoute && method==='POST'){
+          limit(req,`collection-photos:${user.id}`,30);
+          return respond(201,await collectionPhotos.upload(user.id,await readJson(req,photoBodyLimit)));
+        }
+        const photo=method==='GET'&&pathname.match(photoPath);
+        if(photo){
+          const file=await collectionPhotos.download(user.id,photo[1]);
+          if(!file)throw new ApiError(404,'NOT_FOUND','Foto não encontrada.');
+          res.writeHead(200,{'Content-Type':file.mime,'Content-Length':file.buffer.length,
+            'Cache-Control':'private, no-store','Cross-Origin-Resource-Policy':'same-origin','X-Robots-Tag':'noindex, nofollow'});
+          return res.end(file.buffer);
+        }
         if(pathname.startsWith('/api/account/collection/')) {
           const collectionDelete = method==='DELETE' && /^\/api\/account\/collection\/inventory\/[^/]+$/.test(pathname);
           const body=['POST','PUT','PATCH'].includes(method)||collectionDelete?await readJson(req,2*1024*1024):{};

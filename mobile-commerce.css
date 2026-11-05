@@ -1,6 +1,7 @@
 /* Mobile storefront refinements. Loaded after the base component styles. */
 .shop-navigation > .shop-mobile-nav-only { display: none; }
 .shop-catalog-filter-panel > .shop-catalog-filter-toggle { display: none; }
+.shop-checkout-mobile-total { display: none; }
 
 @media (max-width: 760px) {
   .shop-route-page .shop-shell { padding: 32px 5% 64px; }
@@ -43,6 +44,8 @@
   .shop-icon { width: 44px; min-width: 44px; height: 44px; }
   .shop-nav-favorites { display: none; }
   .shop-navigation > .shop-mobile-nav-only { display: flex; }
+  .shop-route-collection .header { margin-bottom: 8px; }
+  .shop-route-collection .shop-nav-content > .shop-search { display: none; }
   .shop-navigation.is-open { max-height: calc(100svh - 131px); overflow-y: auto; overscroll-behavior: contain; gap: 4px; padding: 16px 5% 20px; }
   .shop-navigation.is-open > a { display: flex; align-items: center; width: 100%; min-height: 44px; font-size: 16px; padding: 9px 4px; }
   .shop-search .shop-icon, .shop-close { width: 44px; min-width: 44px; height: 44px; }
@@ -143,6 +146,7 @@
   .shop-free-shipping > p { font-size: 13px; line-height: 1.6; }
   .shop-free-shipping > small { font-size: 11px; line-height: 1.6; }
   .shop-checkout-steps { gap: 10px; }
+  .shop-checkout-mobile-total { display: flex; margin: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 5px; }
   .shop-checkout-steps li { font-size: 11px; line-height: 1.5; }
   .shop-checkout-form > h2 { font-size: 26px; }
   .shop-checkout-form .shop-form-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }

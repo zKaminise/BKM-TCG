@@ -1,39 +1,7 @@
-import {COLLECTION_LANGUAGES as languages,COLLECTION_CONDITIONS as conditions,COLLECTION_TYPES as types,COLLECTION_FINISHES as finishes,COLLECTION_ATTRIBUTES as attributes,COLLECTION_STATUS as statuses,parseCollectionMoney as cents,collectionDecimal as decimal,collectionDate as date,collectionCopyAcquisition,collectionBatchPayload,collectionQueueTotals,collectionDraftKey,collectionCostMutation,collectionInternational,collectionForeignMoney,createCollectionSearchScheduler,collectionBrazilian,collectionConverted,collectionQuoteDateTime} from "./collection-domain.js";
-
-export function createCollectionBrazilianPricePanel({el,money},item,now=Date.now()) {
-  const market=collectionBrazilian(item,now),quote=market.reference;if(!market.hasPrices)return null;
-  const price=value=>Number.isSafeInteger(value)&&value>0?money(value):'Não disponível';
-  let sourceUrl='';try{const url=new URL(quote.sourceUrl);if(url.protocol==='https:'&&['mypcards.com','www.mypcards.com'].includes(url.hostname)&&!url.port&&!url.username&&!url.password)sourceUrl=url.href;}catch{}
-  return el('section',{class:`collection-market-reference collection-market-br${market.stale?' is-stale':''}`,'aria-label':'Referência do mercado brasileiro'},
-    el('small',{class:'collection-market-label'},'REFERÊNCIA DO MERCADO BRASILEIRO'),
-    el('div',{class:'collection-market-br-prices'},el('div',{},el('span',{},'Menor preço anunciado'),el('strong',{},price(quote.minPriceCents))),el('div',{},el('span',{},'Preço médio anunciado'),el('strong',{},price(quote.avgPriceCents)))),
-    el('small',{},'Fonte: ',el('a',{href:'https://mypcards.com',target:'_blank',rel:'noopener noreferrer'},'MYP Cards')),
-    el('small',{},`Consultado em: ${collectionQuoteDateTime(quote.fetchedAt)}${market.stale?' · Desatualizada':''}`),
-    el('small',{},'Valores de anúncios no mercado brasileiro. Podem incluir diferentes condições, idiomas e acabamentos. Não representam necessariamente o preço da versão exata da carta.'),
-    el('small',{},'A média é ponderada pela quantidade anunciada. Não representa vendas concluídas. A API não informa a data de atualização das estatísticas.'),
-    el('small',{class:'collection-market-br-use'},market.usable?'A média anunciada pode compor a estimativa agregada em BRL, sem ajuste à conservação.':market.unavailableReason),
-    sourceUrl?el('a',{href:sourceUrl,target:'_blank',rel:'noopener noreferrer'},'Consultar no MYP Cards ↗'):null);
-}
-
-export function createCollectionConvertedPricePanel({el,money},item,now=Date.now()) {
-  const market=collectionConverted(item,now),quote=market.reference;if(!market.usable)return null;
-  const rate=quote.exchangeRate,formattedRate=new Intl.NumberFormat('pt-BR',{minimumFractionDigits:4,maximumFractionDigits:6}).format(rate.rateMicros/1000000);
-  let sourceUrl='';try{const url=new URL(quote.sourceUrl);if(url.protocol==='https:'&&['api.tcgdex.net','www.cardmarket.com','cardmarket.com','www.tcgplayer.com','tcgplayer.com','prices.pokemontcg.io'].includes(url.hostname)&&!url.port&&!url.username&&!url.password)sourceUrl=url.href;}catch{}
-  return el('section',{class:'collection-market-reference collection-market-converted','aria-label':'Estimativa em reais'},
-    el('small',{class:'collection-market-label'},'ESTIMATIVA EM REAIS'),el('strong',{},money(quote.valueCents)),
-    el('small',{},'Referência internacional convertida em reais.'),
-    el('small',{},'Não é uma cotação do mercado brasileiro nem um valor ajustado à conservação. A correspondência da impressão no marketplace não é certificada.'),
-    el('details',{class:'collection-conversion-details'},el('summary',{},'Fonte e cálculo da estimativa'),
-      el('small',{},`${quote.originalSourceLabel||quote.originalSource} · valor de origem: ${collectionForeignMoney(quote.originalValueCents,quote.originalCurrency)}`),
-      el('small',{},`Preço de origem atualizado em: ${collectionQuoteDateTime(quote.quotedAt)}`),
-      el('small',{},`Câmbio: 1 ${quote.originalCurrency} = R$ ${formattedRate} · PTAX venda de ${collectionQuoteDateTime(rate.quotedAt)}`),
-      el('small',{},'Cálculo: preço de origem × câmbio, arredondado para centavos. Não inclui impostos, frete ou taxas de importação.'),
-      el('a',{href:'https://www.bcb.gov.br/estabilidadefinanceira/historicocotacoes',target:'_blank',rel:'noopener noreferrer'},'Consultar câmbio no Banco Central ↗'),
-      sourceUrl?el('a',{href:sourceUrl,target:'_blank',rel:'noopener noreferrer'},'Ver dados da carta na fonte ↗'):null));
-}
+import {COLLECTION_LANGUAGES as languages,COLLECTION_CONDITIONS as conditions,COLLECTION_TYPES as types,COLLECTION_FINISHES as finishes,COLLECTION_ATTRIBUTES as attributes,COLLECTION_STATUS as statuses,parseCollectionMoney as cents,collectionDecimal as decimal,collectionDate as date,collectionCopyAcquisition,collectionBatchPayload,collectionQueueTotals,collectionDraftKey,collectionCostMutation,createCollectionSearchScheduler} from "./collection-domain.js";
 
 export function createCollectionUI(ctx) {
-  const {el,link,button,field,selectField,checkbox,message,empty,image,money,api,navigate,toast,refresh,getState,svgIcon,collectionNav}=ctx;
+  const {el,button,field,selectField,checkbox,message,empty,image,money,api,navigate,toast,getState,svgIcon,collectionNav}=ctx;
   const root="/account/collection",route="/conta/colecao",arr=value=>Array.isArray(value)?value:[],label=(list,id)=>list.find(([key])=>key===id)?.[1]||id||"—";
   let generation=0,cleanup=()=>{};
   window.addEventListener("bkm:route",()=>{generation++;cleanup();cleanup=()=>{};for(const node of document.querySelectorAll("dialog.collection-dialog[open]"))node.close();});
@@ -49,7 +17,7 @@ export function createCollectionUI(ctx) {
   const visibleChildren=children=>children.flat(Infinity).filter(child=>child!==null&&child!==undefined&&child!==false);
   const replace=(node,...children)=>node.replaceChildren(...visibleChildren(children));
   const append=(node,...children)=>node.append(...visibleChildren(children));
-  const roundNote=item=>item.kind==="CARD"&&item.language!==(item.referenceLanguage||item.card?.referenceLanguage||item.card?.language)?`Imagem de referência em ${label(languages,item.referenceLanguage||item.card?.language)}. A existência desta impressão no idioma escolhido não foi confirmada pelo catálogo.`:"";
+  const roundNote=item=>item.kind==="CARD"&&!item.photoUrl&&item.language!==(item.referenceLanguage||item.card?.referenceLanguage||item.card?.language)?`Imagem de referência em ${label(languages,item.referenceLanguage||item.card?.language)}. A existência desta impressão no idioma escolhido não foi confirmada pelo catálogo.`:"";
   function thumb(item,cls="collection-thumb") {return pic(item)?image(pic(item),title(item),cls):el("span",{class:`${cls} collection-no-image`,role:"img","aria-label":"Sem imagem disponível"},svgIcon("collection"));}
   function photoButton(item,cls="collection-photo") {return button(thumb(item),()=>preview(item),cls,{"aria-label":`Ampliar imagem de ${title(item)}`});}
   function preview(item) {modal(title(item),el("div",{class:"collection-image-preview"},thumb(item),roundNote(item)?message(roundNote(item)):null));}
@@ -70,16 +38,6 @@ export function createCollectionUI(ctx) {
     const set=value=>{input.value=decimal(value);input.setCustomValidity("");onInvalid?.(null);onChange?.(value);input.dispatchEvent(new Event("change",{bubbles:true}));replace(region,);};
     return el("div",{class:"collection-money"},wrap,el("div",{class:"collection-increments"},[10,100,500,1000,5000,10000].map(amount=>button(`+${decimal(amount).replace(/,00$/,"")}`,()=>{try{set((cents(input.value)||0)+amount);}catch(error){replace(region,message(error.message,"error"));}},"collection-chip")),button("Zerar",()=>set(0),"collection-chip"),button("Não informar",()=>set(null),"collection-chip")),region);
   }
-  function quoteNode(item) {
-    const quote=item.valuation,manual=Number.isSafeInteger(item.manualValueCents)?item.manualValueCents:null,market=collectionInternational(item),selected=market.selected;
-    const exactQuote=quote?.source!=='mypcards'&&!quote?.fxConverted?quote:null,brazilian=createCollectionBrazilianPricePanel({el,money},item),converted=createCollectionConvertedPricePanel({el,money},item),brazilianUsable=collectionBrazilian(item).usable;
-    const local=exactQuote?el("div",{class:"collection-quote"},el("strong",{},exactQuote.stale?"Cotação desatualizada":money(exactQuote.valueCents)),el("small",{},`${exactQuote.source==='user_manual'?"Informado por você":exactQuote.sourceLabel||exactQuote.source||"Referência"} · ${exactQuote.currency||"BRL"} · ${date((exactQuote.quotedAt||"").slice(0,10))}`),el("small",{},`${exactQuote.match==='EXACT'?'Correspondência exata':'Correspondência não confirmada'} · ${label(languages,exactQuote.language||item.language)} · ${exactQuote.condition||item.condition} · ${label(finishes,exactQuote.variant||item.variant)}`),exactQuote.sourceUrl&&/^https:\/\//.test(exactQuote.sourceUrl)?el("a",{href:exactQuote.sourceUrl,target:"_blank",rel:"noopener noreferrer"},"Consultar fonte ↗"):null):manual!==null?el('div',{class:'collection-quote'},el('strong',{},money(manual)),el('small',{},'Referência manual em BRL · informada por você')):null;
-    if(item.kind!=='CARD')return local||el('p',{class:'collection-quote collection-quote-missing'},'Sem avaliação em BRL');
-    const reference=selected||market.references.find(quote=>!quote.stale&&quote.variant===null)||market.compatible[0]||null;
-    const international=reference?el('details',{class:'collection-international-alternative'},el('summary',{},'Ver referência original e limitações'),el('div',{class:'collection-market-reference'},el('small',{class:'collection-market-label'},'DADOS DA FONTE INTERNACIONAL'),el('small',{},collectionForeignMoney(reference.valueCents,reference.currency)),el('small',{},`${reference.sourceLabel} · ${reference.variant?label(finishes,reference.variant):'Acabamento não informado'} · ${date(reference.quotedAt.slice(0,10))}${reference.stale?' · Desatualizada':''}`),el('small',{},'Conservação e idioma de mercado não informados. A correspondência de impressão do marketplace não é certificada.'),!selected?el('small',{},reference.variant===null?'Referência geral da carta; excluída dos totais por acabamento.':market.unavailableReason):null,reference.sourceUrl?el('a',{href:reference.sourceUrl,target:'_blank',rel:'noopener noreferrer'},'Ver dados da fonte ↗'):null)):null;
-    const primary=brazilianUsable?brazilian:converted||brazilian;
-    return el('div',{class:'collection-valuations'},local,primary,converted&&brazilian&&!brazilianUsable?el('details',{class:'collection-international-alternative'},el('summary',{},'Referência brasileira com cobertura limitada'),brazilian):null,!primary&&!local?el('p',{class:'collection-quote collection-quote-missing'},reference?collectionConverted(item).unavailableReason:'Sem referência de mercado disponível para esta carta.'):null,!converted?international:null);
-  }
   function saveLocal(key,value){try{localStorage.setItem(key,JSON.stringify(value));}catch{}}
   function readLocal(key){try{return JSON.parse(localStorage.getItem(key)||"null");}catch{return null;}}
 
@@ -87,20 +45,51 @@ export function createCollectionUI(ctx) {
     const owner=getState().user.id,key=`bkm:collection-view:v2:${owner}`,prefs=readLocal(key)||{},query=new URLSearchParams(location.search);query.set("pageSize","36");
     if(!query.has("sort")&&prefs.sort)query.set("sort",prefs.sort);if(!query.has("group")&&prefs.group)query.set("group",prefs.group);
     const current=++generation,region=notice(),results=el("div"),stats=el("div"),selected=new Map(),selection=el("div",{class:"collection-selection","aria-live":"polite"}),container=el("section",{class:"collection-page"});
-    let data={items:[],total:0},view=prefs.view||"grid",controller,debounce,undoId=null;
+    let data={items:[],total:0},view=prefs.view||"grid",controller,debounce,undoId=null,selecting=false;
     const mutationRequests=new Map();
-    const updateQuery=(name,value)=>{value!==null&&value!==undefined&&value!==''?query.set(name,value):query.delete(name);query.delete("page");if(!['sort','dir','group'].includes(name))selected.clear();};
+    const sortKeys=["sort","dir","group","pageSize"],filterEntries=()=>[...query].filter(([name,value])=>value&&name!=="page"&&!sortKeys.includes(name));
+    const updateQuery=(name,value)=>{value!==null&&value!==undefined&&value!==''?query.set(name,value):query.delete(name);query.delete("page");if(!sortKeys.includes(name))selected.clear();};
     const remember=()=>saveLocal(key,{view,sort:query.get("sort")||"default",group:query.get("group")||"none"});
-    const heading=el("div",{class:"collection-heading"},el("div",{},el("p",{class:"shop-kicker"},"SEU ACERVO PARTICULAR"),el("h1",{},"Minha Coleção"),el("p",{class:"shop-muted"},"Suas cartas, suas histórias. Tudo privado, do seu jeito.")),button([svgIcon("plus"),"Adicionar cartas"],()=>navigate(`${route}/adicionar`),"shop-button"));
-    const search=field("Buscar na minha coleção","q","search",query.get("q")||"",{placeholder:"Nome, coleção, número ou observações"}),filters=el("details",{class:"collection-filters"},el("summary",{},"Filtros da coleção")),filterFields=el("div",{class:"collection-filter-grid"}),chips=el("div",{class:"collection-active-filters"});
-    search.querySelector("input").addEventListener("input",event=>{updateQuery("q",event.target.value.trim());clearTimeout(debounce);debounce=setTimeout(load,300);});
-    const statusTabs=el("div",{class:"collection-status-tabs",role:"group","aria-label":"Situação dos itens"},[["ACTIVE","Em coleção"],["SOLD","Vendidos"],["ARCHIVED","Arquivados"],["ALL","Todos"]].map(([id,text])=>button(text,()=>{updateQuery("status",id);selected.clear();load();},"collection-chip",{"aria-pressed":(query.get("status")||"ACTIVE")===id})));
+    const count=el("span",{class:"collection-inventory-count"});
+    const add=()=>navigate(`${route}/adicionar`);
+    const heading=el("div",{class:"collection-heading collection-inventory-heading"},
+      el("div",{},el("h1",{},"Minha Coleção"),count),
+      button([svgIcon("plus"),"Adicionar itens"],add,"shop-button collection-inventory-add"));
+    const search=field("Buscar na minha coleção","q","search",query.get("q")||"",{placeholder:"Nome, número ou coleção"});
+    const searchInput=search.querySelector("input"),filterFields=el("div",{class:"collection-filter-grid"}),advancedFields=el("div",{class:"collection-filter-grid"}),chips=el("div",{class:"collection-active-filters"});
+    const resetFilters=()=>{for(const [name] of filterEntries())query.delete(name);query.delete("page");searchInput.value="";selected.clear();load();};
+    const filterToggle=button("Buscar e filtrar",()=>{filters.hidden=!filters.hidden;filterToggle.setAttribute("aria-expanded",String(!filters.hidden));},
+      "shop-button secondary collection-inventory-filter-toggle",{"aria-controls":"collection-inventory-filters","aria-expanded":"false"});
+    const selectToggle=button("Selecionar",()=>{
+      selecting=!selecting;
+      if(!selecting)selected.clear();
+      renderResults();
+    },"shop-button secondary",{"aria-pressed":"false"});
+    searchInput.addEventListener("input",event=>{updateQuery("q",event.target.value.trim());controller?.abort();clearTimeout(debounce);debounce=setTimeout(load,250);});
+    const statusOptions=[["ACTIVE","Em coleção"],["SOLD","Vendidos"],["ARCHIVED","Arquivados"],["ALL","Todos"]];
+    const statusTabs=el("div",{class:"collection-status-tabs",role:"group","aria-label":"Situação dos itens"},statusOptions.map(([id,text])=>button(text,()=>{updateQuery("status",id==="ACTIVE"?null:id);load();},"collection-chip",{"aria-pressed":String((query.get("status")||"ACTIVE")===id)})));
     const sort=selectField("Ordenar","sort",[["default","Padrão"],["dex","Pokédex"],["number","Código da carta"],["set","Coleção (set)"],["rarity","Raridade"],["name","Nome"],["acquired","Data da compra"],["cost","Quanto paguei"],["value","Valor estimado"],["recent","Adicionado recentemente"]],query.get("sort")||"default"),group=selectField("Agrupar","group",[["none","Sem agrupamento"],["set","Coleção / set"],["pokemon","Pokémon"],["rarity","Raridade"],["illustrator","Ilustrador"],["status","Situação"]],query.get("group")||"none");
     for(const node of [sort,group])node.querySelector("select").addEventListener("change",event=>{updateQuery(event.target.name,event.target.value);remember();load();});
-    const layouts=el("div",{class:"collection-layouts",role:"group","aria-label":"Visualização da coleção"},[["grid","Grade","▦"],["compact","Grade compacta","▤"],["list","Lista","☰"],["detailed","Lista detalhada","≡"]].map(([id,text,icon])=>button(icon,()=>{view=id;remember();renderResults();layouts.querySelectorAll("button").forEach(node=>node.setAttribute("aria-pressed",node.dataset.view===view));},"collection-chip",{"aria-label":text,title:text,"data-view":id,"aria-pressed":id===view})));
-    const tools=el("div",{class:"collection-tools"},sort,button("↑↓",()=>{query.set("dir",query.get("dir")==="desc"?"asc":"desc");load();},"collection-chip",{"aria-label":"Inverter direção da ordenação"}),group,layouts);
-    const selectTools=el("div",{class:"collection-select-tools"},button("Selecionar todos os exibidos",()=>{data.items.forEach(item=>selected.set(item.id,item));renderResults();},"shop-text-link"),button("Limpar seleção",()=>{selected.clear();renderResults();},"shop-text-link"),button("Histórico de movimentações",()=>history(),"shop-text-link"));
-    append(filters,filterFields);append(container,heading,collectionNav(path),stats,region,statusTabs,search,filters,chips,tools,selectTools,results,selection);
+    const layouts=selectField("Visualização","view",[["grid","Grade"],["compact","Grade compacta"],["list","Lista"],["detailed","Lista detalhada"]],view);
+    layouts.querySelector("select").addEventListener("change",event=>{view=event.target.value;remember();renderResults();});
+    const tools=el("div",{class:"collection-filter-grid"},sort,group,layouts,button("Inverter ordem",()=>{updateQuery("dir",query.get("dir")==="desc"?"asc":"desc");load();},"shop-button secondary"));
+    const refreshButton=button("Atualizar valor estimado",event=>run(event.currentTarget,region,async()=>{
+      const ids=data.items.filter(item=>item.kind==="CARD").slice(0,24).map(item=>item.id);
+      if(!ids.length)return;
+      await api(`${root}/inventory/market-refresh`,{method:"POST",body:{ids}});
+      await load();
+      if(current===generation)toast("Referências desta página consultadas.");
+    }),"shop-button secondary");
+    const filters=el("section",{class:"collection-inventory-filters",id:"collection-inventory-filters","aria-label":"Filtros da coleção",hidden:true},
+      search,statusTabs,filterFields,tools,
+      el("details",{class:"collection-inventory-advanced"},el("summary",{},"Filtros avançados"),advancedFields),
+      el("div",{class:"collection-inventory-actions"},button("Limpar filtros",resetFilters,"shop-button secondary"),
+        button("Histórico de movimentações",history,"shop-button secondary"),refreshButton));
+    const selectTools=el("div",{class:"collection-inventory-select-tools",hidden:true},
+      button("Selecionar todos desta página",()=>{data.items.forEach(item=>selected.set(item.id,item));renderResults();},"shop-button secondary"));
+    append(container,heading,stats,collectionNav(path),
+      el("div",{class:"collection-inventory-toolbar"},filterToggle,selectToggle),
+      filters,chips,selectTools,region,results,selection);
     function buildFilters() {
       const facets=data.facets||{},definition=[
         ["Coleção / expansão","setId",[["","Todas"],...arr(facets.sets).map(set=>[set.id,set.name||set.id])]],
@@ -112,45 +101,152 @@ export function createCollectionUI(ctx) {
         ["Referência de preço","price",[["","Todas"],["known","Com cotação válida"],["missing","Sem cotação"],["stale","Desatualizada"]]],
         ["Custo informado","cost",[["","Todos"],["known","Informado"],["missing","Não informado"]]]
       ];
-      replace(filterFields,...definition.map(([text,name,options])=>{const node=selectField(text,name,options,query.get(name)||"");node.querySelector("select").addEventListener("change",event=>{updateQuery(name,event.target.value);selected.clear();load();});return node;}),...[['Aquisição desde','acquiredFrom','date'],['Aquisição até','acquiredTo','date'],['Custo mínimo (R$)','minCost','text'],['Custo máximo (R$)','maxCost','text'],['Valor mínimo (R$)','minValue','text'],['Valor máximo (R$)','maxValue','text']].map(([text,name,type])=>{const node=field(text,name,type,query.has(name)?type==="date"?query.get(name):decimal(Number(query.get(name))):"",{inputmode:type==="text"?"decimal":undefined});const input=node.querySelector("input"),apply=()=>{try{updateQuery(name,type==="date"?input.value:cents(input.value));load();}catch(error){replace(region,message(error.message,"error"));}};input.addEventListener("change",()=>{clearTimeout(debounce);apply();});input.addEventListener("input",()=>{clearTimeout(debounce);debounce=setTimeout(apply,300);});return node;}),button("Limpar filtros",()=>{for(const name of [...query.keys()])if(!["sort","dir","group","pageSize"].includes(name))query.delete(name);search.querySelector("input").value="";selected.clear();load();},"shop-button secondary"));
+      const makeSelect=([text,name,options])=>{
+        const node=selectField(text,name,options,query.get(name)||"");
+        node.querySelector("select").addEventListener("change",event=>{updateQuery(name,event.target.value);load();});
+        return node;
+      };
+      const ranges=[["Aquisição desde","acquiredFrom","date"],["Aquisição até","acquiredTo","date"],
+        ["Custo mínimo (R$)","minCost","text"],["Custo máximo (R$)","maxCost","text"],
+        ["Valor mínimo (R$)","minValue","text"],["Valor máximo (R$)","maxValue","text"]];
+      replace(filterFields,...definition.slice(0,4).map(makeSelect));
+      replace(advancedFields,...definition.slice(4).map(makeSelect),...ranges.map(([text,name,type])=>{
+        const value=query.get(name),node=field(text,name,type,value==null?"":type==="date"?value:decimal(Number(value)),
+          {inputmode:type==="text"?"decimal":undefined});
+        const input=node.querySelector("input");
+        input.addEventListener("change",()=>{
+          try{updateQuery(name,type==="date"?input.value:cents(input.value));load();}
+          catch(error){replace(region,message(error.message,"error"));}
+        });
+        return node;
+      }));
       const chipNames={q:'Busca',status:'Situação',setId:'Coleção',kind:'Tipo',language:'Idioma',condition:'Conservação',rarity:'Raridade',variant:'Acabamento',price:'Cotação',cost:'Custo',acquiredFrom:'Aquisição desde',acquiredTo:'Aquisição até',minCost:'Custo mínimo',maxCost:'Custo máximo',minValue:'Valor mínimo',maxValue:'Valor máximo'};
       const chipValue=(name,value)=>name==='status'?({ACTIVE:'Em coleção',ALL:'Todos',...statuses})[value]||value:name==='setId'?(arr(data.facets?.sets).find(set=>set.id===value)?.name||value):name==='kind'?({CARD:'Carta',SEALED:'Selado',CUSTOM:'Personalizado'})[value]||value:name==='language'?label(languages,value):name==='condition'?label(conditions,value):name==='variant'?label(finishes,value):/^(?:min|max)(?:Cost|Value)$/.test(name)?money(Number(value)):['acquiredFrom','acquiredTo'].includes(name)?date(value):name==='price'?({known:'Com cotação',missing:'Sem cotação',stale:'Desatualizada'})[value]||value:name==='cost'?({known:'Informado',missing:'Não informado'})[value]||value:value;
-      replace(chips,...[...query].filter(([name,value])=>value&&!['page','pageSize','sort','dir','group'].includes(name)).map(([name,value])=>button(`${chipNames[name]||name}: ${chipValue(name,value)} ×`,()=>{query.delete(name);if(name==='q')search.querySelector('input').value='';load();},"collection-chip")));
-      statusTabs.querySelectorAll("button").forEach((node,index)=>node.setAttribute("aria-pressed",[["ACTIVE"],["SOLD"],["ARCHIVED"],["ALL"]][index][0]===(query.get("status")||"ACTIVE")));
+      const activeFilters=filterEntries();
+      replace(chips,...activeFilters.map(([name,value])=>button(`${chipNames[name]||name} · ${chipValue(name,value)} ×`,()=>{
+        updateQuery(name,null);
+        if(name==="q")searchInput.value="";
+        load();
+      },"collection-chip",{"aria-label":`Remover filtro ${chipNames[name]||name}`})));
+      filterToggle.textContent=activeFilters.length?`Buscar e filtrar (${activeFilters.length})`:"Buscar e filtrar";
+      statusTabs.querySelectorAll("button").forEach((node,index)=>node.setAttribute("aria-pressed",String(statusOptions[index][0]===(query.get("status")||"ACTIVE"))));
     }
     function renderStats() {
-      const t=data.totals||{},quantity=t.quantity??t.activeQuantity??0,known=t.knownValueQuantity??0,paid=t.paidQuantity??t.knownCostQuantity??0,comparable=t.comparableQuantity??0,gain=t.unrealizedGainCents,percent=t.unrealizedGainPercent;
-      const stat=(text,value,note)=>el("div",{class:`collection-stat${text==="Variação não realizada"&&gain!=null?(gain<0?" is-negative":gain>0?" is-positive":""):""}`},el("span",{},text),el("strong",{},value),el("small",{},note));
-      const sales=t.sales||{};
-      replace(stats,el("div",{class:"collection-stats"},stat("Valor estimado",quantity>0&&known===0?"Sem cotação":money(t.estimatedValueCents??0),`${known} de ${countLabel(quantity,'exemplar','exemplares')} com cotação válida`),stat("Valor gasto",money(t.paidCents??t.knownCostCents??0),`${paid} de ${countLabel(quantity,'exemplar','exemplares')} com custo informado`),stat("Itens",quantity,countLabel(t.uniqueCards??t.distinctItems??0,'modelo diferente','modelos diferentes')),stat("Variação não realizada",gain==null||!comparable?"—":`${gain>0?"+":""}${money(gain)}`,comparable?`${countLabel(comparable,'exemplar comparável','exemplares comparáveis')} · ${percent==null?"percentual não aplicável":`${Number(percent).toLocaleString('pt-BR',{maximumFractionDigits:2})}%`}`:"Apenas itens com custo e cotação válidos")),el("div",{class:"collection-coverage"},el("span",{},`${t.unpricedQuantity??quantity-known} sem cotação · ${t.unknownCostQuantity??quantity-paid} sem custo informado${t.staleQuantity?` · ${t.staleQuantity} com cotação desatualizada`:""}`),el("p",{},"Custos e estimativas têm coberturas diferentes. A comparação considera somente os mesmos exemplares com ambos os valores."),comparable?el("div",{class:"collection-comparison"},el("span",{},`Custo comparável: ${money(t.comparableCostCents??0)}`),el("span",{},`Valor comparável: ${money(t.comparableValueCents??0)}`)):null,comparable?el("div",{class:"collection-comparison-bars"},[["Custo comparável",t.comparableCostCents??0],["Valor comparável",t.comparableValueCents??0]].map(([text,value])=>el("label",{},el("span",{},text),el("progress",{max:Math.max(t.comparableCostCents??0,t.comparableValueCents??0,1),value,"aria-label":`${text}: ${money(value)}`})))):null,el("div",{class:"collection-categories"},arr(t.byKind).map(category=>el("span",{},`${({CARD:'Cartas',SEALED:'Selados',CUSTOM:'Personalizados'})[category.kind]||category.kind}: ${category.quantity??0}`)))),el("div",{class:"collection-realized"},el("strong",{},`${countLabel(sales.quantity??0,'exemplar','exemplares')} com saída registrada`),el("span",{},`Resultado realizado: ${sales.realizedGainAvailable?money(sales.realizedGainCents):"Indisponível"}`),el("small",{},`${sales.comparableQuantity??0} com custo e valor de venda conhecidos. Aquisições históricas preservadas.`)));
-    }
-    function renderInternationalStats() {
-      const cards=data.items.filter(item=>item.kind==='CARD'),convertedCount=data.totals?.convertedReferenceQuantity||0;
-      if(data.totals?.partial&&data.totals?.knownValueQuantity>0)append(stats,message(`Estimativa parcial: somente ${data.totals.knownValueQuantity} de ${data.totals.quantity} exemplares têm referência atual utilizável em BRL. Itens sem referência não recebem preço zero.`));
-      if(data.totals?.brazilianAggregateQuantity>0)append(stats,message(`${countLabel(data.totals.brazilianAggregateQuantity,'exemplar usa','exemplares usam')} a média agregada de anúncios PT/EN do MYP Cards na estimativa. Esses valores não são ajustados à conservação ou ao acabamento e não representam vendas concluídas.`, 'info'));
-      if(cards.length)append(stats,el('section',{class:'collection-international-stats','aria-label':'Fontes da estimativa em reais'},el('div',{},el('h2',{},'Estimativas em reais'),el('p',{},convertedCount?`${countLabel(convertedCount,'exemplar usa','exemplares usam')} uma referência internacional convertida pela PTAX do Banco Central no valor estimado. A conversão não representa preço de mercado brasileiro nem ajuste à conservação. Veja a fonte, a data e o cálculo em cada carta.`:'As estimativas usam as referências disponíveis em reais. Se não houver cotação brasileira, uma referência internacional atual pode ser convertida pela PTAX do Banco Central. Sem preço ou câmbio válido, o item continua sem estimativa.')),button('Atualizar referências desta página',event=>run(event.currentTarget,region,async()=>{const ids=cards.slice(0,24).map(item=>item.id);await api(`${root}/inventory/market-refresh`,{method:'POST',body:{ids}});await load();append(region,message('Preços e câmbio verificados respeitando o cache. Veja as datas e fontes nas cartas. Até 24 itens por ação, com limite de consultas externas.','success'));}),'shop-text-link')));
+      const totals=data.totals||{},quantity=totals.quantity??totals.activeQuantity??0,known=totals.knownValueQuantity??0;
+      count.textContent=countLabel(quantity,"item","itens");
+      replace(stats,el("div",{class:"collection-stats","aria-label":"Resumo da coleção"},
+        el("div",{class:"collection-stat"},el("span",{},"Valor estimado"),
+          el("strong",{},known?money(totals.estimatedValueCents??0):[
+            el("span",{"aria-hidden":"true"},"—"),el("span",{class:"sr-only"},"Sem estimativa disponível")
+          ]),
+          known>0&&known<quantity?el("small",{},"Parcial"):null),
+        el("div",{class:"collection-stat"},el("span",{},"Valor gasto"),el("strong",{},money(totals.paidCents??totals.knownCostCents??0)))));
     }
     function renderSelection() {
-      selection.hidden=!selected.size;
-      replace(selection,el("strong",{},`${selected.size} selecionados de ${data.items.length} exibidos`),button("Limpar",()=>{selected.clear();renderResults();},"shop-text-link"),button("Editar custo",()=>bulkCost([...selected.values()]),"shop-button secondary"),button("Vendi / registrar saída",()=>sell([...selected.values()]),"shop-button secondary"),button("Arquivar",()=>confirm("Arquivar itens",`Arquivar ${selected.size} registros? Eles saem dos totais ativos e podem ser restaurados.`,()=>mutate({action:"archive",ids:[...selected.keys()]})),"shop-button secondary"),button("Restaurar",()=>confirm("Restaurar itens",`Restaurar ${selected.size} registros para sua coleção?`,()=>mutate({action:"restore",ids:[...selected.keys()]})),"shop-button secondary"));
+      selection.hidden=!selecting||!selected.size;
+      if(selection.hidden){replace(selection);return;}
+      replace(selection,el("strong",{},countLabel(selected.size,"item selecionado","itens selecionados")),
+        button("Limpar",()=>{selected.clear();renderResults();},"shop-button secondary"),
+        button("Editar custo",()=>bulkCost([...selected.values()]),"shop-button secondary"),
+        button("Registrar saída",()=>sell([...selected.values()]),"shop-button secondary"),
+        button("Arquivar",()=>confirm("Arquivar itens",`Arquivar ${selected.size} registros? Eles saem dos totais ativos e podem ser restaurados.`,()=>mutate({action:"archive",ids:[...selected.keys()]})),"shop-button secondary"),
+        button("Restaurar",()=>confirm("Restaurar itens","Restaurar os itens selecionados para sua coleção?",()=>mutate({action:"restore",ids:[...selected.keys()]})),"shop-button secondary"));
     }
     function itemNode(item) {
-      const check=el("input",{type:"checkbox",checked:selected.has(item.id),"aria-label":`Selecionar ${title(item)}`,onChange:event=>{event.target.checked?selected.set(item.id,item):selected.delete(item.id);node.classList.toggle('is-selected',event.target.checked);renderSelection();}}),node=el("article",{class:`collection-item${selected.has(item.id)?" is-selected":""}`,"data-item-id":item.id},el("label",{class:"collection-check"},check,el("span",{class:"sr-only"},`Selecionar ${title(item)}`)),el("span",{class:`collection-item-status status-${item.status}`},status(item)),photoButton(item),el("div",{class:"collection-item-copy"},button(title(item),()=>detail(item),"collection-item-title"),el("p",{class:"collection-item-set"},`${setName(item)} · ${number(item)}`),el("p",{class:"collection-item-version",title:label(conditions,item.condition)},`${item.quantity>1?`${item.quantity}x · `:""}${label(languages,item.language)} · ${item.condition||"Sem condição"} · ${label(finishes,item.variant)}${arr(item.attributes).length?` · ${item.attributes.map(value=>label(attributes,value)).join(' / ')}`:""}`),el("p",{class:"collection-item-extra"},`${item.card?.rarity||"Raridade não informada"} · ${item.card?.illustrator||"Ilustrador não informado"} · Aquisição ${date(item.acquiredAt)}`),el("p",{class:"collection-item-cost"},`Custo unitário: ${cost(item.paidCents)}`),quoteNode(item),roundNote(item)?el("p",{class:"collection-item-warning"},"Idioma da imagem de referência diferente"):null,item.card?.variantInformed?el("p",{class:"collection-item-warning"},"Variante informada por você"):null,button("Ver detalhes",()=>detail(item),"shop-text-link")));
+      const name=title(item),marked=selected.has(item.id),condition=item.condition;
+      const identity=[setName(item)!=="Sem coleção"?setName(item):null,number(item)].filter(Boolean).join(" · ");
+      const kind=label(types,item.itemType);
+      const captionId=`collection-caption-${item.id}`,statusId=`collection-status-${item.id}`;
+      const facts=[
+        condition?el("span",{class:"collection-item-condition",title:label(conditions,condition)},condition==="SEALED"?"Lacrado":condition==="OPENED"?"Aberto":condition==="CUSTOM"?"Personalizado":condition):null,
+        item.quantity>1?el("span",{class:"collection-item-quantity","aria-label":countLabel(item.quantity,"exemplar","exemplares")},`${item.quantity}×`):null,
+        Number.isFinite(item.paidCents)?el("span",{class:"collection-item-cost"},el("small",{},item.quantity>1?"Pago por un.":"Pago"),el("strong",{},money(item.paidCents))):null
+      ].filter(Boolean);
+      const itemInfo=el("span",{class:"collection-item-copy"},
+        el("strong",{class:"collection-item-title"},name),
+        el("span",{class:"collection-item-caption",id:captionId},
+          identity||item.kind!=="CARD"?el("span",{class:"collection-item-set"},identity||kind):null,
+          facts.length?el("span",{class:"collection-item-facts"},facts):null,
+          view==="detailed"?el("span",{class:"collection-item-extra"},[label(languages,item.language),item.kind==="CARD"?label(finishes,item.variant):kind,item.card?.rarity,item.card?.illustrator,item.acquiredAt?date(item.acquiredAt):null].filter(Boolean).join(" · ")):null));
+      const node=el("article",{class:`collection-item${marked?" is-selected":""}`,"data-item-id":item.id});
+      const caption=`${statusId} ${captionId}`;
+      const content=[
+        el("span",{class:"collection-photo"},thumb(item)),
+        el("span",{class:`collection-item-status status-${item.status}`,id:statusId},status(item)),
+        itemInfo
+      ];
+      if(selecting){
+        const check=el("input",{type:"checkbox",checked:marked,"aria-label":`Selecionar ${name}`,"aria-describedby":caption,onChange:event=>{
+          if(event.target.checked)selected.set(item.id,item);
+          else selected.delete(item.id);
+          node.classList.toggle("is-selected",event.target.checked);
+          renderSelection();
+        }});
+        append(node,el("label",{class:"collection-inventory-card"},content,el("span",{class:"collection-check"},check)));
+      }else append(node,button(content,()=>detail(item),"collection-inventory-card",{"aria-label":`Ver detalhes de ${name}`,"aria-describedby":caption}));
       return node;
     }
     function groupKey(item,name) {if(name==='set')return item.setId||((item.card?.setName||item.setName)?'manual:'+(item.card?.setName||item.setName):'unknown');if(name==='rarity')return item.card?.rarity||'unknown';if(name==='illustrator')return item.card?.illustrator||'unknown';if(name==='status')return item.status;if(name==='pokemon')return arr(item.card?.dexNumbers).length?'dex-'+item.card.dexNumbers[0]:item.kind==='CARD'?'non-pokemon':item.kind;return 'all';}
     function renderResults() {
-      results.className=`collection-results view-${view}`;const items=arr(data.items),grouping=query.get("group")||"none";
-      if(!items.length)replace(results,empty(data.total?"Nenhum item nesta página.":[...query.keys()].some(name=>!['page','pageSize','sort','dir','group'].includes(name))?"Nenhum item corresponde aos filtros.":"Sua coleção começa aqui.","Adicione suas cartas para acompanhar o valor e organizar suas conquistas.",button("Adicionar cartas",()=>navigate(`${route}/adicionar`),"shop-button")));
-      else if(grouping==='none')replace(results,el("div",{class:"collection-items"},items.map(itemNode)));
-      else {const groups=new Map();for(const item of items){const key=groupKey(item,grouping);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(item);}replace(results,...[...groups].map(([key,rows])=>{const meta=arr(data.groups).find(group=>String(group.key)===key),name=grouping==='status'?statuses[key]:(meta?.label||(grouping==='set'?setName(rows[0]):key==='unknown'?'Sem informação':key));return el("details",{class:"collection-group",open:true},el("summary",{},el("strong",{},name),el("span",{},`${meta?.quantity??rows.reduce((sum,item)=>sum+item.quantity,0)} exemplares · ${meta?.knownValueQuantity?`${money(meta.estimatedValueCents)} em ${meta.knownValueQuantity} com cotação`:"Sem cotação"}`)),el("div",{class:"collection-items"},rows.map(itemNode)));}));}
-      const pages=Math.ceil(data.total/(data.pageSize||36));if(pages>1)append(results,el("nav",{class:"shop-pagination","aria-label":"Páginas da coleção"},button("← Anterior",()=>{query.set('page',String(data.page-1));load();},"shop-button secondary",{disabled:data.page<=1}),el("span",{},`Página ${data.page} de ${pages} · ${data.total} registros`),button("Próxima →",()=>{query.set('page',String(data.page+1));load();},"shop-button secondary",{disabled:data.page>=pages})));
+      results.className=`collection-results view-${view}`;
+      const items=arr(data.items),grouping=query.get("group")||"none";
+      selectToggle.disabled=!selecting&&!items.length;
+      selectToggle.textContent=selecting?"Concluir":"Selecionar";
+      selectToggle.setAttribute("aria-pressed",String(selecting));
+      selectTools.hidden=!selecting||!items.length;
+      refreshButton.hidden=!items.some(item=>item.kind==="CARD");
+      if(!items.length){
+        const filtered=filterEntries().length>0;
+        replace(results,filtered
+          ?empty("Nenhum item encontrado.","Experimente outro termo ou limpe os filtros.",button("Limpar filtros",resetFilters,"shop-button secondary"))
+          :empty(data.total?"Nenhum item nesta página.":"Sua coleção está vazia.",data.total?"Volte à página anterior.":"Adicione uma carta, um selado ou um item personalizado.",
+            data.total?null:button("Adicionar primeiro item",add,"shop-button")));
+      }else if(grouping==="none"){
+        replace(results,el("div",{class:"collection-items"},items.map(itemNode)));
+      }else{
+        const groups=new Map();
+        for(const item of items){
+          const key=groupKey(item,grouping);
+          if(!groups.has(key))groups.set(key,[]);
+          groups.get(key).push(item);
+        }
+        replace(results,...[...groups].map(([key,rows])=>{
+          const meta=arr(data.groups).find(group=>String(group.key)===key);
+          const name=grouping==="status"?statuses[key]:(meta?.label||(grouping==="set"?setName(rows[0]):key==="unknown"?"Sem informação":key));
+          const quantity=meta?.quantity??rows.reduce((sum,item)=>sum+(item.quantity||1),0);
+          return el("details",{class:"collection-group",open:true},el("summary",{},el("strong",{},name),el("span",{},countLabel(quantity,"exemplar","exemplares"))),
+            el("div",{class:"collection-items"},rows.map(itemNode)));
+        }));
+      }
+      const pages=Math.ceil(data.total/(data.pageSize||36));
+      if(pages>1)append(results,el("nav",{class:"shop-pagination","aria-label":"Páginas da coleção"},
+        button("Anterior",()=>{query.set("page",String(data.page-1));load();},"shop-button secondary",{disabled:data.page<=1}),
+        el("span",{},`Página ${data.page} de ${pages}`),
+        button("Próxima",()=>{query.set("page",String(data.page+1));load();},"shop-button secondary",{disabled:data.page>=pages})));
       renderSelection();
     }
     async function load() {
-      controller?.abort();controller=new AbortController();const active=controller;results.setAttribute('aria-busy','true');replace(region,message("Carregando sua coleção…"));
-      try {const next=await api(`${root}/inventory?${query}`,{signal:active.signal});if(current!==generation||active!==controller||getState().user?.id!==owner)return;data={...next,items:arr(next.items)};for(const item of data.items)if(selected.has(item.id))selected.set(item.id,item);renderStats();renderInternationalStats();buildFilters();renderResults();replace(region,el("p",{class:"shop-fine"},`${countLabel(data.total,'registro encontrado','registros encontrados')} · ${countLabel(data.items.reduce((sum,item)=>sum+(item.quantity||1),0),'exemplar','exemplares')} nesta página`),data.priceProviders?.message?el('p',{class:'shop-fine'},data.priceProviders.message):null);}
-      catch(error){if(error.name==='AbortError'||active!==controller||current!==generation)return;replace(region,message(error.message,"error"),button("Tentar novamente",load,"shop-button secondary"));}finally{if(active===controller)results.removeAttribute('aria-busy');}
+      clearTimeout(debounce);
+      controller?.abort();
+      controller=new AbortController();
+      const active=controller;
+      results.setAttribute("aria-busy","true");
+      replace(region,message("Carregando sua coleção…"));
+      try {
+        const next=await api(`${root}/inventory?${query}`,{signal:active.signal});
+        if(active.signal.aborted||current!==generation||active!==controller||getState().user?.id!==owner)return;
+        data={...next,items:arr(next.items)};
+        for(const item of data.items)if(selected.has(item.id))selected.set(item.id,item);
+        renderStats();
+        buildFilters();
+        renderResults();
+        replace(region);
+      } catch(error) {
+        if(error.name==="AbortError"||active!==controller||current!==generation)return;
+        replace(region,message(error.message,"error"),button("Tentar novamente",load,"shop-button secondary"));
+      } finally {
+        if(active===controller)results.removeAttribute("aria-busy");
+      }
     }
     async function mutate(body) {const payloadKey=JSON.stringify(body);if(!mutationRequests.has(payloadKey))mutationRequests.set(payloadKey,newId());const response=await api(`${root}/inventory/bulk`,{method:"POST",body:{requestId:mutationRequests.get(payloadKey),...body}});mutationRequests.delete(payloadKey);undoId=response.operationId;selected.clear();await load();if(undoId)append(region,message("Alteração salva no seu histórico.","success"),button("Desfazer esta alteração",async event=>run(event.currentTarget,region,async()=>{await api(`${root}/inventory/bulk`,{method:'POST',body:{requestId:newId(),action:'undo',operationId:undoId}});undoId=null;await load();}),"shop-text-link"));return response;}
     function bulkCost(items) {
@@ -163,9 +259,53 @@ export function createCollectionUI(ctx) {
       const form=el("form",{class:"personal-form",onSubmit:event=>{event.preventDefault();run(form.querySelector('[type=submit]'),region,async()=>{if(!form.reportValidity())return;const values=new FormData(form);await mutate({action:'sell',ids:items.map(item=>item.id),amountCents:values.get('exitType')==='SALE'?amount:null,mode:values.get('mode'),exitType:values.get('exitType'),date:values.get('date')||null,notes:values.get('notes')||'',...(quantity?{quantities:{[items[0].id]:Number(values.get('quantity'))}}:{})});dialog.close();});}},items.length===1?el('div',{class:'collection-sale-identity'},thumb(items[0]),el('strong',{},title(items[0]))):el('p',{},`${items.length} registros selecionados`),message('Este é um registro privado de saída da sua coleção. Ele não cria anúncio, pagamento ou pedido da loja.'),exit,quantity,mode,amountField,field('Data da saída (opcional)','date','date',''),field('Observações da saída','notes','textarea','',{maxlength:2000,rows:3}),profit,region,el('button',{type:'submit',class:'shop-button'},'Confirmar saída / registrar venda'));explain();dialog=modal(items.length===1?`Vendi ${title(items[0])}`:'Registrar saída em massa',form);
     }
     async function detail(item) {
-      const region=notice(),content=el('div',{},el('p',{class:'shop-loading'},'Carregando detalhes…')),dialog=modal(title(item),content);
-      try {const result=await api(`${root}/inventory/${encodeURIComponent(item.id)}`),record=result.item||item;if(!dialog.isConnected)return;replace(content,el('div',{class:'collection-detail'},photoButton(record),el('div',{},el('span',{class:'shop-badge'},status(record)),el('h3',{},title(record)),el('p',{},`${setName(record)} · ${number(record)}`),el('p',{class:'shop-muted'},`${record.card?.series||''} · ${record.card?.rarity||'Raridade não informada'} · ${record.card?.illustrator||'Ilustrador não informado'}`),el('p',{},`${label(languages,record.language)} · ${label(conditions,record.condition)} · ${label(finishes,record.variant)}`),el('p',{},`Aquisição: ${date(record.acquiredAt)} · Custo: ${cost(record.paidCents)}`),quoteNode(record),roundNote(record)?message(roundNote(record)):null,el('p',{class:'collection-private-notes'},record.notes||'Sem observações'),record.status==='SOLD'&&record.sale?el('div',{},el('p',{},`Saída: ${({SALE:'Venda',TRADE:'Troca',DONATION:'Doação',OTHER:'Outra saída'})[record.sale.exitType]||'Registrada'} · ${date(record.sale.date)} · Valor recebido: ${record.sale.amountCents==null?'Não informado':money(record.sale.amountCents)}`),el('p',{},`Custo registrado na saída: ${cost(record.sale.costCents)} · Resultado por exemplar: ${record.sale.realizedGainCents==null?'Indisponível':money(record.sale.realizedGainCents)}`)):null)),el('div',{class:'shop-actions collection-detail-actions'},button('Editar',()=>{dialog.close();edit(record,load);},'shop-button secondary'),button('Duplicar exemplar',()=>{dialog.close();startDuplicate(record);},'shop-button secondary'),record.status==='SOLD'||record.status==='ARCHIVED'?button('Restaurar',()=>{dialog.close();confirm('Restaurar item','Restaurar este registro para o acervo ativo?',()=>mutate({action:'restore',ids:[record.id]}));},'shop-button secondary'):button('Vendi / registrar saída',()=>{dialog.close();sell([record]);},'shop-button secondary'),record.status!=='ARCHIVED'?button('Arquivar',()=>{dialog.close();confirm('Arquivar item','O registro sairá dos totais ativos e poderá ser restaurado.',()=>mutate({action:'archive',ids:[record.id]}));},'shop-button secondary'):null,button('Excluir permanentemente',()=>{dialog.close();confirm('Excluir permanentemente','O exemplar será removido permanentemente do inventário. A trilha de operações é mantida para auditoria; esta exclusão não pode ser desfeita.',async()=>{await api(`${root}/inventory/${encodeURIComponent(record.id)}`,{method:'DELETE',body:{confirmation:'EXCLUIR'}});await load();},{strong:true});},'shop-text-link')),el('h3',{},'Histórico deste exemplar'),eventsNode(result.events),region);}
-      catch(error){replace(content,message(error.message,'error'),button('Tentar novamente',()=>{dialog.close();detail(item);},'shop-button secondary'));}
+      const content=el("div",{},el("p",{class:"shop-loading"},"Carregando detalhes…")),dialog=modal(title(item),content);
+      try{
+        const result=await api(`${root}/inventory/${encodeURIComponent(item.id)}`),record=result.item||item;
+        if(!dialog.isConnected)return;
+        const facts=[
+          ["Condição",label(conditions,record.condition)],
+          ["Idioma",label(languages,record.language)],
+          ["Acabamento",record.kind==="CARD"?label(finishes,record.variant):null],
+          ["Tipo",record.kind!=="CARD"?label(types,record.itemType):null],
+          ["Quantidade",record.quantity],
+          ["Valor pago por unidade",record.paidCents==null?null:money(record.paidCents)],
+          ["Aquisição",record.acquiredAt?date(record.acquiredAt):null],
+          ["Raridade",record.card?.rarity],
+          ["Ilustração",record.card?.illustrator]
+        ];
+        const sale=record.status==="SOLD"?record.sale:null;
+        if(sale)facts.push(["Saída",({SALE:"Venda",TRADE:"Troca",DONATION:"Doação",OTHER:"Outra saída"})[sale.exitType]||"Registrada"],
+          ["Data da saída",sale.date?date(sale.date):null],["Valor recebido",sale.amountCents==null?null:money(sale.amountCents)],
+          ["Custo registrado na saída",sale.costCents==null?null:money(sale.costCents)],
+          ["Resultado por exemplar",sale.realizedGainCents==null?null:money(sale.realizedGainCents)]);
+        const closed=record.status==="SOLD"||record.status==="ARCHIVED";
+        replace(content,el("div",{class:"collection-detail"},
+          photoButton(record),
+          el("div",{},
+            el("span",{class:"shop-badge"},status(record)),
+            el("p",{class:"collection-detail-set"},[setName(record)!=="Sem coleção"?setName(record):null,number(record)].filter(Boolean).join(" · ")),
+            el("dl",{class:"collection-detail-facts"},facts.filter(([,value])=>value!=null&&value!=="")
+              .map(([text,value])=>el("div",{},el("dt",{},text),el("dd",{},value)))),
+            roundNote(record)?el("p",{class:"shop-muted"},roundNote(record)):null,
+            record.notes?el("p",{class:"collection-private-notes"},record.notes):null)),
+          el("div",{class:"shop-actions collection-detail-actions"},
+            button("Editar",()=>{dialog.close();edit(record,load);},"shop-button"),
+            button("Duplicar exemplar",()=>{dialog.close();startDuplicate(record);},"shop-button secondary"),
+            closed
+              ?button("Restaurar",()=>{dialog.close();confirm("Restaurar item","Restaurar este registro para o acervo ativo?",()=>mutate({action:"restore",ids:[record.id]}));},"shop-button secondary")
+              :button("Registrar saída",()=>{dialog.close();sell([record]);},"shop-button secondary")),
+          el("details",{class:"collection-inventory-advanced"},el("summary",{},"Histórico e outras ações"),
+            eventsNode(result.events),
+            el("div",{class:"shop-actions collection-detail-actions"},
+              record.status!=="ARCHIVED"?button("Arquivar",()=>{dialog.close();confirm("Arquivar item","O registro sairá dos totais ativos e poderá ser restaurado.",()=>mutate({action:"archive",ids:[record.id]}));},"shop-button secondary"):null,
+              button("Excluir permanentemente",()=>{dialog.close();confirm("Excluir permanentemente","O exemplar será removido permanentemente do inventário. A trilha de operações é mantida para auditoria; esta exclusão não pode ser desfeita.",async()=>{
+                await api(`${root}/inventory/${encodeURIComponent(record.id)}`,{method:"DELETE",body:{confirmation:"EXCLUIR"}});
+                await load();
+              },{strong:true});},"shop-text-link"))));
+      }catch(error){
+        if(dialog.isConnected)replace(content,message(error.message,"error"),button("Tentar novamente",()=>{dialog.close();detail(item);},"shop-button secondary"));
+      }
     }
     function startDuplicate(item) {const draft={...item,id:undefined,quantity:1,status:'IN_COLLECTION',sale:undefined,events:undefined,manualValueCents:null,manualQuotedAt:null,localId:newId(),touched:{}};const storageKey=collectionDraftKey(owner),previous=readLocal(storageKey),queue=previous?.owner===owner?arr(previous.queue):[];queue.push(draft);saveLocal(storageKey,{owner,queue,updatedAt:Date.now(),step:'details',index:queue.length-1,requestId:newId()});navigate(`${route}/adicionar`);}
     async function history() {const content=el('div',{},message('Carregando movimentações…')),dialog=modal('Histórico da minha coleção',content);try{const result=await api(`${root}/inventory/events?pageSize=60`);if(dialog.isConnected)replace(content,eventsNode(result.items||result.events),message('As saídas registradas aqui são particulares e não geram pedidos na loja.'));}catch(error){replace(content,message(error.message,'error'));}}
@@ -174,53 +314,208 @@ export function createCollectionUI(ctx) {
   function eventsNode(events) {return arr(events).length?el('ol',{class:'collection-events'},events.map(event=>{const action=event.action||event.kind;return el('li',{},el('strong',{},event.label||({ADD:'Adicionado',CREATE:'Adicionado',EDIT:'Editado',COST:'Custo atualizado',SELL:'Saída registrada',ARCHIVE:'Arquivado',RESTORE:'Restaurado',UNDO:'Alteração desfeita',DELETE:'Excluído'})[action]||'Atualização'),el('span',{},event.after?.card?.name||event.before?.card?.name||''),el('span',{},event.createdAt?new Date(event.createdAt).toLocaleString('pt-BR'):'Data não informada'),event.notes?el('p',{},event.notes):null);})):el('p',{class:'shop-muted'},'Nenhuma movimentação anterior registrada.');}
 
   function identityNode(item) {return el('div',{class:'collection-identity'},photoButton(item),el('div',{},el('p',{class:'shop-kicker'},item.kind==='CARD'?'CARTA POKÉMON':item.kind==='SEALED'?'PRODUTO SELADO':'ITEM PERSONALIZADO'),el('h3',{},title(item)),el('p',{},`${setName(item)} · ${number(item)}`),el('p',{class:'shop-muted'},[item.card?.series,item.card?.rarity,item.card?.illustrator].filter(Boolean).join(' · '))));}
-  function detailFields(item,onChange) {
-    const marketPreview=el('div',{'aria-live':'polite'},quoteNode(item));
-    const touched=name=>{item.touched={...item.touched,[name]:true};},change=(name,value)=>{item[name]=value;touched(name);replace(marketPreview,quoteNode(item));onChange?.();},invalid=name=>error=>{item.errors={...item.errors};error?item.errors[name]=error:delete item.errors[name];onChange?.();};
+  function photoFields(item,change) {
+    const saved=el('div',{class:'collection-saved-photo'}),region=notice(),privatePhoto=url=>/^\/api\/account\/collection\/photos\/[a-f0-9-]+$/i.test(url||'');
+    const linkField=field('Link da imagem','photoUrl','url',privatePhoto(item.photoUrl)?'':item.photoUrl||'',{maxlength:2000,placeholder:'https://…'}),linkInput=linkField.querySelector('input');
+    const uploadField=field('Enviar uma imagem','photoFile','file','',{accept:'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp'}),input=uploadField.querySelector('input');
+    let pending;
+    const showSaved=()=>replace(saved,item.photoUrl?el('div',{},thumb(item),el('span',{},'Foto selecionada'),button('Remover foto',()=>{cancelUpload();linkInput.value='';linkInput.setCustomValidity('');change('photoUrl','');replace(region);showSaved();},'shop-text-link')):null);
+    const cancelUpload=()=>{pending?.abort();pending=null;input.setCustomValidity('');};
+    linkInput.addEventListener('input',()=>{
+      cancelUpload();replace(region);const value=linkInput.value.trim();let valid=!value;
+      try{const url=new URL(value);valid=url.protocol==='https:'&&!url.username&&!url.password;}catch{}
+      linkInput.setCustomValidity(valid?'':'Use um link HTTPS válido para a imagem.');
+      if(valid&&(value||!privatePhoto(item.photoUrl)))change('photoUrl',value);
+    });
+    linkInput.addEventListener('change',showSaved);
+    input.addEventListener('change',async()=>{
+      cancelUpload();const file=input.files?.[0];input.value='';if(!file)return;
+      const mime=file.type||({png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp'})[file.name.split('.').at(-1)?.toLowerCase()];
+      if(!['image/png','image/jpeg','image/webp'].includes(mime)||!file.size||file.size>2*1024*1024){replace(region,message('Escolha uma imagem PNG, JPEG ou WebP de até 2 MB.','error'));return;}
+      const active=new AbortController();pending=active;input.setCustomValidity('Aguarde o envio da foto.');replace(region,el('p',{class:'shop-muted'},'Enviando foto…'));
+      try{
+        const bytes=new Uint8Array(await file.arrayBuffer());let binary='';for(let offset=0;offset<bytes.length;offset+=16384)binary+=String.fromCharCode(...bytes.subarray(offset,offset+16384));
+        if(active.signal.aborted||!input.isConnected)return;
+        const response=await api(`${root}/photos`,{method:'POST',body:{data:btoa(binary),mime},signal:active.signal});
+        if(active.signal.aborted||!input.isConnected)return;
+        if(!privatePhoto(response.url))throw new Error('Não foi possível confirmar a foto enviada.');
+        linkInput.value='';linkInput.setCustomValidity('');change('photoUrl',response.url);showSaved();replace(region,el('p',{class:'shop-muted'},'Foto enviada.'));
+      }catch(error){if(!active.signal.aborted&&input.isConnected)replace(region,message(error.message,'error'));}
+      finally{if(pending===active){pending=null;input.setCustomValidity('');}}
+    });
+    showSaved();return el('details',{class:'collection-photo-fields',open:!!item.photoUrl},el('summary',{},'Foto do exemplar (opcional)'),el('div',{class:'collection-photo-inputs'},uploadField,el('p',{class:'shop-muted'},'PNG, JPEG ou WebP, até 2 MB. Você também pode usar um link.'),linkField,saved,region));
+  }
+  function detailFields(item,onChange,{allowManualValue=false}={}) {
+    const touched=name=>{item.touched={...item.touched,[name]:true};},change=(name,value)=>{item[name]=value;touched(name);onChange?.();},invalid=name=>error=>{item.errors={...item.errors};error?item.errors[name]=error:delete item.errors[name];onChange?.();};
     const lang=selectField('Idioma do exemplar','language',languages,item.language||'pt'),type=selectField('Tipo de item','itemType',item.kind==='CARD'?types.filter(([key])=>key==='SINGLE'):[['','Selecione o tipo'],...types.filter(([key])=>key!=='SINGLE'&&(item.kind!=='SEALED'||key!=='CUSTOM'))],item.itemType|| (item.kind==='CARD'?'SINGLE':''),{required:true});
     lang.querySelector('select').addEventListener('change',event=>{change('language',event.target.value);replace(warning,roundNote(item)?message(roundNote(item)):null);});type.querySelector('select').addEventListener('change',event=>change('itemType',event.target.value));
     const condition=el('fieldset',{class:'collection-choice-group'},el('legend',{},'Conservação / condição'),...(item.kind==='CARD'?[...conditions,...(item.condition==='LP'?[['LP','Levemente jogada — registro anterior']]:item.condition==='DMG'?[['DMG','Danificada — registro anterior']]:[])]:item.kind==='SEALED'?[['SEALED','Lacrado'],['OPENED','Aberto']]:[['CUSTOM','Descrita nas observações'],['M','Excelente'],['SP','Com marcas de uso'],['D','Danificado']]).map(([id,text])=>{const input=el('input',{type:'radio',name:'condition',value:id,checked:item.condition===id,required:true,onChange:()=>change('condition',id)});return el('label',{class:'collection-radio',title:text},input,el('span',{},id),el('small',{},text));}));
-    const acquired=field('Data de aquisição (opcional)','acquiredAt','date',item.acquiredAt||''),notes=field('Observações privadas','notes','textarea',item.notes||'',{rows:3,maxlength:2000}),photo=field('URL HTTPS da sua foto (opcional)','photoUrl','url',item.photoUrl||'',{maxlength:2000,placeholder:'https://…'}),warning=notice();
-    acquired.querySelector('input').addEventListener('change',event=>change('acquiredAt',event.target.value||null));notes.querySelector('textarea').addEventListener('input',event=>change('notes',event.target.value));photo.querySelector('input').addEventListener('change',event=>change('photoUrl',event.target.value));replace(warning,roundNote(item)?message(roundNote(item)):null);
+    const acquired=field('Data de aquisição (opcional)','acquiredAt','date',item.acquiredAt||''),notes=field('Observações privadas','notes','textarea',item.notes||'',{rows:3,maxlength:2000}),warning=notice();
+    acquired.querySelector('input').addEventListener('change',event=>change('acquiredAt',event.target.value||null));notes.querySelector('textarea').addEventListener('input',event=>change('notes',event.target.value));replace(warning,roundNote(item)?message(roundNote(item)):null);
     const finish=selectField('Acabamento','variant',finishes,item.variant||'NORMAL');finish.querySelector('select').addEventListener('change',event=>change('variant',event.target.value));
     const attr=el('fieldset',{class:'collection-choice-group'},el('legend',{},'Atributos adicionais'),attributes.map(([id,text])=>{const node=checkbox(text,`attribute-${id}`,arr(item.attributes).includes(id));node.querySelector('input').addEventListener('change',event=>change('attributes',event.target.checked?[...new Set([...arr(item.attributes),id])]:arr(item.attributes).filter(value=>value!==id)));return node;}));
-    const manual=moneyField('manualValueCents','Referência manual unitária (R$) — informada por você',item.manualValueCents??null,value=>change('manualValueCents',value),invalid('manualValueCents'));
+    const manual=allowManualValue?el('details',{class:'collection-manual-value'},el('summary',{},'Informar meu próprio valor de referência'),moneyField('manualValueCents','Referência manual unitária (R$)',item.manualValueCents??null,value=>change('manualValueCents',value),invalid('manualValueCents'))):null;
     const manualIdentity=item.kind==='CUSTOM'||item.kind==='SEALED'&&!item.sealedId&&!item.card?.sealedId?el('div',{class:'collection-manual-identity'},...[['Nome do item','title','text',title(item)],['Coleção ou linha','setName','text',setName(item)==='Sem coleção'?'':setName(item)],['Descrição','description','textarea',item.description||item.card?.description||'']].map(([text,name,type,value])=>{const node=field(text,name,type,value,{required:name==='title',maxlength:name==='description'?2000:200,rows:type==='textarea'?3:undefined});node.querySelector('input,textarea').addEventListener('input',event=>{if(name==='setName'){item.card={...item.card,setName:event.target.value};touched(name);onChange?.();}else change(name,event.target.value);});return node;})):null;
-    return el('div',{class:'collection-detail-fields'},manualIdentity,el('div',{class:'shop-form-grid'},type,lang),warning,marketPreview,condition,moneyField('paidCents','Quanto você pagou neste exemplar? (R$ por unidade, opcional)',item.paidCents??null,value=>change('paidCents',value),invalid('paidCents')),acquired,item.kind==='CARD'?el('div',{},finish,attr,message('Acabamentos e atributos não confirmados pelo catálogo ficam marcados como informados por você. Eles não recebem cotação de outra versão.')):null,notes,photo,el('details',{class:'collection-manual-value'},el('summary',{},'Informar meu próprio valor de referência'),manual,message('Valor privado, em BRL, informado por você. Ele não é uma cotação automática brasileira e não será substituído silenciosamente.')));
+    return el('div',{class:'collection-detail-fields'},manualIdentity,el('div',{class:'shop-form-grid'},type,lang),warning,condition,moneyField('paidCents','Valor pago por exemplar (R$, opcional)',item.paidCents??null,value=>change('paidCents',value),invalid('paidCents')),acquired,item.kind==='CARD'?el('div',{class:'collection-finish-fields'},finish,el('details',{class:'collection-extra-fields'},el('summary',{},'Atributos adicionais (opcional)'),attr)):null,notes,photoFields(item,change),manual);
   }
-  function edit(record,onSaved) {let item=structuredClone(record),requestId=newId(),dialog;const region=notice(),form=el('form',{class:'personal-form',onSubmit:event=>{event.preventDefault();run(form.querySelector('[type=submit]'),region,async()=>{if(!form.reportValidity())return;const payload=collectionBatchPayload([item],newId()).items[0];delete payload.quantity;if(!item.touched?.manualValueCents)delete payload.manualValueCents;payload.requestId=requestId;payload.revision=record.revision;await api(`${root}/inventory/${encodeURIComponent(record.id)}`,{method:'PUT',body:payload});dialog.close();toast('Exemplar atualizado.');await onSaved?.();});}},identityNode(item),detailFields(item,()=>requestId=newId()),region,el('button',{type:'submit',class:'shop-button'},'Salvar alterações'));dialog=modal(`Editar ${title(record)}`,form);}
+  function edit(record,onSaved) {let item=structuredClone(record),requestId=newId(),dialog;const region=notice(),form=el('form',{class:'personal-form',onSubmit:event=>{event.preventDefault();run(form.querySelector('[type=submit]'),region,async()=>{if(!form.reportValidity())return;const payload=collectionBatchPayload([item],newId()).items[0];delete payload.quantity;if(!item.touched?.manualValueCents)delete payload.manualValueCents;payload.requestId=requestId;payload.revision=record.revision;await api(`${root}/inventory/${encodeURIComponent(record.id)}`,{method:'PUT',body:payload});dialog.close();toast('Exemplar atualizado.');await onSaved?.();});}},identityNode(item),detailFields(item,()=>requestId=newId(),{allowManualValue:true}),region,el('button',{type:'submit',class:'shop-button'},'Salvar alterações'));dialog=modal(`Editar ${title(record)}`,form);}
 
   async function wizard() {
     const owner=getState().user.id,key=collectionDraftKey(owner),draft=readLocal(key),valid=draft?.owner===owner&&Date.now()-draft.updatedAt<7*86400000;let queue=valid?arr(draft.queue):[],step=valid?draft.step||'choose':'choose',index=Math.min(valid?draft.index||0:0,Math.max(queue.length-1,0)),requestId=valid?draft.requestId||newId():newId(),queueOpen=false,copyUndo=null,replaceIndex=null;
-    const current=++generation,page=el('section',{class:'collection-wizard'}),main=el('div',{class:'collection-wizard-main'}),sidebar=el('aside',{class:'collection-queue','aria-label':'Fila de itens'}),region=notice(),queueToggle=button('Fila (0)',()=>{queueOpen=!queueOpen;renderQueue();},'shop-button secondary collection-queue-toggle',{'aria-expanded':false});let searchAbort,searchTimer,searchSchedule;
+    const current=++generation,page=el('section',{class:'collection-wizard'}),main=el('div',{class:'collection-wizard-main'}),sidebar=el('aside',{class:'collection-queue',id:'collection-wizard-queue','aria-label':'Fila de itens'}),region=notice();
+    const queries=new Map(),resultCache=new Map();let searchAbort,searchSchedule,detailsAbort,refreshSearchCounts;
     const save=()=>{if(getState().user?.id!==owner)return;saveLocal(key,{owner,queue,step,index,requestId,updatedAt:Date.now()});};
     const changed=()=>{requestId=newId();save();renderQueue();};
-    const goto=value=>{queueOpen=false;step=value;searchAbort?.abort();clearTimeout(searchTimer);searchSchedule?.dispose();save();render();};
-    const header=el('div',{class:'collection-heading'},button('← Minha coleção',()=>navigate(route),'shop-text-link'),el('div',{},el('p',{class:'shop-kicker'},'MONTE SUA FILA'),el('h1',{},'Adicionar à coleção')),queueToggle);
-    append(page,header,el('ol',{class:'collection-steps'},['Escolher','Buscar','Detalhar','Revisar'].map((text,i)=>el('li',{'data-step':i},text))),region,el('div',{class:'collection-wizard-layout'},main,sidebar));
-    const newQueueItem=(kind,card={})=>({localId:newId(),kind,cardId:kind==='CARD'?(card.providerId||card.id):undefined,setId:card.setId||'',sealedId:kind==='SEALED'?card.id:undefined,card:kind==='CARD'?card:{name:card.name||'',setName:card.setName||'',image:card.image||'',sealedId:card.sealedId},title:card.name||'',language:card.language||'pt',referenceLanguage:card.referenceLanguage||card.language||'pt',condition:'',variant:card.availableVariants?.length===1?card.availableVariants[0]:'NORMAL',attributes:[],quantity:1,paidCents:null,acquiredAt:null,manualValueCents:null,notes:'',photoUrl:'',itemType:kind==='CARD'?'SINGLE':card.itemType||(kind==='SEALED'?'':'CUSTOM'),touched:{}});
+    const goto=value=>{
+      queueOpen=false;step=value;save();render();
+      main.scrollIntoView({block:'start'});main.querySelector('h2')?.focus({preventScroll:true});
+    };
+    function startDetails() {const pending=queue.findIndex(item=>!item.condition||!item.itemType||Object.keys(item.errors||{}).length);index=pending<0?0:pending;goto('details');}
+    let queueTrigger;
+    function closeQueue() {queueOpen=false;renderQueue();queueTrigger?.focus();}
+    function openQueue(event) {
+      if(queueOpen){closeQueue();return;}
+      queueTrigger=event.currentTarget;queueOpen=true;renderQueue();sidebar.querySelector('.collection-queue-close')?.focus();
+    }
+    const queueControls={'aria-expanded':'false','aria-controls':'collection-wizard-queue'};
+    const queueToggle=button('Fila (0)',openQueue,'shop-button secondary collection-queue-toggle',queueControls);
+    const queueCount=button('',openQueue,'collection-continue-count',{...queueControls,'aria-live':'polite'});
+    const continueButton=button('Preencher detalhes',startDetails,'shop-button collection-wizard-primary');
+    const continueBar=el('div',{class:'collection-wizard-continue',hidden:true},queueCount,continueButton);
+    const header=el('div',{class:'collection-heading collection-wizard-heading'},button('‹ Minha coleção',()=>navigate(route),'shop-text-link'),el('h1',{},'Adicionar à coleção'),queueToggle);
+    append(page,header,el('ol',{class:'collection-steps','aria-label':'Etapas para adicionar um item'},['Tipo','Buscar','Detalhar','Revisar'].map((text,i)=>el('li',{'data-step':i},text))),region,el('div',{class:'collection-wizard-layout'},main,sidebar),continueBar);
+    const newQueueItem=(kind,card={})=>({localId:newId(),kind,cardId:kind==='CARD'?(card.providerId||card.id):undefined,setId:card.setId||'',sealedId:kind==='SEALED'?card.id:undefined,card:kind==='CARD'?card:{name:card.name||'',setName:card.setName||'',image:card.image||'',sealedId:card.sealedId},title:card.name||'',language:card.language||'pt',referenceLanguage:card.referenceLanguage||card.language||'pt',condition:'',variant:card.availableVariants?.length===1?card.availableVariants[0]:'NORMAL',attributes:[],quantity:1,paidCents:null,acquiredAt:null,manualValueCents:null,notes:'',photoUrl:'',itemType:kind==='CARD'?'SINGLE':card.itemType||(kind==='SEALED'?'':'CUSTOM'),needsCardDetails:kind==='CARD'&&!Array.isArray(card.availableVariants),touched:{}});
     function renderQueue() {
-      sidebar.classList.toggle('is-open',queueOpen);queueToggle.textContent=`Fila (${queue.length})`;queueToggle.setAttribute('aria-expanded',queueOpen);replace(sidebar,el('div',{class:'collection-queue-heading'},button('×',()=>{queueOpen=false;renderQueue();queueToggle.focus();},'shop-text-link collection-queue-close',{'aria-label':'Fechar fila'}),el('h2',{},`${queue.length} ${queue.length===1?'item':'itens'} na fila`),button('+ Adicionar',()=>goto('choose'),'shop-text-link'),button('Limpar',()=>confirm('Limpar fila','Remover todos os itens deste rascunho?',()=>{queue=[];step='choose';changed();render();}),'shop-text-link',{disabled:!queue.length})),queue.length?el('ol',{class:'collection-queue-list'},queue.map((item,i)=>el('li',{class:index===i&&step==='details'?'is-editing':''},button([el('span',{class:'collection-queue-index'},String(i+1)),thumb(item),el('span',{},el('strong',{},title(item)),el('small',{},`${item.condition||'Condição pendente'} · ${label(languages,item.language)}`),el('small',{},`${label(finishes,item.variant)} · ${cost(item.paidCents)}`))],()=>{index=i;queueOpen=false;goto('details');},'collection-queue-item'),button('×',()=>{queue.splice(i,1);index=Math.min(index,Math.max(queue.length-1,0));if(!queue.length)step='choose';changed();render();},'collection-remove',{'aria-label':`Remover ${title(item)} da fila`}),button('+',()=>{queue.splice(i+1,0,{...structuredClone(item),localId:newId()});changed();render();},'collection-duplicate',{'aria-label':`Repetir ${title(item)} na fila`})) )):el('div',{class:'collection-queue-empty'},svgIcon('collection'),el('p',{},'Escolha cartas, selados e personalizados. Cada exemplar mantém seus próprios detalhes.')),el('div',{class:'collection-queue-footer'},button(step==='details'||step==='review'?'Revisar itens':'Preencher detalhes',()=>{index=0;goto(step==='details'||step==='review'?'review':'details');},'shop-button',{disabled:!queue.length})));
+      const count=countLabel(queue.length,'item selecionado','itens selecionados'),canContinue=!!queue.length&&['choose','cards','sealed'].includes(step)&&replaceIndex==null;
+      if(queueCount.textContent!==count)queueCount.textContent=count;
+      queueCount.setAttribute('aria-expanded',String(queueOpen));
+      continueBar.hidden=!canContinue||queueOpen;
+      page.classList.toggle('has-collection-continue',canContinue);
+      sidebar.classList.toggle('is-open',queueOpen);queueToggle.textContent=`Fila (${queue.length})`;queueToggle.setAttribute('aria-expanded',String(queueOpen));
+      const heading=el('div',{class:'collection-queue-heading'},
+        button('×',closeQueue,'shop-text-link collection-queue-close',{'aria-label':'Fechar fila'}),
+        el('h2',{},countLabel(queue.length,'item na fila','itens na fila')),
+        button('Adicionar mais',()=>{replaceIndex=null;goto('choose');},'shop-text-link'),
+        button('Limpar',()=>confirm('Limpar fila','Remover todos os itens deste rascunho?',()=>{queue=[];replaceIndex=null;changed();goto('choose');}),'shop-text-link',{disabled:!queue.length}));
+      const list=queue.length?el('ol',{class:'collection-queue-list'},queue.map(queueRow)):el('div',{class:'collection-queue-empty'},svgIcon('collection'),el('p',{},'Os itens selecionados aparecem aqui.'));
+      replace(sidebar,heading,list,canContinue?el('div',{class:'collection-queue-footer'},button('Preencher detalhes',startDetails,'shop-button collection-wizard-primary')):null);
+      refreshSearchCounts?.();
     }
-    function choose() {replace(main,el('div',{class:'collection-type-choice'},el('h2',{},'O que você está adicionando?'),el('p',{class:'shop-muted'},'Misture cartas, selados e personalizados na mesma fila. Preencha os detalhes de cada exemplar no próximo passo.'),[['CARD','Carta','Busque pelo catálogo por nome, código ou coleção. Veja imagens e raridades reais.'],['SEALED','Selado','Booster, blister, deck, ETB, box, lata ou acessório. Escolha um cadastro ou informe seu próprio item.'],['CUSTOM','Personalizado','Playmat, moeda, lote ou autógrafo. Descreva seu colecionável e adicione uma foto.']].map(([kind,text,description])=>button([svgIcon(kind==='CARD'?'collection':kind==='SEALED'?'bag':'plus'),el('span',{},el('strong',{},text),el('small',{},description)),el('span',{},'→')],()=>{replaceIndex=null;if(kind==='CUSTOM')custom('CUSTOM');else search(kind);},'collection-type-button'))));}
-    function add(card,kind) {if(queue.length>=100){replace(region,message('Adicione até 100 exemplares por envio. Finalize esta fila para continuar.','error'));return;}if(replaceIndex!=null){const prior=queue[replaceIndex];queue[replaceIndex]={...prior,cardId:card.providerId||card.id,setId:card.setId,card,title:card.name,referenceLanguage:card.referenceLanguage||card.language};index=replaceIndex;replaceIndex=null;changed();goto('details');return;}queue.push(newQueueItem(kind,card));changed();toast(`${card.name} adicionado à fila.`);}
+    function queueRow(item,i) {
+      const open=button([el('span',{class:'collection-queue-index'},String(i+1)),thumb(item),el('span',{},el('strong',{},title(item)),el('small',{},`${item.condition||'Condição pendente'} · ${label(languages,item.language)}`))],()=>{index=i;replaceIndex=null;goto('details');},'collection-queue-item');
+      const remove=button('×',()=>{
+        queue.splice(i,1);
+        if(i<index)index--;
+        index=Math.min(index,Math.max(queue.length-1,0));
+        const replacing=replaceIndex!=null;replaceIndex=null;changed();
+        if(!queue.length)goto('choose');else if(replacing||step==='details'||step==='review')render();
+        if(queueOpen)sidebar.querySelector('.collection-queue-close')?.focus();
+      },'collection-remove',{'aria-label':`Remover ${title(item)} da fila`});
+      const duplicate=button('+',()=>{
+        if(queue.length>=100){replace(region,message('A fila aceita até 100 exemplares.','error'));return;}
+        queue.splice(i+1,0,{...structuredClone(item),localId:newId()});
+        if(i<index)index++;
+        if(replaceIndex!=null&&i<replaceIndex)replaceIndex++;
+        changed();if(step==='details'||step==='review')render();
+        if(queueOpen)sidebar.querySelector('.collection-queue-close')?.focus();
+      },'collection-duplicate',{'aria-label':`Repetir ${title(item)} na fila`});
+      return el('li',{class:index===i&&step==='details'?'is-editing':''},open,remove,duplicate);
+    }
+    function choose() {replace(main,el('div',{class:'collection-type-choice'},el('h2',{tabindex:-1},'O que você quer adicionar?'),[['cards','collection','Carta','Encontre pelo nome ou número da carta.'],['sealed','bag','Selado','Boosters, decks, ETBs e outros produtos.'],['custom','plus','Personalizado','Cadastre um item fora do catálogo.']].map(([target,icon,text,description])=>button([svgIcon(icon),el('span',{},el('strong',{},text),el('small',{},description)),el('span',{'aria-hidden':true},'›')],()=>{replaceIndex=null;goto(target);},'collection-type-button'))));}
+    function add(card,kind) {
+      if(replaceIndex!=null){const prior=queue[replaceIndex];queue[replaceIndex]={...prior,cardId:card.providerId||card.id,setId:card.setId,card,title:card.name,referenceLanguage:card.referenceLanguage||card.language,needsCardDetails:!Array.isArray(card.availableVariants)};index=replaceIndex;replaceIndex=null;changed();goto('details');return;}
+      if(queue.length>=100){replace(region,message('A fila aceita até 100 exemplares.','error'));return;}
+      queue.push(newQueueItem(kind,card));changed();
+    }
     function search(kind) {
-      searchSchedule?.dispose();step=kind==='CARD'?'cards':'sealed';save();const resultCache=new Map();let queryText='',searchPage=1,sequence=0,lastResult={items:[]};const query=field(kind==='CARD'?'Buscar cartas':'Buscar selados','catalogQuery','search','',{placeholder:kind==='CARD'?'Nome, código, nome + número ou coleção':'Nome, coleção ou código do produto',autocomplete:'off'}),language=selectField('Idioma do catálogo','referenceLanguage',languages,'pt'),set=selectField('Coleção de referência','setId',[['','Todas as coleções']], ''),results=el('div',{class:'collection-search-results'}),searchStatus=notice(),searchControls=el('div',{class:'collection-search-controls'}),form=el('form',{onSubmit:event=>{event.preventDefault();searchPage=1;searchSchedule.flush();}},el('h2',{},kind==='CARD'?'Buscar cartas':'Buscar produtos selados'),button('← Escolher tipo',()=>goto('choose'),'shop-text-link'),el('div',{class:'shop-form-grid'},query,kind==='CARD'?language:null,kind==='CARD'?set:null),el('button',{type:'submit',class:'shop-button secondary'},'Atualizar pesquisa'),el('p',{class:'shop-fine'},'Pesquisa automática: digite um nome, número ou código. Não é necessário clicar em um botão.'));
-      const loadSearch=async()=>{searchAbort?.abort();searchAbort=new AbortController();const active=searchAbort,seq=++sequence;queryText=query.querySelector('input').value.trim();if(!queryText&&!set.querySelector('select').value){replace(results,empty('Encontre sua próxima carta.','Pesquise por nome, número impresso ou expansão.'));replace(searchStatus,);replace(searchControls,);results.removeAttribute('aria-busy');return;}replace(searchStatus,message('Consultando catálogo real…'));results.setAttribute('aria-busy','true');const params=new URLSearchParams({q:queryText,language:language.querySelector('select').value,page:String(searchPage),pageSize:'12',live:'1'});if(set.querySelector('select').value)params.set('setId',set.querySelector('select').value.trim());
-        try{const cacheKey=params.toString(),cached=resultCache.get(cacheKey),data=cached&&Date.now()-cached.at<60000?cached.data:await api(`${root}/catalog/${kind==='CARD'?'search':'sealed'}?${params}`,{signal:active.signal});if(active.signal.aborted)return;resultCache.set(cacheKey,{data,at:Date.now()});if(resultCache.size>30)resultCache.delete(resultCache.keys().next().value);if(current!==generation||seq!==sequence||active!==searchAbort||!main.contains(form))return;lastResult=data;renderSearch();replace(searchStatus,...arr(data.warnings).map(text=>message(typeof text==='string'?text:text.message||'')),data.stale?message('O provedor está indisponível. Exibindo metadados já conferidos em cache.'):null,el('p',{class:'shop-fine'},`${data.total||0} ${(data.total||0)===1?'resultado':'resultados'} para a pesquisa atual`));}
-        catch(error){if(error.name!=='AbortError'&&seq===sequence)replace(searchStatus,message(error.message,'error'),button('Tentar novamente',loadSearch,'shop-button secondary'));}finally{if(seq===sequence&&active===searchAbort)results.removeAttribute('aria-busy');}
+      const cards=kind==='CARD',query=field(cards?'Buscar cartas':'Buscar selados','catalogQuery','search',queries.get(kind)||'',{placeholder:cards?'Ex. Pikachu ou 025/165':'Nome, coleção ou código do produto',autocomplete:'off',enterkeyhint:'search','aria-controls':'collection-search-results'}),input=query.querySelector('input'),rows=[];
+      const results=el('div',{class:`collection-search-results${cards?'':' collection-search-sealed'}`,id:'collection-search-results'}),status=el('p',{class:'collection-search-status',role:'status'}),searchError=el('div',{});
+      let loadedPage=0,lastRequested='';
+      const more=button(cards?'Ver mais cartas':'Ver mais selados',()=>load(loadedPage+1),'shop-button secondary collection-search-more',{hidden:true});
+      const back=button(replaceIndex==null?'‹ Tipo':'‹ Detalhes',()=>{const replacing=replaceIndex!=null;replaceIndex=null;goto(replacing?'details':'choose');},'shop-text-link',{'aria-label':replaceIndex==null?'Escolher tipo':'Voltar aos detalhes'});
+      const form=el('form',{class:'collection-search-form',role:'search',onSubmit:event=>{event.preventDefault();if(input.value.trim()!==lastRequested)searchSchedule.flush();}},el('h2',{tabindex:-1},cards?'Buscar cartas':'Buscar selados'),back,query);
+
+      const updateCounts=()=>{
+        const counts=new Map();for(const item of queue){const key=cards?`${item.cardId}:${item.referenceLanguage}`:item.sealedId;if(item.kind===kind&&key)counts.set(key,(counts.get(key)||0)+1);}
+        for(const {key,badge} of rows){const count=counts.get(key)||0;badge.hidden=!count;badge.textContent=count?`${count} na fila`:'';}
       };
-      const renderSearch=()=>{replace(results,...arr(lastResult.items).map(card=>{const count=queue.filter(item=>kind==='SEALED'?item.sealedId===card.id:item.cardId===(card.providerId||card.id)&&item.referenceLanguage===(card.referenceLanguage||card.language)).length,item={card,title:card.name,kind,language:card.language,referenceLanguage:card.referenceLanguage,variant:card.availableVariants?.length===1?card.availableVariants[0]:'NORMAL',attributes:[]};return el('article',{class:'collection-search-result'},photoButton(item),el('div',{},el('strong',{},card.name),el('p',{},`${card.displayNumber||card.number||card.sku||''} · ${card.setName||card.setId||'Sem coleção'} (${card.setCode||card.setId||'—'})`),el('p',{class:'shop-muted'},`${card.rarity||''} · ${label(languages,card.language)}`),kind==='CARD'?quoteNode(item):null,count?el('span',{class:'collection-queued-count'},`${count}x na fila`):null),button('+ Adicionar',()=>{add(card,kind);renderSearch();},'shop-button secondary'));}));if(!arr(lastResult.items).length)append(results,message('Nenhum resultado encontrado. Experimente outro termo, idioma ou código de coleção.'));const pages=Math.ceil((lastResult.total||0)/(lastResult.pageSize||12));replace(searchControls,pages>1?el('nav',{class:'shop-pagination','aria-label':'Resultados do catálogo'},button('← Anterior',()=>{searchPage--;loadSearch();},'shop-button secondary',{disabled:searchPage<=1}),el('span',{},`Página ${searchPage} de ${pages}`),button('Próxima →',()=>{searchPage++;loadSearch();},'shop-button secondary',{disabled:searchPage>=pages})):null);};
-      searchSchedule=createCollectionSearchScheduler(loadSearch);const scheduleSearch=event=>{if(event?.isComposing)return;searchAbort?.abort();sequence++;searchPage=1;replace(results,);replace(searchControls,);replace(searchStatus,message('Pesquisa automática em andamento…'));searchSchedule.schedule();};query.querySelector('input').addEventListener('input',scheduleSearch);query.querySelector('input').addEventListener('compositionend',scheduleSearch);for(const control of [language.querySelector('select'),set.querySelector('select')])control.addEventListener('change',()=>{searchPage=1;loadSearch();});
-      const loadSetOptions=async()=>{if(kind!=='CARD')return;const lang=language.querySelector('select').value;try{const response=await api(`${root}/catalog/search?language=${encodeURIComponent(lang)}&pageSize=1`);if(current!==generation||language.querySelector('select').value!==lang||!main.contains(form))return;const select=set.querySelector('select'),selected=select.value;replace(select,el('option',{value:''},'Todas as coleções'),arr(response.sets).map(entry=>el('option',{value:entry.id},`${entry.name} (${entry.id})`)));select.value=selected;}catch{}};language.querySelector('select').addEventListener('change',loadSetOptions);replace(main,form,message('Monte sua fila aqui. No próximo passo, informe custo, idioma e condição de cada exemplar.'),searchStatus,results,searchControls,kind==='SEALED'?button('Adicionar selado personalizado',()=>custom('SEALED'),'shop-button secondary'):null);renderQueue();loadSetOptions();loadSearch();
+      refreshSearchCounts=updateCounts;
+      function result(card) {
+        const item={card,title:card.name,kind,language:card.language,referenceLanguage:card.referenceLanguage},key=cards?`${card.providerId||card.id}:${card.referenceLanguage||card.language}`:card.id;
+        const badge=el('span',{class:'collection-queued-count',hidden:true}),code=card.displayNumber||card.number||card.sku,collection=card.setName||card.setCode||card.setId;
+        const action=button([svgIcon('plus'),el('span',{},replaceIndex==null?'Adicionar':'Selecionar')],()=>{input.blur();add(card,kind);},'shop-button secondary collection-search-add',{'aria-label':`${replaceIndex==null?'Adicionar':'Selecionar'} ${card.name}${code?` ${code}`:''}${collection?` de ${collection}`:''}`});
+        const thumbnail=card.imageSmall?{...item,card:{...card,image:card.imageSmall}}:item;
+        const photo=pic(thumbnail)?button(thumb(thumbnail),()=>preview(item),'collection-photo',{'aria-label':`Ampliar imagem de ${card.name}`}):el('span',{class:'collection-photo collection-search-missing'},'Sem imagem');
+        rows.push({key,badge});
+        return el('article',{class:'collection-search-result'},photo,el('div',{class:'collection-search-copy'},el('strong',{},card.name),code?el('p',{class:'collection-search-code'},code):null,collection?el('p',{class:'collection-search-set'},collection):null,badge),action);
+      }
+      function reset() {rows.length=0;loadedPage=0;lastRequested='';replace(results);replace(searchError);more.hidden=true;results.removeAttribute('aria-busy');}
+      async function load(pageNumber=1) {
+        const value=input.value.trim();if(!value)return;
+        searchAbort?.abort();const active=new AbortController();searchAbort=active;
+        const isCurrent=()=>!active.signal.aborted&&current===generation&&active===searchAbort&&main.contains(form)&&value===input.value.trim();
+        lastRequested=value;status.textContent=pageNumber===1?'Buscando…':'Carregando mais resultados…';replace(searchError);results.setAttribute('aria-busy','true');more.disabled=true;
+        const params=new URLSearchParams({q:value,page:String(pageNumber),pageSize:'12',live:'1'});if(cards)params.set('view','quick');
+        const request=`${root}/catalog/${cards?'search':'sealed'}?${params}`;
+        try {
+          const cached=resultCache.get(request),data=cached&&Date.now()-cached.at<60000?cached.data:await api(request,{signal:active.signal});if(!isCurrent())return;
+          if(!cached||cached.data!==data){resultCache.set(request,{data,at:Date.now()});if(resultCache.size>30)resultCache.delete(resultCache.keys().next().value);}
+          if(pageNumber===1){rows.length=0;replace(results);}
+          append(results,arr(data.items).map(result));updateCounts();loadedPage=pageNumber;
+          const count=data.total??rows.length;
+          status.textContent=count?`${countLabel(count,'resultado','resultados')}${data.languageFallback?' · referências em inglês':''}${data.stale?' · catálogo em cache':''}`:cards?'Nenhuma carta encontrada. Tente outro nome ou número.':'Nenhum selado encontrado. Você pode cadastrar o seu item.';
+          more.hidden=rows.length>=count||!arr(data.items).length;
+        } catch(error) {
+          if(error.name==='AbortError'||!isCurrent())return;
+          status.textContent='';replace(searchError,el('p',{role:'alert',class:'collection-search-error'},'Não foi possível buscar no catálogo.'),button('Tentar novamente',()=>load(pageNumber),'shop-button secondary'));
+        } finally {if(isCurrent()){results.removeAttribute('aria-busy');more.disabled=false;}}
+      }
+      function onInput(event) {
+        if(event?.isComposing)return;searchAbort?.abort();searchSchedule.cancel();queries.set(kind,input.value);reset();
+        const value=input.value.trim();status.textContent=value?'Buscando…':cards?'Digite o nome ou número impresso na carta.':'Digite o nome ou código do produto.';
+        if(value)searchSchedule.schedule();
+      }
+      searchSchedule=createCollectionSearchScheduler(load,{delay:200});input.addEventListener('input',onInput);input.addEventListener('compositionend',onInput);
+      replace(main,form,!cards?button('Não encontrei meu produto',()=>goto('sealed-custom'),'shop-text-link collection-sealed-manual'):null,status,searchError,results,more);
+      if(input.value.trim())load();else onInput();
     }
-    function custom(kind) {step=kind==='SEALED'?'sealed-custom':'custom';save();const item=newQueueItem(kind),region=notice(),form=el('form',{class:'personal-form',onSubmit:event=>{event.preventDefault();if(!form.reportValidity())return;const values=new FormData(form),quantity=Number(values.get('quantity'));if(!Number.isInteger(quantity)||quantity<1||quantity>50||queue.length+quantity>100){replace(region,message('Use de 1 a 50 unidades, respeitando o limite de 100 itens na fila.','error'));return;}for(let i=0;i<quantity;i++)queue.push({...structuredClone(item),localId:newId(),title:String(values.get('title')).trim(),itemType:values.get('itemType'),description:values.get('description')||'',photoUrl:values.get('photoUrl')||'',setId:'',card:{name:String(values.get('title')).trim(),setName:values.get('setName')||'',image:''}});changed();goto('choose');}},el('h2',{},kind==='SEALED'?'Seu selado personalizado':'Seu item personalizado'),button('← Escolher tipo',()=>goto('choose'),'shop-text-link'),field('Nome do item','title','text','',{required:true,minlength:2,maxlength:200}),selectField('Categoria','itemType',types.filter(([key])=>key!=='SINGLE'&&(kind!=='SEALED'||key!=='CUSTOM')),kind==='SEALED'?'ETB':'CUSTOM'),field('Coleção ou linha (opcional)','setName','text','',{maxlength:200}),field('Descrição (opcional)','description','textarea','',{rows:3,maxlength:2000}),field('Foto por URL HTTPS (opcional)','photoUrl','url','',{maxlength:2000,placeholder:'https://…'}),field('Quantidade de exemplares','quantity','number',1,{required:true,min:1,max:50}),message('Cada unidade entra separadamente na fila. Você poderá informar custos e conservação diferentes. Sem fonte externa, não haverá cotação automática.'),region,el('button',{type:'submit',class:'shop-button'},'Adicionar à fila'));replace(main,form);renderQueue();}
-    function details() {if(!queue.length){goto('choose');return;}const item=queue[index],form=el('form',{class:'collection-item-form',onSubmit:event=>{event.preventDefault();if(!form.reportValidity())return;if(index<queue.length-1){index++;goto('details');}else goto('review');}}),footer=el('div',{class:'collection-form-footer'},button('← Anterior',()=>{if(index>0){index--;goto('details');}else goto('choose');},'shop-button secondary'),el('button',{type:'submit',class:'shop-button'},index<queue.length-1?'Próximo item →':`Revisar ${queue.length} ${queue.length===1?'item':'itens'}`));
-      append(form,el('div',{class:'collection-item-progress'},el('strong',{},`Item ${index+1} de ${queue.length}`),el('progress',{max:queue.length,value:index+1,'aria-label':`Item ${index+1} de ${queue.length}`})),identityNode(item),item.kind==='CARD'?button('Corrigir carta selecionada',()=>{replaceIndex=index;search('CARD');},'shop-text-link'):null,detailFields(item,changed));
-      if(index<queue.length-1)append(form,el('section',{class:'collection-copy'},el('h3',{},'Comprou tudo igual?'),el('p',{},'Copie somente custo, data, condição, idioma e acabamento aos próximos itens. As identidades das cartas serão preservadas.'),button('Aplicar aos itens restantes',()=>{let dialog;const overwrite=checkbox('Sobrescrever também campos já preenchidos','overwrite',false),region=notice();dialog=modal('Aplicar dados aos itens restantes',el('form',{class:'personal-form',onSubmit:event=>{event.preventDefault();copyUndo=structuredClone(queue);queue=collectionCopyAcquisition(queue,index,{overwrite:overwrite.querySelector('input').checked});changed();dialog.close();render();}},message('Campos já preenchidos serão preservados, a menos que você escolha sobrescrever.'),overwrite,region,el('button',{type:'submit',class:'shop-button'},'Confirmar cópia')));},'shop-button secondary'),copyUndo?button('Desfazer cópia',()=>{queue=copyUndo;copyUndo=null;changed();render();},'shop-text-link'):null));append(form,footer);replace(main,form);}
-    function review() {const totals=collectionQueueTotals(queue),errors=queue.flatMap((item,i)=>[...(!item.condition?[`Item ${i+1}: selecione a condição.`]:[]),...(!item.itemType?[`Item ${i+1}: selecione o tipo de item.`]:[]),...Object.values(item.errors||{}).map(text=>`Item ${i+1}: ${text}`)]),form=el('form',{class:'collection-review',onSubmit:event=>{event.preventDefault();run(form.querySelector('[type=submit]'),region,async()=>{if(errors.length)throw new Error('Revise os itens sem condição antes de salvar.');if(getState().user?.id!==owner)throw new Error('A sessão mudou. Entre novamente antes de salvar.');const submittedRequest=requestId,payload=collectionBatchPayload(queue,submittedRequest);page.inert=true;page.setAttribute('aria-busy','true');replace(region,message('Salvando todos os exemplares com segurança…'));try{const response=await api(`${root}/inventory/batch`,{method:'POST',body:payload});if(readLocal(key)?.requestId===submittedRequest)localStorage.removeItem(key);if(current!==generation||getState().user?.id!==owner)return;toast(`${countLabel(response.added??queue.length,'item adicionado','itens adicionados')} à sua coleção.`);queue=[];cleanup=()=>{};navigate(route);}finally{page.inert=false;page.removeAttribute('aria-busy');}});}},el('h2',{},'Revisar e adicionar'),el('div',{class:'collection-review-totals'},el('strong',{},`${totals.quantity} ${totals.quantity===1?'exemplar':'exemplares'}`),el('strong',{},`Aquisição conhecida: ${money(totals.knownCost)}`),el('p',{},`${totals.unknownCost} sem custo informado · ${totals.unpriced} sem avaliação em BRL. Estimativas convertidas em reais mostram a fonte e o cálculo em cada carta.`)),errors.length?message(errors.join(' '),'error'):null,el('div',{class:'collection-review-items'},queue.map((item,i)=>el('article',{},thumb(item),el('div',{},el('strong',{},title(item)),el('p',{},`${setName(item)} · ${number(item)}`),el('p',{},`${label(languages,item.language)} · ${item.condition||'Condição pendente'} · ${label(finishes,item.variant)}`),el('p',{},`Custo: ${cost(item.paidCents)} · Aquisição: ${date(item.acquiredAt)}`),quoteNode(item),el('p',{},item.notes||'Sem observações'),button(`Editar item ${i+1}`,()=>{index=i;goto('details');},'shop-text-link'))))),el('button',{type:'submit',class:'shop-button',disabled:errors.length>0},`Adicionar ${totals.quantity} ${totals.quantity===1?'item':'itens'} à coleção`));replace(main,form);}
-    function render() {if(current!==generation)return;replace(region,);page.querySelectorAll('.collection-steps li').forEach((node,i)=>node.classList.toggle('active',i===({choose:0,cards:1,sealed:1,custom:1,'sealed-custom':1,details:2,review:3})[step]));renderQueue();if(step==='choose')choose();else if(step==='cards')search('CARD');else if(step==='sealed')search('SEALED');else if(step==='custom')custom('CUSTOM');else if(step==='sealed-custom')custom('SEALED');else if(step==='details')details();else review();}
-    const closeQueueOnEscape=event=>{if(event.key==='Escape'&&queueOpen){queueOpen=false;renderQueue();queueToggle.focus();}};page.addEventListener('keydown',closeQueueOnEscape);cleanup=()=>{page.removeEventListener('keydown',closeQueueOnEscape);searchAbort?.abort();clearTimeout(searchTimer);searchSchedule?.dispose();save();};render();return page;
+    function custom(kind) {const item=newQueueItem(kind),region=notice(),form=el('form',{class:'personal-form collection-custom-form',onSubmit:event=>{event.preventDefault();if(!form.reportValidity())return;const values=new FormData(form),quantity=Number(values.get('quantity'));if(!Number.isInteger(quantity)||quantity<1||quantity>50||queue.length+quantity>100){replace(region,message('Use de 1 a 50 unidades, respeitando o limite de 100 itens na fila.','error'));return;}for(let i=0;i<quantity;i++)queue.push({...structuredClone(item),localId:newId(),title:String(values.get('title')).trim(),itemType:values.get('itemType'),description:values.get('description')||'',setId:'',card:{name:String(values.get('title')).trim(),setName:values.get('setName')||'',image:''}});changed();startDetails();}},el('h2',{tabindex:-1},kind==='SEALED'?'Seu selado personalizado':'Seu item personalizado'),button(kind==='SEALED'?'‹ Voltar à busca':'‹ Escolher tipo',()=>goto(kind==='SEALED'?'sealed':'choose'),'shop-text-link'),field('Nome do item','title','text','',{required:true,minlength:2,maxlength:200}),selectField('Categoria','itemType',types.filter(([key])=>key!=='SINGLE'&&(kind!=='SEALED'||key!=='CUSTOM')),kind==='SEALED'?'ETB':'CUSTOM'),field('Coleção ou linha (opcional)','setName','text','',{maxlength:200}),field('Descrição (opcional)','description','textarea','',{rows:3,maxlength:2000}),field('Quantidade de exemplares','quantity','number',1,{required:true,min:1,max:50}),region,el('button',{type:'submit',class:'shop-button collection-wizard-primary'},'Preencher detalhes'));replace(main,form);}
+    async function enrichDetails(item,form) {
+      if(!item.needsCardDetails)return;
+      const active=new AbortController();detailsAbort=active;
+      const params=new URLSearchParams({cardId:item.cardId,setId:item.setId,language:item.referenceLanguage,view:'quick'});
+      try {
+        const card=await api(`${root}/catalog/card?${params}`,{signal:active.signal});
+        if(active.signal.aborted||!main.contains(form)||(card.providerId||card.id)!==item.cardId||card.setId!==item.setId)return;
+        item.card={...item.card,...card};item.needsCardDetails=false;
+        if(!item.touched?.variant&&card.availableVariants?.length===1){item.variant=card.availableVariants[0];form.querySelector('select[name="variant"]').value=item.variant;}
+        changed();
+      }catch{/* Search metadata and the manually chosen finish are enough to continue. */}
+    }
+    function details() {
+      if(!queue.length){goto('choose');return;}
+      const item=queue[index],next=index<queue.length-1;
+      const form=el('form',{class:'collection-item-form',onSubmit:event=>{event.preventDefault();if(!form.reportValidity())return;if(next){index++;goto('details');}else goto('review');}});
+      const back=button(index>0?'Anterior':'Voltar',()=>{if(index>0){index--;goto('details');}else goto(item.kind==='CARD'?'cards':item.sealedId?'sealed':'choose');},'shop-button secondary');
+      append(form,el('h2',{tabindex:-1},'Detalhes do exemplar'),el('div',{class:'collection-item-progress'},el('strong',{},`Item ${index+1} de ${queue.length}`),el('progress',{max:queue.length,value:index+1,'aria-label':`Item ${index+1} de ${queue.length}`})),identityNode(item),item.kind==='CARD'?button('Trocar carta',()=>{replaceIndex=index;goto('cards');},'shop-text-link'):null,detailFields(item,changed));
+      if(next)append(form,el('section',{class:'collection-copy'},el('h3',{},'Comprou tudo igual?'),el('p',{},'Copie custo, data, condição, idioma e acabamento para os próximos itens.'),button('Aplicar aos itens restantes',()=>{let dialog;const overwrite=checkbox('Sobrescrever também campos já preenchidos','overwrite',false);dialog=modal('Aplicar dados aos itens restantes',el('form',{class:'personal-form',onSubmit:event=>{event.preventDefault();copyUndo=structuredClone(queue);queue=collectionCopyAcquisition(queue,index,{overwrite:overwrite.querySelector('input').checked});changed();dialog.close();render();}},overwrite,el('button',{type:'submit',class:'shop-button'},'Confirmar cópia')));},'shop-button secondary'),copyUndo?button('Desfazer cópia',()=>{queue=copyUndo;copyUndo=null;changed();render();},'shop-text-link'):null));
+      append(form,el('div',{class:'collection-form-footer'},back,el('button',{type:'submit',class:'shop-button collection-wizard-primary'},next?'Próximo item':`Revisar ${countLabel(queue.length,'item','itens')}`)));
+      replace(main,form);enrichDetails(item,form);
+    }
+    function review() {
+      const totals=collectionQueueTotals(queue),errors=queue.flatMap((item,i)=>[...(!item.condition?[`Item ${i+1}: selecione a condição.`]:[]),...(!item.itemType?[`Item ${i+1}: selecione o tipo de item.`]:[]),...Object.values(item.errors||{}).map(text=>`Item ${i+1}: ${text}`)]);
+      const form=el('form',{class:'collection-review',onSubmit:event=>{event.preventDefault();run(form.querySelector('[type=submit]'),region,async()=>{if(errors.length||!queue.length)throw new Error('Revise os itens antes de salvar.');if(getState().user?.id!==owner)throw new Error('A sessão mudou. Entre novamente antes de salvar.');const submittedRequest=requestId,payload=collectionBatchPayload(queue,submittedRequest);page.inert=true;page.setAttribute('aria-busy','true');replace(region,message('Salvando exemplares…'));try{const response=await api(`${root}/inventory/batch`,{method:'POST',body:payload});if(readLocal(key)?.requestId===submittedRequest)localStorage.removeItem(key);if(current!==generation||getState().user?.id!==owner)return;toast(`${countLabel(response.added??queue.length,'item adicionado','itens adicionados')} à sua coleção.`);queue=[];cleanup=()=>{};navigate(route);}finally{page.inert=false;page.removeAttribute('aria-busy');}});}},el('h2',{tabindex:-1},'Revisar e adicionar'),el('div',{class:'collection-review-totals'},el('span',{},countLabel(totals.quantity,'exemplar','exemplares')),el('strong',{},totals.unknownCost===totals.quantity?'Sem valor pago informado':`Valor pago: ${money(totals.knownCost)}`)),errors.length?message(errors.join(' '),'error'):null,el('div',{class:'collection-review-items'},queue.map((item,i)=>el('article',{},thumb(item),el('div',{},el('strong',{},title(item)),el('p',{},[setName(item),number(item)].filter(Boolean).join(' · ')),el('p',{},[label(languages,item.language),item.condition||'Condição pendente',item.kind==='CARD'?label(finishes,item.variant):null].filter(Boolean).join(' · ')),item.paidCents!=null?el('p',{class:'collection-item-cost'},`Pago: ${money(item.paidCents)}`):null,item.acquiredAt?el('p',{},`Aquisição: ${date(item.acquiredAt)}`):null,item.notes?el('p',{},item.notes):null,button(`Editar item ${i+1}`,()=>{index=i;goto('details');},'shop-text-link'))))),el('div',{class:'collection-form-footer'},el('button',{type:'submit',class:'shop-button collection-wizard-primary',disabled:errors.length>0||!queue.length},`Adicionar ${countLabel(totals.quantity,'item','itens')} à coleção`)));
+      replace(main,form);
+    }
+    function stopRequests() {searchAbort?.abort();searchSchedule?.dispose();detailsAbort?.abort();refreshSearchCounts=null;}
+    function render() {
+      if(current!==generation)return;stopRequests();replace(region);
+      const activeStep=({choose:0,cards:1,sealed:1,custom:1,'sealed-custom':1,details:2,review:3})[step];
+      page.querySelectorAll('.collection-steps li').forEach((node,i)=>{node.classList.toggle('active',i===activeStep);i===activeStep?node.setAttribute('aria-current','step'):node.removeAttribute('aria-current');});
+      renderQueue();if(step==='choose')choose();else if(step==='cards')search('CARD');else if(step==='sealed')search('SEALED');else if(step==='custom')custom('CUSTOM');else if(step==='sealed-custom')custom('SEALED');else if(step==='details')details();else review();
+    }
+    const closeQueueOnEscape=event=>{if(event.key==='Escape'&&queueOpen)closeQueue();};page.addEventListener('keydown',closeQueueOnEscape);
+    cleanup=()=>{page.removeEventListener('keydown',closeQueueOnEscape);stopRequests();save();};render();return page;
   }
   return {dashboard,wizard};
 }

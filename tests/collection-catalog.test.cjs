@@ -111,6 +111,55 @@ test('nome de Pokémon não expande uma coleção que apenas contém esse nome',
   assert.equal((await f.service.search(new URLSearchParams({q:'Pikachu 001',setId:'detx'}))).total,0,'number must not return another Pokémon');
 });
 
+test('busca rápida usa ordem de lançamento antes da paginação e evita detalhes por carta',async t=>{
+  const f=await fixture(t),releaseCalls=[];
+  f.sets[4].releaseDate='2019-04-05';
+  f.sets[5].releaseDate='2025-05-30';
+  f.sets[5].cardCount.official=0;
+  const service=createCollectionCatalog({db:f.db,ApiError,fetchImpl:async(input,options)=>{
+    const url=new URL(input);
+    if(url.pathname==='/v2/pt/sets'&&url.searchParams.get('sort:field')==='releaseDate'){
+      releaseCalls.push(url.href);
+      assert.equal(url.searchParams.get('sort:order'),'DESC');
+      const briefs=[...f.sets].sort((a,b)=>(b.releaseDate||'').localeCompare(a.releaseDate||'')).map(({id,name,cardCount})=>({id,name,cardCount}));
+      return {ok:true,status:200,text:async()=>JSON.stringify(briefs)};
+    }
+    return f.fetchImpl(input,options);
+  }});
+  const search=(q,page='1')=>service.search(new URLSearchParams({q,page,pageSize:'1',live:'1'}),{quick:true});
+  assert.equal((await search('')).total,0);
+  assert.equal(releaseCalls.length+f.calls.length,0);
+  const [first,repeat]=await Promise.all([search('Pikachu'),search('Pikachu')]);
+  assert.deepEqual(first,repeat);
+  assert.equal(first.total,2);
+  assert.equal(first.items[0].id,'bolt4-025','newer Pikachu ex goes before an older exact-name match');
+  assert.equal(first.items[0].displayNumber,'025','unknown printed total does not produce 025/0');
+  assert.ok(first.items[0].imageSmall);
+  assert.equal('sets' in first,false);
+  assert.equal('marketData' in first.items[0],false);
+  assert.equal((await search('Pikachu','2')).items[0].id,'detx-010');
+  assert.equal((await search('010/18')).items[0].id,'detx-010');
+  assert.equal((await search('detx-010')).items[0].id,'detx-010');
+  assert.equal(releaseCalls.length,1);
+  assert.equal(f.calls.filter(url=>url.endsWith('/pt/cards')).length,1);
+  assert.ok(f.calls.every(url=>!new URL(url).pathname.match(/\/(cards|sets)\//)));
+});
+
+test('busca rápida mantém o fallback inglês e a identidade verificável da carta',async t=>{
+  const f=await fixture(t),service=createCollectionCatalog({db:f.db,ApiError,fetchImpl:async(input,options)=>{
+    const response=await f.fetchImpl(input,options);
+    if(new URL(input).pathname!=='/v2/pt/cards')return response;
+    const cards=JSON.parse(await response.text()).filter(card=>card.id!=='night2-166');
+    return {ok:true,status:200,text:async()=>JSON.stringify(cards)};
+  }});
+  const result=await service.search(new URLSearchParams({q:'Lune',live:'1'}),{quick:true});
+  assert.equal(result.languageFallback,true);
+  assert.equal(result.items[0].canonicalId,'tcgdex:en:night2-166');
+  assert.equal(result.items[0].referenceLanguage,'en');
+  assert.equal('marketData' in result.items[0],false);
+  assert.ok(f.calls.every(url=>!new URL(url).pathname.match(/\/(cards|sets)\//)));
+});
+
 test('termo presente apenas no título da coleção não fabrica resultados de cartas, nem no fallback de idioma',async t=>{
   const f=await fixture(t);
   for(const card of f.cards)if(card.name.startsWith('Pikachu'))card.name=card.name.replace('Pikachu','Raichu');

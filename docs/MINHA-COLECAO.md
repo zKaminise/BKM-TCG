@@ -6,12 +6,12 @@ Revisão de **27/10/2026**. O módulo foi integrado ao projeto existente, sem tr
 
 ### Cadastro completo
 
-Em `/conta/colecao`, **Adicionar cartas** abre `/conta/colecao/adicionar`:
+Em `/conta/colecao`, **Adicionar itens** abre `/conta/colecao/adicionar`.
 
 1. Escolher **Carta**, **Selado** ou **Personalizado**.
-2. Pesquisar automaticamente enquanto digita, sem clicar em pesquisar, incluindo números parciais como `166/1`. Pesquisar cartas reais por nome, número, nome+número, expansão, código ou ID; ver foto, nome, expansão, número impresso, raridade e idioma de referência. Resultados ambíguos são apresentados separadamente; o usuário pode restringir a coleção.
+2. Digitar o nome ou número da carta, inclusive combinações como `Pikachu 5/25`. A busca atualiza automaticamente e mostra imagem, nome, número e expansão, da mais recente para a mais antiga conforme o TCGdex.
 3. Adicionar várias cartas à mesma fila, inclusive cópias iguais. Selados e personalizados podem entrar na mesma fila. Cada exemplar tem identidade e dados próprios.
-4. Preencher detalhes individualmente: tipo, idioma físico, conservação, acabamento, atributos separados, custo opcional, data, observações e foto por URL HTTPS. Nenhuma condição de carta é selecionada silenciosamente no novo wizard.
+4. Usar **Preencher detalhes**, que fica visível no celular após adicionar um item à fila. Informar idioma físico, condição, acabamento, custo e dados opcionais, incluindo foto por upload ou link HTTPS.
 5. Aplicar aquisição aos restantes com confirmação, preservando campos já preenchidos salvo autorização explícita de sobrescrita; revisar ou desfazer a cópia. Identidade, foto e raridade não são copiadas de uma carta para outra.
 6. Revisar unidades, aquisição conhecida e ausências; salvar um lote transacional com chave idempotente. O rascunho só é limpo após confirmação do sucesso.
 
@@ -73,7 +73,9 @@ São normalizados provedor/ID, set/código/série, número local e impresso, nom
 
 Selados catalogados usam metadados publicados da BKM, nunca o saldo ou preço da loja como avaliação particular. Sem cadastro há entrada manual. Um selado já registrado continua editável se o anúncio comercial for arquivado, porque sua identidade pessoal tem snapshot. Não existe catálogo externo licenciado de selados conectado.
 
-Imagens personalizadas usam **URL HTTPS pública validada**, com fallback. Credenciais na URL, endereços privados e protocolos ativos são rejeitados; o servidor não faz fetch arbitrário da foto. Upload privado de arquivo e vitrine pública de coleção não foram acrescentados. O cadastro por URL é a alternativa implementada prevista na especificação.
+As imagens pessoais aceitam PNG, JPEG ou WebP de até 2 MB ou link HTTPS público. O upload vai para `bkm-collection-private`, separado das fotos da loja. A rota de leitura exige sessão do proprietário. Para configurar o bucket em outro ambiente, use `npm run storage:configure -- --collection .env` com o arquivo privado desse ambiente.
+
+O backup criptografado inclui as fotos privadas. Ao restaurar localmente, mantenha a pasta `BANCO.sqlite.objects/collection-photos` junto ao SQLite. Remover a foto do exemplar desvincula a imagem e preserva o objeto privado para outros exemplares e o histórico.
 
 Consulta e resultados reais completos: [COLECAO-CATALOGO.md](COLECAO-CATALOGO.md).
 

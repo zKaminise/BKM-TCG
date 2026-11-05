@@ -23,6 +23,8 @@ const normalizedNumber = value => String(value ?? '').trim().toUpperCase().repla
 const text = (value,max=300) => typeof value==='string'?value.trim().slice(0,max):'';
 const integer = value => Number.isSafeInteger(value)&&value>=0?value:null;
 const validDate = value => typeof value==='string'&&Number.isFinite(Date.parse(value))?value:null;
+const cardNumbers = new Intl.Collator('pt-BR',{numeric:true});
+const newestSetsEndpoint = 'sets?sort:field=releaseDate&sort:order=DESC';
 
 function asset(value, size='high') {
   if(typeof value!=='string'||value.length>1200||value.includes('..'))return '';
@@ -109,8 +111,11 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     if(!raw||!ID.test(raw.id||'')||!text(raw.name))return null;
     return {id:raw.id,name:text(raw.name),setCode:text(raw.abbreviation?.official||raw.tcgOnline||raw.id,80),language:lang,officialCount:integer(raw.cardCount?.official),totalCards:integer(raw.cardCount?.total),series:text(raw.serie?.name),seriesId:text(raw.serie?.id,80),image:asset(raw.logo||raw.symbol,'logo'),releaseDate:validDate(raw.releaseDate)};
   }
-  async function setsIndex(lang) {
-    const [sets,series]=await Promise.all([cached('sets',lang,'all','sets'),cached('series',lang,'all','series')]);
+  async function setsIndex(lang,{newestFirst=false}={}) {
+    const [sets,series]=await Promise.all([
+      newestFirst?cached('sets',lang,'release-desc',newestSetsEndpoint):cached('sets',lang,'all','sets'),
+      cached('series',lang,'all','series')
+    ]);
     if(!Array.isArray(sets.data)||sets.data.length>5000||!Array.isArray(series.data))fail('O catálogo retornou uma lista de coleções inválida.');
     const pocket=series.data.some(row=>row.id==='tcgp')?await cached('series',lang,'tcgp','series/tcgp'):null;
     const digitalIds=new Set((pocket?.data?.sets||[]).map(row=>row.id));
@@ -124,18 +129,28 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     if(saved.data.serie?.id==='tcgp')fail('Minha Coleção acompanha itens físicos; cartas digitais de Pokémon TCG Pocket não são incluídas.','CATALOG_DIGITAL_ITEM',422);
     return {...saved,set:setDto(saved.data,lang)};
   }
-  function cardDto(raw,set,lang,saved) {
+  function cardBriefDto(raw,set,lang,saved) {
+    const number=text(raw.localId||raw.number,40),total=integer(raw.set?.cardCount?.official)||set.officialCount||null;
+    const image=asset(raw.image);
+    return {
+      id:raw.id,provider:'tcgdex',providerId:raw.id,canonicalId:`tcgdex:${lang}:${raw.id}`,tcg:'pokemon',kind:'CARD',
+      name:text(raw.name)||raw.id,number,localNumber:number,total,printedTotal:total,displayNumber:total===null?number:`${number}/${total}`,
+      setId:set.id,setName:set.name,setCode:set.setCode||set.id,series:set.series||'',seriesId:set.seriesId||'',
+      image,imageSmall:asset(raw.image,'low'),imageLarge:image,imageKind:'reference',language:lang,referenceLanguage:lang,
+      rarity:text(raw.rarity,120),fetchedAt:saved.fetchedAt,metadataStale:saved.stale
+    };
+  }
+  function cardDto(raw,set,lang,saved,{includeMarket=true}={}) {
+    const brief=cardBriefDto(raw,set,lang,saved);
     const variants=raw.variants&&typeof raw.variants==='object'?Object.fromEntries(Object.entries(raw.variants).filter(([key,value])=>/^[a-zA-Z]{1,40}$/.test(key)&&typeof value==='boolean')):{};
     const availableVariants=[];
     for(const [key,value] of Object.entries({normal:'NORMAL',holo:'HOLO',reverse:'REVERSE',wPromo:'PROMO',firstEdition:'FIRST_EDITION'}))if(variants[key]===true)availableVariants.push(value);
     const warnings=[];
-    const image=asset(raw.image),small=asset(raw.image,'low');
-    if(!image)warnings.push('O catálogo não dispõe de imagem nesta referência.');
+    if(!brief.image)warnings.push('O catálogo não dispõe de imagem nesta referência.');
     if(saved.stale)warnings.push('Metadados em cache: a fonte está temporariamente indisponível ou aguarda atualização.');
-    const number=text(raw.localId||raw.number,40),total=integer(raw.set?.cardCount?.official)??set.officialCount;
-    return {id:raw.id,provider:'tcgdex',providerId:raw.id,canonicalId:`tcgdex:${lang}:${raw.id}`,tcg:'pokemon',kind:'CARD',name:text(raw.name)||raw.id,number,localNumber:number,total,printedTotal:total,displayNumber:total===null?number:`${number}/${total}`,setId:set.id,setName:set.name,setCode:set.setCode||set.id,series:set.series||'',seriesId:set.seriesId||'',rarity:text(raw.rarity,120),illustrator:text(raw.illustrator,160),dexNumbers:Array.isArray(raw.dexId)?[...new Set(raw.dexId.filter(value=>Number.isSafeInteger(value)&&value>0))].slice(0,20):[],category:text(raw.category,80),types:Array.isArray(raw.types)?raw.types.filter(value=>typeof value==='string').slice(0,8):[],image,imageSmall:small,imageLarge:image,imageKind:'reference',language:lang,referenceLanguage:lang,availableLanguages:[lang],languageCoverage:'Only the requested provider record is verified; other physical printings are not inferred.',variants,availableVariants,updatedAt:validDate(raw.updated)||saved.fetchedAt,fetchedAt:saved.fetchedAt,metadataStale:saved.stale,warnings,valuation:null,marketData:normalizeTcgdexMarket(raw,{language:lang,fetchedAt:saved.fetchedAt,now:now()})};
+    return {...brief,illustrator:text(raw.illustrator,160),dexNumbers:Array.isArray(raw.dexId)?[...new Set(raw.dexId.filter(value=>Number.isSafeInteger(value)&&value>0))].slice(0,20):[],category:text(raw.category,80),types:Array.isArray(raw.types)?raw.types.filter(value=>typeof value==='string').slice(0,8):[],availableLanguages:[lang],languageCoverage:'Only the requested provider record is verified; other physical printings are not inferred.',variants,availableVariants,updatedAt:validDate(raw.updated)||saved.fetchedAt,warnings,...(includeMarket?{valuation:null,marketData:normalizeTcgdexMarket(raw,{language:lang,fetchedAt:saved.fetchedAt,now:now()})}:{})};
   }
-  async function card(cardId,setId,lang='pt') {
+  async function card(cardId,setId,lang='pt',options) {
     lang=language(lang);
     if(typeof cardId==='string'&&cardId.startsWith('tcgdex:')){const parts=cardId.split(':');if(parts.length!==3||parts[1]!==lang)fail('O idioma da referência não corresponde à identidade da carta.','VALIDATION',422);cardId=parts[2];}
     identity(cardId);identity(setId,'coleção');
@@ -143,7 +158,7 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     if(!set.data.cards.some(row=>row.id===cardId))fail('A carta não pertence a esta coleção e idioma de referência.','CARD_NOT_FOUND',404);
     const saved=await cached('card',lang,cardId,`cards/${encodeURIComponent(cardId)}`,{ttl:DAY});
     if(saved.data?.id!==cardId||saved.data.set?.id!==setId||!text(saved.data.name)||!text(saved.data.localId||saved.data.number))fail('Os dados de referência da carta não correspondem à coleção solicitada.','CARD_NOT_FOUND',404);
-    return cardDto(saved.data,set.set,lang,{...saved,stale:saved.stale||set.stale});
+    return cardDto(saved.data,set.set,lang,{...saved,stale:saved.stale||set.stale},options);
   }
   async function limitedMap(values,fn,width=4) {
     const output=new Array(values.length);let cursor=0,failure;
@@ -151,13 +166,13 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     if(failure)throw failure;
     return output;
   }
-  function deriveSetId(brief,setMap) {
+  function deriveSetId(brief,setMap,setIdsByLength) {
     const suffix='-'+String(brief.localId||'');
     const simple=brief.id.endsWith(suffix)?brief.id.slice(0,-suffix.length):'';
     if(setMap.has(simple))return simple;
-    return [...setMap.keys()].sort((a,b)=>b.length-a.length).find(id=>brief.id.startsWith(id+'-'))||null;
+    return setIdsByLength.find(id=>brief.id.startsWith(id+'-'))||null;
   }
-  async function search(input=new URLSearchParams()) {
+  async function search(input=new URLSearchParams(),{quick=false}={}) {
     const query=input instanceof URLSearchParams?input:new URLSearchParams(input),{page,pageSize}=pagination(query),parsed=parseSearch(query.get('q')||query.get('name')||query.get('number')||'');
     let lang=language(query.get('language')||'pt');
     const warnings=[];
@@ -165,17 +180,22 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     if(prefix){lang=language(prefix[1]);parsed.original=prefix[2];parsed.name=normalize(prefix[2]);parsed.number=null;parsed.fullNumber=false;warnings.push(`Identidade canônica: catálogo ${lang}.`);}
     const selectedSet=text(query.get('setId')||query.get('set'),80);
     if(selectedSet)identity(selectedSet,'coleção');
-    const index=await setsIndex(lang),setMap=new Map(index.items.map(row=>[row.id,row]));
+    if(quick&&!parsed.original&&!selectedSet)return {items:[],total:0,page,pageSize,hasMore:false,source:'TCGdex',language:lang,stale:false,warnings};
+    const [index,quickBriefCache]=await Promise.all([
+      setsIndex(lang,{newestFirst:quick}),
+      quick&&!selectedSet?cached('cards',lang,'all','cards'):null
+    ]);
+    const setMap=new Map(index.items.map(row=>[row.id,row]));
     if(selectedSet&&!setMap.has(selectedSet))fail('A coleção selecionada não está no catálogo físico deste idioma.','CATALOG_NOT_FOUND',404);
     let aliases=[];
-    if(lang!=='en'&&parsed.original){try{const english=await cached('sets','en','all','sets');if(Array.isArray(english.data))aliases=english.data.map(raw=>setDto(raw,'en')).filter(Boolean);}catch{warnings.push('Os aliases internacionais estão temporariamente indisponíveis. A busca neste idioma continua disponível.');}}
+    if(!quick&&lang!=='en'&&parsed.original){try{const english=await cached('sets','en','all','sets');if(Array.isArray(english.data))aliases=english.data.map(raw=>setDto(raw,'en')).filter(Boolean);}catch{warnings.push('Os aliases internacionais estão temporariamente indisponíveis. A busca neste idioma continua disponível.');}}
     const aliasMap=new Map(aliases.map(row=>[row.id,row]));
     const matchingSets=new Set();
-    const tokenized=normalize(parsed.original),tokens=tokenized.split(' ').filter(Boolean),nameTokens=parsed.name.split(' ').filter(Boolean);
+    const tokenized=normalize(parsed.original),tokens=tokenized.split(' ').filter(Boolean),nameTokens=parsed.name.split(' ').filter(Boolean),searchCode=compactId(parsed.original);
     for(const set of index.items){
       const family=index.series.find(row=>set.id.toLowerCase().startsWith(row.id.toLowerCase()));
       const alias=aliasMap.get(set.id),familyNames=[family?.name,...(FAMILY_ALIASES[family?.id]||[])],haystack=normalize([set.id,set.name,alias?.name,...familyNames].join(' '));
-      const exactCode=compactId(set.id)===compactId(parsed.original);
+      const exactCode=compactId(set.id)===searchCode||quick&&compactId(set.setCode)===searchCode;
       // A Pokémon name can also appear inside an expansion title (for
       // example Pikachu / Detective Pikachu). Only a complete expansion name,
       // verified code or exact series alias expresses expansion intent.
@@ -189,7 +209,7 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     // means the expansion, while "Charmander 168" means name + local number.
     const expansionSearch=matchingSets.size>0&&!parsed.fullNumber;
     const abbreviation=parsed.number&&parsed.name?parsed.name:parsed.original;
-    if(/^[a-zA-Z]{2,8}$/.test(abbreviation)&&!matchingSets.size){
+    if(!quick&&/^[a-zA-Z]{2,8}$/.test(abbreviation)&&!matchingSets.size){
       const params=new URLSearchParams({'abbreviation.official':abbreviation.toUpperCase()});
       const found=await cached('set-query',lang,crypto.createHash('sha256').update(params.toString()).digest('hex').slice(0,32),'sets?'+params.toString());
       const unverified=new Set(),wanted=abbreviation.toUpperCase();
@@ -213,27 +233,26 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     }
     if(!parsed.original&&!selectedSet)return {items:[],total:0,page,pageSize,hasMore:false,source:'TCGdex',language:lang,stale:index.stale,fetchedAt:index.fetchedAt,warnings,sets:index.items,series:index.series};
     let briefs,briefCache;
-    if(selectedSet){const detail=await setDetail(selectedSet,lang);briefs=detail.data.cards;briefCache=detail;}
-    else {briefCache=await cached('cards',lang,'all','cards');briefs=briefCache.data;}
+    if(selectedSet){const detail=await setDetail(selectedSet,lang);briefs=detail.data.cards;briefCache=detail;if(quick)setMap.set(selectedSet,detail.set);}
+    else {briefCache=quickBriefCache||await cached('cards',lang,'all','cards');briefs=briefCache.data;}
     if(!Array.isArray(briefs)||briefs.length>100000)fail('O catálogo retornou uma lista de cartas inválida.');
-    const candidates=[];
+    const candidates=[],setIdsByLength=[...setMap.keys()].sort((a,b)=>b.length-a.length),live=query.get('live')==='1',seriesFilter=query.get('series');
     for(const brief of briefs){
       if(!brief||!ID.test(brief.id||'')||!text(brief.name)||!text(brief.localId||brief.number))continue;
-      const setId=selectedSet||deriveSetId(brief,setMap),set=setMap.get(setId);if(!set)continue;
+      const setId=selectedSet||deriveSetId(brief,setMap,setIdsByLength),set=setMap.get(setId);if(!set)continue;
       const fullIdentity=brief.id===parsed.original;
-      const exactSet=matchingSets.has(setId),localNumber=normalizedNumber(brief.localId||brief.number),live=query.get('live')==='1';
+      const exactSet=matchingSets.has(setId),localNumber=normalizedNumber(brief.localId||brief.number);
       const numberMatch=parsed.number&&(localNumber===parsed.number||live&&!parsed.fullNumber&&localNumber.startsWith(parsed.number));
       const totalMatch=!parsed.printedTotal||(set.officialCount!==null&&(normalizedNumber(set.officialCount)===parsed.printedTotal||live&&normalizedNumber(set.officialCount).startsWith(parsed.printedTotal)));
-      const nameMatch=nameTokens.length&&nameTokens.every(token=>normalize(brief.name).includes(token));
+      const cardName=nameTokens.length?normalize(brief.name):'',nameMatch=nameTokens.length&&nameTokens.every(token=>cardName.includes(token));
       let match=!parsed.original||fullIdentity;
       if(expansionSearch)match=exactSet;
       else if(parsed.fullNumber)match=numberMatch&&totalMatch&&(!parsed.name||nameMatch||exactSet);
       else if(parsed.number)match=(numberMatch&&(!parsed.name||nameMatch||exactSet))||(!parsed.name&&exactSet);
       else match=match||exactSet||nameMatch;
       if(!match)continue;
-      const seriesFilter=query.get('series');
       if(seriesFilter){const family=index.series.find(row=>setId.toLowerCase().startsWith(row.id.toLowerCase()));if(seriesFilter!==family?.id&&!normalize(family?.name).includes(normalize(seriesFilter)))continue;}
-      candidates.push({brief,setId,score:fullIdentity?100:exactSet?80:normalize(brief.name)===parsed.name?70:50});
+      candidates.push({brief,setId,localNumber,score:fullIdentity?100:exactSet?80:cardName&&cardName===parsed.name?70:50});
     }
     for(const [inputKey,providerKey]of[['rarity','rarity'],['type','types']])if(text(query.get(inputKey),120)){
       const params=new URLSearchParams({[providerKey]:text(query.get(inputKey),120)}),filtered=await cached('card-query',lang,crypto.createHash('sha256').update(params.toString()).digest('hex').slice(0,32),'cards?'+params.toString());
@@ -245,16 +264,21 @@ function createCollectionCatalog({db,ApiError,fetchImpl=globalThis.fetch,now=Dat
     // printing or falsely declaring that the real card does not exist.
     if(candidates.length===0&&lang==='pt'&&parsed.original&&!query.has('noLanguageFallback')){
       const fallbackQuery=new URLSearchParams(query);fallbackQuery.set('language','en');fallbackQuery.set('noLanguageFallback','1');
-      try {const fallback=await search(fallbackQuery);if(fallback.total>0)return {...fallback,requestedLanguage:'pt',referenceLanguage:'en',languageFallback:true,warnings:[...warnings,'Não há correspondência no catálogo em português. Exibindo referências em inglês, identificadas como tal; isto não comprova uma impressão em português.',...fallback.warnings]};}
+      try {const fallback=await search(fallbackQuery,{quick});if(fallback.total>0)return {...fallback,requestedLanguage:'pt',referenceLanguage:'en',languageFallback:true,warnings:[...warnings,'Não há correspondência no catálogo em português. Exibindo referências em inglês, identificadas como tal; isto não comprova uma impressão em português.',...fallback.warnings]};}
       catch(error){if(error.status!==404&&error.status!==503)throw error;}
     }
-    candidates.sort((a,b)=>b.score-a.score||a.setId.localeCompare(b.setId,undefined,{numeric:true})||normalizedNumber(a.brief.localId).localeCompare(normalizedNumber(b.brief.localId),undefined,{numeric:true})||a.brief.id.localeCompare(b.brief.id));
+    if(quick){
+      // Set briefs omit releaseDate. The provider sorts their canonical dates
+      // before returning the briefs; apply that rank before paginating cards.
+      const releaseRank=new Map(index.items.map((set,position)=>[set.id,position]));
+      candidates.sort((a,b)=>releaseRank.get(a.setId)-releaseRank.get(b.setId)||cardNumbers.compare(a.localNumber,b.localNumber)||a.brief.id.localeCompare(b.brief.id));
+    }else candidates.sort((a,b)=>b.score-a.score||a.setId.localeCompare(b.setId,undefined,{numeric:true})||normalizedNumber(a.brief.localId).localeCompare(normalizedNumber(b.brief.localId),undefined,{numeric:true})||a.brief.id.localeCompare(b.brief.id));
     const selected=candidates.slice((page-1)*pageSize,page*pageSize);
-    const items=await limitedMap(selected,async({brief,setId})=>card(brief.id,setId,lang));
+    const items=quick?selected.map(({brief,setId})=>cardBriefDto(brief,setMap.get(setId),lang,briefCache)):await limitedMap(selected,async({brief,setId})=>card(brief.id,setId,lang));
     const ambiguous=parsed.number&&new Set(candidates.map(value=>value.setId)).size>1;
     if(ambiguous)warnings.push('Esta numeração aparece em mais de uma expansão. Confirme o nome e o código da coleção antes de adicionar.');
     if(index.stale||briefCache.stale||items.some(item=>item.metadataStale))warnings.push('Exibindo os últimos metadados salvos. A consulta externa será tentada novamente posteriormente.');
-    return {items,total:candidates.length,page,pageSize,hasMore:page*pageSize<candidates.length,source:'TCGdex',language:lang,stale:index.stale||briefCache.stale||items.some(item=>item.metadataStale),fetchedAt:briefCache.fetchedAt,warnings,ambiguous:!!ambiguous,sets:index.items,series:index.series};
+    return {items,total:candidates.length,page,pageSize,hasMore:page*pageSize<candidates.length,source:'TCGdex',language:lang,stale:index.stale||briefCache.stale||items.some(item=>item.metadataStale),fetchedAt:briefCache.fetchedAt,warnings,ambiguous:!!ambiguous,...(quick?{}:{sets:index.items,series:index.series})};
   }
   function safeProductImage(value) {
     if(typeof value!=='string')return '';

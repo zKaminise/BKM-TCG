@@ -2,6 +2,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const crypto=require('node:crypto');
 const {BackupError,sealBackup,unsealBackup,restoreSnapshot,keyBytes,objectPath}=require('../server/backup.cjs');
+const {photoBucket,photoBackupFolder}=require('../server/collection-photos.cjs');
 const root=path.resolve(__dirname,'..');
 const usage='Uso: node scripts/backup.cjs create --project REFERENCIA | restore --file ARQUIVO.bkmbackup --out CAMINHO_ABSOLUTO_NOVO.sqlite | create-key';
 function args(values){const options={command:values[0]};for(let index=1;index<values.length;index+=2){if(!['--project','--file','--out'].includes(values[index])||!values[index+1]||Object.hasOwn(options,values[index].slice(2)))throw new BackupError(usage);options[values[index].slice(2)]=values[index+1];}return options;}
@@ -10,10 +11,32 @@ async function storageObjects(env){
   const base=new URL(env.SUPABASE_URL),bucket=env.SUPABASE_STORAGE_BUCKET||'bkm-public';
   if(base.protocol!=='https:'||!base.hostname.endsWith('.supabase.co')||base.pathname!=='/'||base.username||base.password||base.search||base.hash||!/^[a-z0-9][a-z0-9-]{1,62}$/.test(bucket))throw new BackupError('Configuração Storage inválida.');
   const headers={apikey:env.SUPABASE_SERVICE_ROLE_KEY,Authorization:'Bearer '+env.SUPABASE_SERVICE_ROLE_KEY};const objects=[];let bytes=0;
-  async function list(prefix=''){
-    for(let offset=0;;offset+=100){const response=await fetch(new URL('/storage/v1/object/list/'+bucket,base),{method:'POST',redirect:'error',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({prefix,limit:100,offset,sortBy:{column:'name',order:'asc'}}),signal:AbortSignal.timeout(30000)});if(!response.ok)throw new BackupError('Não foi possível listar os objetos do Storage.');const rows=await response.json();if(!Array.isArray(rows))throw new BackupError('Resposta Storage inválida.');for(const row of rows){const name=prefix?prefix+'/'+row.name:row.name;objectPath(name);if(!row.id){await list(name);continue;}if(objects.length>=50000||bytes>256*1024*1024)throw new BackupError('Storage excede os limites deste backup manual.');const download=await fetch(new URL('/storage/v1/object/authenticated/'+bucket+'/'+name.split('/').map(encodeURIComponent).join('/'),base),{redirect:'error',headers,signal:AbortSignal.timeout(30000)});if(!download.ok||Number(download.headers.get('content-length'))>8388608)throw new BackupError('Não foi possível copiar um objeto do Storage.');const buffer=Buffer.from(await download.arrayBuffer());bytes+=buffer.length;if(buffer.length>8388608||bytes>256*1024*1024)throw new BackupError('Storage excede os limites deste backup manual.');objects.push({name,size:buffer.length,contentType:download.headers.get('content-type')||'application/octet-stream',sha256:crypto.createHash('sha256').update(buffer).digest('hex'),base64:buffer.toString('base64')});}if(rows.length<100)break;}
+  async function list(sourceBucket,archiveFolder='',prefix=''){
+    for(let offset=0;;offset+=100){
+      const response=await fetch(new URL('/storage/v1/object/list/'+sourceBucket,base),{method:'POST',redirect:'error',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({prefix,limit:100,offset,sortBy:{column:'name',order:'asc'}}),signal:AbortSignal.timeout(30000)});
+      if(!response.ok)throw new BackupError('Não foi possível listar os objetos do Storage.');
+      const rows=await response.json();if(!Array.isArray(rows))throw new BackupError('Resposta Storage inválida.');
+      for(const row of rows){
+        const name=prefix?prefix+'/'+row.name:row.name;
+        const segments=objectPath(name);
+        if(!row.id){await list(sourceBucket,archiveFolder,name);continue;}
+        if(objects.length>=50000||bytes>256*1024*1024)throw new BackupError('Storage excede os limites deste backup manual.');
+        const download=await fetch(new URL('/storage/v1/object/authenticated/'+sourceBucket+'/'+segments.map(encodeURIComponent).join('/'),base),{redirect:'error',headers,signal:AbortSignal.timeout(30000)});
+        if(!download.ok||Number(download.headers.get('content-length'))>8388608)throw new BackupError('Não foi possível copiar um objeto do Storage.');
+        const buffer=Buffer.from(await download.arrayBuffer());bytes+=buffer.length;
+        if(buffer.length>8388608||bytes>256*1024*1024)throw new BackupError('Storage excede os limites deste backup manual.');
+        objects.push({name:archiveFolder?archiveFolder+'/'+name:name,size:buffer.length,contentType:download.headers.get('content-type')||'application/octet-stream',sha256:crypto.createHash('sha256').update(buffer).digest('hex'),base64:buffer.toString('base64')});
+      }
+      if(rows.length<100)break;
+    }
   }
-  await list();return objects;
+  await list(bucket);
+  const privateBucket=await fetch(new URL('/storage/v1/bucket/'+photoBucket,base),{redirect:'error',headers,signal:AbortSignal.timeout(30000)});
+  if(privateBucket.ok){
+    if((await privateBucket.json()).public!==false)throw new BackupError('O bucket da coleção precisa ser privado.');
+    await list(photoBucket,photoBackupFolder);
+  }else if(![400,404].includes(privateBucket.status))throw new BackupError('Não foi possível conferir o bucket privado da coleção.');
+  return objects;
 }
 async function snapshotPostgres(env,project){
   if(!/^[a-z]{20}$/.test(project||''))throw new BackupError('Confirme explicitamente a referência do projeto BKM.');
